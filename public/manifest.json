@@ -1,0 +1,21 @@
+{
+  "name": "الصرافة والحوالات",
+  "short_name": "الصرافة",
+  "description": "تطبيق إدارة الصرافة والحوالات المالية",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#10b981",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["finance", "business"],
+  "lang": "ar",
+  "dir": "rtl"
+}

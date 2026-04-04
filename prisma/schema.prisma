@@ -1,0 +1,146 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// العملات المدعومة
+model Currency {
+  id          String   @id @default(cuid())
+  code        String   @unique // USD, EUR, SYP, etc.
+  name        String   // اسم العملة بالعربية
+  symbol      String   // $, €, etc.
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // العلاقات
+  vaults           Vault[]
+  transactions     Transaction[]
+  baseTransactions Transaction[] @relation("BaseCurrency")
+  debts            Debt[]
+}
+
+// صناديق العملات (الأرصدة)
+model Vault {
+  id              String   @id @default(cuid())
+  currencyId      String
+  balance         Float    @default(0)
+  openingBalance  Float    @default(0) // رصيد أول المدة
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // العلاقات
+  currency    Currency @relation(fields: [currencyId], references: [id], onDelete: Cascade)
+  
+  @@unique([currencyId])
+}
+
+// الحسابات
+model Account {
+  id          String   @id @default(cuid())
+  name        String
+  type        AccountType @default(PRIVATE)
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  // العلاقات
+  transactions Transaction[]
+  debts       Debt[]
+}
+
+enum AccountType {
+  PRIVATE
+  PUBLIC
+}
+
+// الحركات المالية
+model Transaction {
+  id              String   @id @default(cuid())
+  accountId       String
+  currencyId      String   // العملة النهائية (التي يسجل بها الرصيد)
+  baseCurrencyId  String?  // عملة المبلغ الأساسي (اختياري - للتحويل بين العملات)
+  type            TransactionType
+  paymentType     PaymentType @default(CASH) // نوع الدفع: كاش أو آجل
+  amount          Float    // المبلغ الأساسي
+  conversionFactor Float   @default(1) // معامل التحويل
+  conversionMethod ConversionMethod @default(MULTIPLY)
+  feesType        FeesType @default(FIXED)
+  feesAmount      Float    @default(0) // الأجور
+  feesDirection   FeesDirection @default(INCOME) // اتجاه الأجور: لنا / علينا
+  finalBalance    Float    // الرصيد النهائي
+  description     String?  // البيان
+  date            DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // العلاقات
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  currency        Currency @relation(fields: [currencyId], references: [id], onDelete: Cascade)
+  baseCurrency    Currency? @relation(fields: [baseCurrencyId], references: [id], onDelete: SetNull, name: "BaseCurrency")
+}
+
+enum PaymentType {
+  CASH      // كاش
+  DEFERRED  // آجل
+}
+
+enum TransactionType {
+  INCOME    // لنا
+  EXPENSE   // علينا
+}
+
+enum ConversionMethod {
+  MULTIPLY  // ضرب
+  DIVIDE    // قسمة
+}
+
+enum FeesType {
+  FIXED     // مبلغ ثابت
+  PERCENTAGE // نسبة مئوية
+  PER_THOUSAND // من ألف
+}
+
+enum FeesDirection {
+  INCOME    // لنا
+  EXPENSE   // علينا
+}
+
+// الديون
+model Debt {
+  id              String   @id @default(cuid())
+  accountId       String
+  currencyId      String
+  amount          Float
+  conversionFactor Float   @default(1)
+  conversionMethod ConversionMethod @default(MULTIPLY)
+  finalBalance    Float
+  description     String?
+  isPaid          Boolean  @default(false)
+  paidAt          DateTime?
+  date            DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  // العلاقات
+  account         Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  currency        Currency @relation(fields: [currencyId], references: [id], onDelete: Cascade)
+}
+
+// إعدادات التطبيق
+model Setting {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  value       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

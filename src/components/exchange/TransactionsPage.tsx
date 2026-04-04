@@ -1,0 +1,371 @@
+'use client';
+
+import { useState } from 'react';
+import { useAppStore } from '@/store/useAppStore';
+import { useLocalData } from '@/hooks/useLocalData';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2 } from 'lucide-react';
+import { TransactionCard } from './TransactionCard';
+import { TransactionModal } from './TransactionModal';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useToast } from '@/hooks/use-toast';
+import type { Transaction } from '@/types';
+import { cn } from '@/lib/utils';
+import { formatNumber, formatDate } from '@/lib/format';
+
+export function TransactionsPage() {
+  const {
+    transactions,
+    openTransactionModal,
+    isTransactionModalOpen,
+    closeTransactionModal
+  } = useAppStore();
+  const { deleteTransaction } = useLocalData();
+  const { toast } = useToast();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'INCOME' | 'EXPENSE'>('all');
+  const [filterPaymentType, setFilterPaymentType] = useState<'all' | 'CASH' | 'DEFERRED'>('all');
+  const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
+  const [deleteTransactionState, setDeleteTransaction] = useState<Transaction | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const filteredTransactions = transactions.filter(t => {
+    const matchesSearch =
+      t.account?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.description?.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesType = filterType === 'all' || t.type === filterType;
+    const matchesPaymentType = filterPaymentType === 'all' || t.paymentType === filterPaymentType;
+    return matchesSearch && matchesType && matchesPaymentType;
+  });
+
+  const handleEdit = (transaction: Transaction) => {
+    setSelectedTransaction(null);
+    openTransactionModal(transaction);
+  };
+
+  const handleDelete = async () => {
+    if (!deleteTransactionState) return;
+
+    setIsDeleting(true);
+    try {
+      const result = await deleteTransaction(deleteTransactionState.id);
+
+      if (result.success) {
+        setDeleteTransaction(null);
+        setSelectedTransaction(null);
+        toast({
+          title: 'تم الحذف',
+          description: 'تم حذف الحركة بنجاح',
+        });
+      } else {
+        toast({
+          title: 'خطأ',
+          description: result.error || 'حدث خطأ أثناء الحذف',
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error deleting transaction:', error);
+      toast({
+        title: 'خطأ',
+        description: 'حدث خطأ أثناء حذف الحركة',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+  
+  return (
+    <div className="space-y-6 pb-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">الحركات</h1>
+          <p className="text-sm text-muted-foreground">{transactions.length} حركة</p>
+        </div>
+        <Button
+          onClick={() => openTransactionModal()}
+          className="gap-2 rounded-full"
+        >
+          <Plus className="w-4 h-4" />
+          إضافة
+        </Button>
+      </div>
+      
+      {/* Search & Filters */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="بحث..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pr-10"
+          />
+        </div>
+        
+        <div className="flex gap-3">
+          <Select
+            value={filterType}
+            onValueChange={(value: 'all' | 'INCOME' | 'EXPENSE') => setFilterType(value)}
+          >
+            <SelectTrigger className="flex-1">
+              <SelectValue placeholder="نوع الحركة" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">الكل</SelectItem>
+              <SelectItem value="INCOME">لنا</SelectItem>
+              <SelectItem value="EXPENSE">علينا</SelectItem>
+            </SelectContent>
+          </Select>
+          
+          <Select
+            value={filterPaymentType}
+            onValueChange={(value: 'all' | 'CASH' | 'DEFERRED') => setFilterPaymentType(value)}
+          >
+            <SelectTrigger className="flex-1">
+              <SelectValue placeholder="نوع الدفع" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">الكل</SelectItem>
+              <SelectItem value="CASH">كاش</SelectItem>
+              <SelectItem value="DEFERRED">آجل</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      
+      {/* Transactions List */}
+      {filteredTransactions.length === 0 ? (
+        <div className="text-center py-12 rounded-2xl bg-muted/30">
+          <ArrowLeftRight className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+          <p className="text-muted-foreground mb-4">
+            {searchQuery || filterType !== 'all' || filterPaymentType !== 'all' 
+              ? 'لا توجد نتائج' 
+              : 'لا توجد حركات'}
+          </p>
+          {!searchQuery && filterType === 'all' && filterPaymentType === 'all' && (
+            <Button onClick={() => openTransactionModal()}>
+              إضافة حركة جديدة
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <AnimatePresence mode="popLayout">
+            {filteredTransactions.map((transaction, index) => (
+              <TransactionCard
+                key={transaction.id}
+                transaction={transaction}
+                index={index}
+                onClick={() => setSelectedTransaction(transaction)}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+      
+      {/* Transaction Modal */}
+      <TransactionModal />
+      
+      {/* Transaction Detail Modal */}
+      <Dialog open={!!selectedTransaction} onOpenChange={() => setSelectedTransaction(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>تفاصيل الحركة</DialogTitle>
+          </DialogHeader>
+          
+          {selectedTransaction && (
+            <TransactionDetailContent 
+              transaction={selectedTransaction}
+              onEdit={() => handleEdit(selectedTransaction)}
+              onDelete={() => setDeleteTransaction(selectedTransaction)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      
+      {/* Delete Confirmation */}
+      <AlertDialog open={!!deleteTransactionState} onOpenChange={() => setDeleteTransaction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>حذف الحركة</AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف هذه الحركة؟
+              <br />
+              المبلغ: {formatNumber(deleteTransactionState?.finalBalance || 0)} {deleteTransactionState?.currency?.symbol}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              {isDeleting ? 'جاري الحذف...' : 'حذف'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+// Transaction Detail Content Component
+function TransactionDetailContent({ 
+  transaction, 
+  onEdit, 
+  onDelete 
+}: { 
+  transaction: Transaction; 
+  onEdit: () => void; 
+  onDelete: () => void;
+}) {
+  const isIncome = transaction.type === 'INCOME';
+  const isCash = transaction.paymentType === 'CASH';
+  const isFeesIncome = transaction.feesDirection === 'INCOME';
+  
+  return (
+    <div className="space-y-4">
+      {/* Header */}
+      <div className={cn(
+        'rounded-xl p-4',
+        isIncome ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'
+      )}>
+        <div className="flex items-center gap-3">
+          <div className={cn(
+            'w-12 h-12 rounded-full flex items-center justify-center',
+            isIncome ? 'bg-emerald-100 dark:bg-emerald-900/50' : 'bg-red-100 dark:bg-red-900/50'
+          )}>
+            <span className="text-xl font-bold">{transaction.currency?.symbol}</span>
+          </div>
+          <div className="flex-1">
+            <p className="text-2xl font-bold">
+              {formatNumber(transaction.finalBalance)} {transaction.currency?.symbol}
+            </p>
+            <div className="flex items-center gap-2 mt-1">
+              <span className={cn(
+                'text-sm font-medium',
+                isIncome ? 'text-emerald-600' : 'text-red-600'
+              )}>
+                {isIncome ? 'لنا' : 'علينا'}
+              </span>
+              <span className="text-muted-foreground">•</span>
+              <span className={cn(
+                'text-sm font-medium',
+                isCash ? 'text-blue-600' : 'text-amber-600'
+              )}>
+                {isCash ? 'كاش' : 'آجل'}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Details Grid */}
+      <div className="grid grid-cols-2 gap-3">
+        <DetailItem label="الحساب" value={transaction.account?.name || '-'} />
+        <DetailItem label="العملة" value={transaction.currency?.name || '-'} />
+        <DetailItem label="المبلغ الأساسي" value={`${formatNumber(transaction.amount)} ${transaction.currency?.symbol}`} />
+        <DetailItem label="التاريخ" value={formatDate(transaction.date)} />
+        
+        {transaction.feesAmount > 0 && (
+          <>
+            <DetailItem label="قيمة الأجور" value={formatNumber(transaction.feesAmount)} />
+            <DetailItem 
+              label="اتجاه الأجور" 
+              value={isFeesIncome ? 'لنا' : 'علينا'}
+              highlight
+              highlightColor={isFeesIncome ? 'emerald' : 'red'}
+            />
+          </>
+        )}
+      </div>
+      
+      {/* Description */}
+      {transaction.description && (
+        <div className="rounded-xl bg-muted/50 p-3">
+          <p className="text-xs text-muted-foreground mb-1">البيان</p>
+          <p className="text-sm">{transaction.description}</p>
+        </div>
+      )}
+      
+      {/* Action Buttons */}
+      <div className="grid grid-cols-2 gap-3 pt-2">
+        <Button
+          variant="outline"
+          onClick={onEdit}
+          className="gap-2"
+        >
+          <Edit className="w-4 h-4" />
+          تعديل
+        </Button>
+        <Button
+          variant="destructive"
+          onClick={onDelete}
+          className="gap-2"
+        >
+          <Trash2 className="w-4 h-4" />
+          حذف
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function DetailItem({ 
+  label, 
+  value, 
+  highlight = false,
+  highlightColor = 'primary'
+}: { 
+  label: string; 
+  value: string; 
+  highlight?: boolean;
+  highlightColor?: 'primary' | 'emerald' | 'red' | 'blue' | 'amber';
+}) {
+  const highlightClasses = {
+    primary: 'bg-primary/10 text-primary',
+    emerald: 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    red: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
+    blue: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    amber: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300',
+  };
+  
+  return (
+    <div className={cn(
+      'rounded-lg p-3',
+      highlight ? highlightClasses[highlightColor] : 'bg-muted/50'
+    )}>
+      <p className="text-[10px] text-muted-foreground mb-0.5">{label}</p>
+      <p className="text-sm font-medium">{value}</p>
+    </div>
+  );
+}

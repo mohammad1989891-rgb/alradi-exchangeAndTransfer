@@ -1,9 +1,10 @@
 'use client';
 
+import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
-import { motion } from 'framer-motion';
-import { RefreshCw, Wallet, Settings, Plus, DollarSign, TrendingUp, Users, CreditCard, ArrowUpRight, ArrowDownRight, Coins } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { RefreshCw, Wallet, Plus, DollarSign, TrendingUp, Coins, RefreshCcw, ChevronDown, ChevronUp, HandCoins, Scale } from 'lucide-react';
 import { VaultCard, SummaryCard } from './VaultCard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -13,7 +14,10 @@ import type { Vault } from '@/lib/localDb';
 export function BalancesPage() {
   const { isLoading, setIsLoading, openCurrencyModal } = useAppStore();
   // استخدام البيانات من useLocalData مباشرة لضمان التحديث الفوري
-  const { refreshData, totalBalanceUSD, debtRemaining, transactions, vaults, currencies } = useLocalData();
+  const { refreshData, totalBalanceUSD, debtRemaining, transactions, vaults, currencies, debts, debtPayments } = useLocalData();
+  
+  // حالة إظهار/إخفاء تفاصيل الديون
+  const [showDebtDetails, setShowDebtDetails] = useState(false);
 
   const handleRefresh = async () => {
     setIsLoading(true);
@@ -39,6 +43,23 @@ export function BalancesPage() {
   // صافي الديون الآجلة (للعرض فقط، لا يدخل في إجمالي الأرصدة)
   const netDeferredDebts = (debtRemaining.deferredReceivableRemaining || 0) - (debtRemaining.deferredPayableRemaining || 0);
   
+  // ============================================
+  // حسابات الديون الجديدة (الأصول والالتزامات)
+  // ============================================
+  
+  // الأصول (الديون لنا) = نقدي + آجل
+  const totalReceivables = (debtRemaining.cashReceivable || 0) + (debtRemaining.deferredReceivable || 0);
+  const totalReceivablesPaid = (debtRemaining.cashReceivablePaid || 0) + (debtRemaining.deferredReceivablePaid || 0);
+  const totalReceivablesRemaining = (debtRemaining.cashReceivableRemaining || 0) + (debtRemaining.deferredReceivableRemaining || 0);
+  
+  // الالتزامات (الديون علينا) = نقدي + آجل
+  const totalPayables = (debtRemaining.cashPayable || 0) + (debtRemaining.deferredPayable || 0);
+  const totalPayablesPaid = (debtRemaining.cashPayablePaid || 0) + (debtRemaining.deferredPayablePaid || 0);
+  const totalPayablesRemaining = (debtRemaining.cashPayableRemaining || 0) + (debtRemaining.deferredPayableRemaining || 0);
+  
+  // الرصيد النهائي (صافي الديون)
+  const netDebtBalance = totalReceivablesRemaining - totalPayablesRemaining;
+  
   // إجمالي الأرصدة النهائي = أرصدة الصناديق فقط (النقد الفعلي)
   // لا نضيف الديون الآجلة لأنها التزامات/مستحقات غير نقدية
   const finalTotalBalance = totalBalanceUSD;
@@ -51,32 +72,45 @@ export function BalancesPage() {
   return (
     <div className="space-y-6 pb-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">الأرصدة</h1>
-          <p className="text-sm text-muted-foreground">إدارة صناديق العملات</p>
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-between"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg">
+            <Wallet className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">الأرصدة</h1>
+            <p className="text-sm text-muted-foreground">إدارة صناديق العملات</p>
+          </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={openCurrencyModal}
-            className="rounded-full"
-            title="إدارة العملات"
-          >
-            <Coins className="w-5 h-5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={handleRefresh}
-            disabled={isLoading}
-            className="rounded-full"
-          >
-            <RefreshCw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
-          </Button>
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={openCurrencyModal}
+              className="rounded-xl bg-muted/50"
+              title="إدارة العملات"
+            >
+              <Coins className="w-5 h-5" />
+            </Button>
+          </motion.div>
+          <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              disabled={isLoading}
+              className="rounded-xl bg-muted/50"
+            >
+              <RefreshCcw className={cn('w-5 h-5', isLoading && 'animate-spin')} />
+            </Button>
+          </motion.div>
         </div>
-      </div>
+      </motion.div>
 
       {/* Total Balance in USD Card */}
       <motion.div
@@ -134,82 +168,197 @@ export function BalancesPage() {
         />
       </div>
 
-      {/* Debt Summary Cards - الديون والدفعات */}
-      <div className="grid grid-cols-2 gap-3">
+      {/* ============================================ */}
+      {/* قسم الديون الجديد - الأصول والالتزامات */}
+      {/* ============================================ */}
+      <div className="space-y-3">
+        {/* عنوان القسم مع زر إظهار/إخفاء التفاصيل */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <HandCoins className="w-5 h-5 text-muted-foreground" />
+            <h2 className="text-lg font-semibold">ملخص الديون</h2>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowDebtDetails(!showDebtDetails)}
+            className="gap-1 text-xs"
+          >
+            {showDebtDetails ? (
+              <>
+                <ChevronUp className="w-4 h-4" />
+                إخفاء التفاصيل
+              </>
+            ) : (
+              <>
+                <ChevronDown className="w-4 h-4" />
+                إظهار التفاصيل
+              </>
+            )}
+          </Button>
+        </div>
+
+        {/* بطاقات الأصول والالتزامات */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* بطاقة الأصول (الديون لنا) - أخضر فاتح */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl bg-emerald-50 dark:bg-emerald-950/50 p-4 shadow-md border border-emerald-200 dark:border-emerald-800"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <p className="text-sm text-emerald-700 dark:text-emerald-300">الأصول (لنا)</p>
+            </div>
+            <p className="text-xl sm:text-2xl font-bold text-emerald-700 dark:text-emerald-300 whitespace-nowrap overflow-hidden text-ellipsis" dir="ltr">
+              {formatNumber(totalReceivablesRemaining)} $
+            </p>
+            <p className="text-xs text-emerald-600/70 dark:text-emerald-400/70 mt-1">المتبقي لنا</p>
+          </motion.div>
+
+          {/* بطاقة الالتزامات (الديون علينا) - أحمر فاتح */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="rounded-xl bg-red-50 dark:bg-red-950/50 p-4 shadow-md border border-red-200 dark:border-red-800"
+          >
+            <div className="flex items-center gap-2 mb-2">
+              <TrendingUp className="w-4 h-4 rotate-180 text-red-600 dark:text-red-400" />
+              <p className="text-sm text-red-700 dark:text-red-300">الالتزامات (علينا)</p>
+            </div>
+            <p className="text-xl sm:text-2xl font-bold text-red-700 dark:text-red-300 whitespace-nowrap overflow-hidden text-ellipsis" dir="ltr">
+              {formatNumber(totalPayablesRemaining)} $
+            </p>
+            <p className="text-xs text-red-600/70 dark:text-red-400/70 mt-1">المتبقي علينا</p>
+          </motion.div>
+        </div>
+
+        {/* بطاقة صافي الديون - ديناميكي حسب القيمة */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 p-4 text-white shadow-md"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
-              <Users className="w-4 h-4" />
-            </div>
-            <span className="text-sm text-white/80">إجمالي الديون المستحقة</span>
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold">{formatNumber(debtRemaining.totalDebts)}</span>
-            <span className="text-sm text-white/70">$</span>
-          </div>
-          <p className="text-xs text-white/60 mt-1">
-            {debtRemaining.unpaidDebtsCount + debtRemaining.paidDebtsCount} دين مسجل
-          </p>
-        </motion.div>
-
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="rounded-2xl bg-gradient-to-br from-teal-500 to-cyan-500 p-4 text-white shadow-md"
-        >
-          <div className="flex items-center gap-2 mb-2">
-            <div className="w-8 h-8 rounded-lg bg-white/20 flex items-center justify-center">
-              <CreditCard className="w-4 h-4" />
-            </div>
-            <span className="text-sm text-white/80">إجمالي الدفعات المسددة</span>
-          </div>
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold">{formatNumber(debtRemaining.totalPaid)}</span>
-            <span className="text-sm text-white/70">$</span>
-          </div>
-          <p className="text-xs text-white/60 mt-1">
-            {debtRemaining.paidDebtsCount} دين تم سداده بالكامل
-          </p>
-        </motion.div>
-      </div>
-
-      {/* Debt Remaining Summary */}
-      {debtRemaining.totalRemaining > 0 && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.35 }}
-          className="rounded-2xl bg-gradient-to-r from-rose-50 to-pink-50 dark:from-rose-950/30 dark:to-pink-950/30 p-4 border border-rose-200 dark:border-rose-800"
+          className={cn(
+            "rounded-xl p-4 shadow-md border",
+            netDebtBalance > 0
+              ? "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800"
+              : netDebtBalance < 0
+                ? "bg-red-50 dark:bg-red-950/50 border-red-200 dark:border-red-800"
+                : "bg-gray-50 dark:bg-gray-950/50 border-gray-200 dark:border-gray-800"
+          )}
         >
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-500/10 flex items-center justify-center">
-                <ArrowUpRight className="w-5 h-5 text-rose-500" />
-              </div>
+            <div className="flex items-center gap-2">
+              <Scale className={cn(
+                "w-5 h-5",
+                netDebtBalance > 0
+                  ? "text-emerald-600 dark:text-emerald-400"
+                  : netDebtBalance < 0
+                    ? "text-red-600 dark:text-red-400"
+                    : "text-gray-600 dark:text-gray-400"
+              )} />
               <div>
-                <p className="text-sm text-muted-foreground">متبقي للسداد</p>
-                <p className="text-xl font-bold text-rose-600 dark:text-rose-400">
-                  {formatNumber(debtRemaining.totalRemaining)} $
-                </p>
+                <p className={cn(
+                  "text-sm",
+                  netDebtBalance > 0
+                    ? "text-emerald-700 dark:text-emerald-300"
+                    : netDebtBalance < 0
+                      ? "text-red-700 dark:text-red-300"
+                      : "text-gray-700 dark:text-gray-300"
+                )}>صافي الديون</p>
+                <p className={cn(
+                  "text-xs",
+                  netDebtBalance > 0
+                    ? "text-emerald-600/70 dark:text-emerald-400/70"
+                    : netDebtBalance < 0
+                      ? "text-red-600/70 dark:text-red-400/70"
+                      : "text-gray-600/70 dark:text-gray-400/70"
+                )}>الأصول - الالتزامات</p>
               </div>
             </div>
             <div className="text-left">
-              <p className="text-xs text-muted-foreground">نسبة المسدد</p>
-              <p className="text-lg font-semibold text-rose-600 dark:text-rose-400">
-                {debtRemaining.totalDebts > 0
-                  ? Math.round((debtRemaining.totalPaid / debtRemaining.totalDebts) * 100)
-                  : 0}%
+              <p className={cn(
+                "text-xl sm:text-2xl font-bold whitespace-nowrap",
+                netDebtBalance > 0
+                  ? "text-emerald-700 dark:text-emerald-300"
+                  : netDebtBalance < 0
+                    ? "text-red-700 dark:text-red-300"
+                    : "text-gray-700 dark:text-gray-300"
+              )} dir="ltr">
+                {netDebtBalance >= 0 ? '+' : ''}{formatNumber(netDebtBalance)} $
+              </p>
+              <p className={cn(
+                "text-xs",
+                netDebtBalance > 0
+                  ? "text-emerald-600/70 dark:text-emerald-400/70"
+                  : netDebtBalance < 0
+                    ? "text-red-600/70 dark:text-red-400/70"
+                    : "text-gray-600/70 dark:text-gray-400/70"
+              )}>
+                {netDebtBalance > 0 ? 'لصالحنا' : netDebtBalance < 0 ? 'علينا' : 'متوازن'}
               </p>
             </div>
           </div>
         </motion.div>
-      )}
+
+        {/* تفاصيل الديون (قابلة للإظهار/الإخفاء) */}
+        <AnimatePresence>
+          {showDebtDetails && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.3 }}
+              className="space-y-3 overflow-hidden"
+            >
+              {/* تفاصيل الأصول */}
+              <div className="rounded-xl bg-muted/50 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4" />
+                  تفاصيل الأصول (لنا)
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">➜ الإجمالي:</span>
+                    <span className="font-semibold text-emerald-600">{formatNumber(totalReceivables)} $</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">➜ مجموع المدفوع:</span>
+                    <span className="font-medium text-emerald-600">{formatNumber(totalReceivablesPaid)} $</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-bold pt-2 border-t border-border">
+                    <span>➜ المتبقي:</span>
+                    <span className="text-emerald-600">{formatNumber(totalReceivablesRemaining)} $</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* تفاصيل الالتزامات */}
+              <div className="rounded-xl bg-muted/50 p-4 space-y-3">
+                <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 rotate-180" />
+                  تفاصيل الالتزامات (علينا)
+                </h3>
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">➜ الإجمالي:</span>
+                    <span className="font-semibold text-red-600">{formatNumber(totalPayables)} $</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">➜ مجموع المدفوع:</span>
+                    <span className="font-medium text-red-600">{formatNumber(totalPayablesPaid)} $</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-bold pt-2 border-t border-border">
+                    <span>➜ المتبقي:</span>
+                    <span className="text-red-600">{formatNumber(totalPayablesRemaining)} $</span>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
 
       {/* Vault Cards */}
       <div>

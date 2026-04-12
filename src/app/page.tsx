@@ -17,8 +17,10 @@ import { AccountStatementModal } from '@/components/exchange/AccountStatementMod
 import { CurrencyModal } from '@/components/exchange/CurrencyModal';
 import { OpeningBalanceModal } from '@/components/exchange/OpeningBalanceModal';
 import { CurrencyExchangeModal } from '@/components/exchange/CurrencyExchangeModal';
+import { SplashScreen } from '@/components/exchange/SplashScreen';
+import { LoginPage } from '@/components/exchange/LoginPage';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, Search, Loader2, Settings } from 'lucide-react';
+import { Menu, Search, Loader2, Settings, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -32,6 +34,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
+// App states
+type AppState = 'splash' | 'login' | 'app';
+
 export default function Home() {
   const { 
     activeTab, setActiveTab, openSideMenu, isLoading, setIsLoading, isInitialized, setIsInitialized,
@@ -42,15 +47,56 @@ export default function Home() {
   const localData = useLocalData();
   const { toast } = useToast();
   
+  // App state management
+  const [appState, setAppState] = useState<AppState>('splash');
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  
   // Exit confirmation state
   const [showExitDialog, setShowExitDialog] = useState(false);
   const [exitToastShown, setExitToastShown] = useState(false);
   const lastBackPressTime = useRef(0);
   const EXIT_TIMEOUT = 2000;
   
+  // Check if user is already logged in
+  useEffect(() => {
+    const savedUserId = localStorage.getItem('currentUserId');
+    if (savedUserId) {
+      setCurrentUserId(savedUserId);
+    }
+  }, []);
+  
+  // Handle splash screen completion
+  const handleSplashComplete = () => {
+    if (currentUserId) {
+      setAppState('app');
+    } else {
+      setAppState('login');
+    }
+  };
+  
+  // Handle successful login
+  const handleLogin = (userId: string) => {
+    setCurrentUserId(userId);
+    localStorage.setItem('currentUserId', userId);
+    localStorage.setItem('currentUsername', 'admin');
+    setAppState('app');
+  };
+  
+  // Handle logout
+  const handleLogout = () => {
+    localStorage.removeItem('currentUserId');
+    localStorage.removeItem('currentUsername');
+    setCurrentUserId(null);
+    setAppState('login');
+    toast({
+      title: 'تم تسجيل الخروج',
+      description: 'إلى اللقاء!',
+    });
+  };
+  
   // Load data when initialized
   useEffect(() => {
-    if (localData.isInitialized) {
+    if (localData.isInitialized && appState === 'app') {
       setCurrencies(localData.currencies);
       setVaults(localData.vaults);
       setAccounts(localData.accounts);
@@ -87,6 +133,7 @@ export default function Home() {
     setCurrencyExchanges,
     setIsLoading,
     setIsInitialized,
+    appState,
   ]);
   
   // Listen for currency update event
@@ -184,6 +231,16 @@ export default function Home() {
     }
   };
   
+  // Show splash screen
+  if (appState === 'splash') {
+    return <SplashScreen onComplete={handleSplashComplete} />;
+  }
+  
+  // Show login page
+  if (appState === 'login') {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+  
   // Show loading screen while initializing
   if (isLoading || !isInitialized) {
     return (
@@ -249,6 +306,15 @@ export default function Home() {
               className="rounded-full"
             >
               <Settings className="w-5 h-5" />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleLogout}
+              className="rounded-full text-red-500 hover:text-red-600"
+              title="تسجيل الخروج"
+            >
+              <LogOut className="w-5 h-5" />
             </Button>
           </div>
         </div>

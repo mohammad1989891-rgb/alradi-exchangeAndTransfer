@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { useTheme } from 'next-themes';
@@ -21,6 +21,10 @@ import {
   FileJson,
   Merge,
   Replace,
+  Lock,
+  User,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -53,7 +57,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { exportAllData, importAllData, clearAllData } from '@/lib/localDb';
+import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers } from '@/lib/localDb';
 import type { Currency as CurrencyType } from '@/types';
 
 export function SettingsPage() {
@@ -74,6 +78,26 @@ export function SettingsPage() {
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [showClearDialog, setShowClearDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Password Change
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showOldPassword, setShowOldPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
+  const [currentUsername, setCurrentUsername] = useState('');
+  const [newUsername, setNewUsername] = useState('');
+  const [isChangingUsername, setIsChangingUsername] = useState(false);
+
+  // Load current username on mount
+  useEffect(() => {
+    const savedUsername = localStorage.getItem('currentUsername');
+    if (savedUsername) {
+      setCurrentUsername(savedUsername);
+    }
+  }, []);
 
   // Statistics
   const stats = {
@@ -220,7 +244,246 @@ export function SettingsPage() {
     }
   };
 
+  // Change Password
+  const handleChangePassword = async () => {
+    if (!oldPassword || !newPassword || !confirmPassword) {
+      toast({
+        title: 'خطأ',
+        description: 'يرجى ملء جميع الحقول',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: 'خطأ',
+        description: 'كلمة المرور الجديدة غير متطابقة',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (newPassword.length < 4) {
+      toast({
+        title: 'خطأ',
+        description: 'كلمة المرور يجب أن تكون 4 أحرف على الأقل',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsChangingPassword(true);
+    try {
+      const userId = localStorage.getItem('currentUserId');
+      if (!userId) {
+        toast({
+          title: 'خطأ',
+          description: 'لم يتم العثور على المستخدم',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const result = await changePassword(userId, oldPassword, newPassword);
+      
+      if (result.success) {
+        toast({
+          title: 'تم بنجاح',
+          description: result.message,
+        });
+        setOldPassword('');
+        setNewPassword('');
+        setConfirmPassword('');
+      } else {
+        toast({
+          title: 'خطأ',
+          description: result.message,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'خطأ',
+        description: 'حدث خطأ غير متوقع',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsChangingPassword(false);
+    }
+  };
+
+  // Change Username
+  const handleChangeUsername = async () => {
+    if (!newUsername.trim()) {
+      toast({
+        title: 'خطأ',
+        description: 'يرجى إدخال اسم المستخدم الجديد',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    if (newUsername.length < 3) {
+      toast({
+        title: 'خطأ',
+        description: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsChangingUsername(true);
+    try {
+      const userId = localStorage.getItem('currentUserId');
+      if (!userId) {
+        toast({
+          title: 'خطأ',
+          description: 'لم يتم العثور على المستخدم',
+          variant: 'destructive',
+        });
+        return;
+      }
+
+      const result = await changeUsername(userId, newUsername);
+      
+      if (result.success) {
+        toast({
+          title: 'تم بنجاح',
+          description: result.message,
+        });
+        setCurrentUsername(newUsername);
+        setNewUsername('');
+      } else {
+        toast({
+          title: 'خطأ',
+          description: result.message,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      toast({
+        title: 'خطأ',
+        description: 'حدث خطأ غير متوقع',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsChangingUsername(false);
+    }
+  };
+
   const sections = [
+    {
+      id: 'account',
+      title: 'الحساب',
+      icon: User,
+      content: (
+        <div className="space-y-4">
+          {/* Change Username */}
+          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <User className="w-5 h-5 text-blue-500" />
+              </div>
+              <div>
+                <p className="font-medium">تغيير اسم المستخدم</p>
+                <p className="text-xs text-muted-foreground">اسم المستخدم الحالي: {currentUsername || localStorage.getItem('currentUsername') || 'admin'}</p>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <Input
+                placeholder="اسم المستخدم الجديد"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                className="flex-1"
+              />
+              <Button
+                onClick={handleChangeUsername}
+                disabled={isChangingUsername || !newUsername.trim()}
+                className="bg-blue-500 hover:bg-blue-600"
+              >
+                {isChangingUsername ? '...' : 'حفظ'}
+              </Button>
+            </div>
+          </div>
+
+          {/* Change Password */}
+          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <Lock className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div>
+                <p className="font-medium">تغيير كلمة المرور</p>
+                <p className="text-xs text-muted-foreground">يُنصح باستخدام كلمة مرور قوية</p>
+              </div>
+            </div>
+            
+            {/* Old Password */}
+            <div className="relative">
+              <Input
+                type={showOldPassword ? 'text' : 'password'}
+                placeholder="كلمة المرور الحالية"
+                value={oldPassword}
+                onChange={(e) => setOldPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowOldPassword(!showOldPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+
+            {/* New Password */}
+            <div className="relative">
+              <Input
+                type={showNewPassword ? 'text' : 'password'}
+                placeholder="كلمة المرور الجديدة"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowNewPassword(!showNewPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+
+            {/* Confirm Password */}
+            <div className="relative">
+              <Input
+                type={showConfirmPassword ? 'text' : 'password'}
+                placeholder="تأكيد كلمة المرور الجديدة"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+
+            <Button
+              onClick={handleChangePassword}
+              disabled={isChangingPassword || !oldPassword || !newPassword || !confirmPassword}
+              className="w-full bg-emerald-500 hover:bg-emerald-600"
+            >
+              {isChangingPassword ? 'جاري الحفظ...' : 'تغيير كلمة المرور'}
+            </Button>
+          </div>
+        </div>
+      ),
+    },
     {
       id: 'appearance',
       title: 'المظهر',

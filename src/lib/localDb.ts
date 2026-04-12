@@ -149,7 +149,19 @@ export interface CurrencyExchange {
 // Database setup
 const db = new Dexie('ExchangeAppDB');
 
-db.version(2).stores({
+// ============================================
+// User Model - للمستخدمين وتسجيل الدخول
+// ============================================
+export interface User {
+  id: string;
+  username: string;
+  password: string;  // سيتم تخزينها مشفرة
+  name?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+db.version(3).stores({
   currencies: 'id, code, name, isDefault, isActive, exchangeRate',
   vaults: 'id, currencyId',
   accounts: 'id, name, type, isActive',
@@ -158,6 +170,8 @@ db.version(2).stores({
   debtPayments: 'id, debtId, date',
   // جدول عمليات الصرف
   currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
+  // جدول المستخدمين
+  users: 'id, username',
 });
 
 // Helper function
@@ -1967,4 +1981,118 @@ export async function updateCurrencyExchangeRateWithMethod(
   }
   await db.table("currencies").update(currencyId, updateData);
   return (await db.table<Currency>("currencies").get(currencyId))!;
+}
+
+// ============================================
+// User Functions - دوال المستخدمين وتسجيل الدخول
+// ============================================
+
+// تشفير بسيط للكلمة السرية (Base64 + reverse)
+function hashPassword(password: string): string {
+  return btoa(password.split('').reverse().join(''));
+}
+
+function verifyPassword(password: string, hashedPassword: string): boolean {
+  return hashPassword(password) === hashedPassword;
+}
+
+// إنشاء مستخدم افتراضي عند أول تشغيل
+export async function initializeDefaultUser(): Promise<User> {
+  await initializeDatabase();
+  const usersCount = await db.table<User>('users').count();
+  
+  if (usersCount === 0) {
+    const now = new Date();
+    const defaultUser: User = {
+      id: 'user_default',
+      username: 'admin',
+      password: hashPassword('admin'),
+      name: 'المدير',
+      createdAt: now,
+      updatedAt: now,
+    };
+    await db.table('users').add(defaultUser);
+    return defaultUser;
+  }
+  
+  return (await db.table<User>('users').toArray())[0];
+}
+
+// الحصول على مستخدم بالاسم
+export async function getUserByUsername(username: string): Promise<User | undefined> {
+  await initializeDatabase();
+  return db.table<User>('users').where('username').equals(username).first();
+}
+
+// الحصول على جميع المستخدمين
+export async function getUsers(): Promise<User[]> {
+  await initializeDatabase();
+  return db.table<User>('users').toArray();
+}
+
+// تسجيل الدخول
+export async function loginUser(username: string, password: string): Promise<{ success: boolean; user?: User; message: string }> {
+  await initializeDatabase();
+  
+  // التأكد من وجود مستخدم افتراضي
+  await initializeDefaultUser();
+  
+  const user = await getUserByUsername(username);
+  
+  if (!user) {
+    return { success: false, message: 'اسم المستخدم غير موجود' };
+  }
+  
+  if (!verifyPassword(password, user.password)) {
+    return { success: false, message: 'كلمة المرور غير صحيحة' };
+  }
+  
+  return { success: true, user, message: 'تم تسجيل الدخول بنجاح' };
+}
+
+// تغيير كلمة المرور
+export async function changePassword(userId: string, oldPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+  await initializeDatabase();
+  
+  const user = await db.table<User>('users').get(userId);
+  
+  if (!user) {
+    return { success: false, message: 'المستخدم غير موجود' };
+  }
+  
+  if (!verifyPassword(oldPassword, user.password)) {
+    return { success: false, message: 'كلمة المرور القديمة غير صحيحة' };
+  }
+  
+  await db.table('users').update(userId, {
+    password: hashPassword(newPassword),
+    updatedAt: new Date(),
+  });
+  
+  return { success: true, message: 'تم تغيير كلمة المرور بنجاح' };
+}
+
+// تغيير اسم المستخدم
+export async function changeUsername(userId: string, newUsername: string): Promise<{ success: boolean; message: string }> {
+  await initializeDatabase();
+  
+  // التحقق من عدم وجود اسم مستخدم آخر بنفس الاسم
+  const existingUser = await getUserByUsername(newUsername);
+  if (existingUser && existingUser.id !== userId) {
+    return { success: false, message: 'اسم المستخدم موجود مسبقاً' };
+  }
+  
+  await db.table('users').update(userId, {
+    username: newUsername,
+    updatedAt: new Date(),
+  });
+  
+  return { success: true, message: 'تم تغيير اسم المستخدم بنجاح' };
+}
+
+// تحديث بيانات المستخدم
+export async function updateUser(userId: string, data: { name?: string }): Promise<User | null> {
+  await initializeDatabase();
+  await db.table('users').update(userId, { ...data, updatedAt: new Date() });
+  return db.table<User>('users').get(userId) || null;
 }

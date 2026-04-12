@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Car, 
@@ -22,7 +22,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
-import { VehicleDetailsModal } from './VehicleDetailsModal';
+import { VehicleDetailsModal, VehicleTransaction } from './VehicleDetailsModal';
 import { VehicleTransactionModal } from './VehicleTransactionModal';
 import { SharedTransactionsModal } from './SharedTransactionsModal';
 import {
@@ -45,19 +45,7 @@ interface VehicleCard {
   secondPartnerTotal: number;
   totalCost: number;
   createdAt: Date;
-  transactions: VehicleTransaction[]; // إضافة المعاملات للمركبة
-}
-
-// Vehicle Transaction type
-interface VehicleTransaction {
-  id: string;
-  vehicleId: string;
-  date: Date;
-  amount: number;
-  partner: 'first' | 'second';
-  paymentType: 'cash' | 'deferred';
-  description: string;
-  createdAt: Date;
+  transactions: VehicleTransaction[];
 }
 
 export function VehiclesPage() {
@@ -105,6 +93,21 @@ export function VehiclesPage() {
   // Generate unique ID
   const generateId = () => 'vehicle_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
 
+  // ============================================
+  // 🔹 حسابات المركبة الواحدة
+  // ============================================
+  const calculateVehicleTotals = useCallback((transactions: VehicleTransaction[]) => {
+    const firstPartnerTotal = transactions
+      .filter(t => t.partner === 'first')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    const secondPartnerTotal = transactions
+      .filter(t => t.partner === 'second')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    return { firstPartnerTotal, secondPartnerTotal };
+  }, []);
+
   // Add new vehicle handler
   const handleAddVehicle = () => {
     const newVehicle: VehicleCard = {
@@ -147,6 +150,123 @@ export function VehiclesPage() {
   // Close shared transactions modal
   const handleCloseSharedModal = () => {
     setIsSharedModalOpen(false);
+  };
+
+  // ============================================
+  // 🔹 إضافة/تعديل/حذف المعاملات
+  // ============================================
+  
+  // إضافة معاملة جديدة
+  const handleAddTransaction = (data: Omit<VehicleTransaction, 'id' | 'vehicleId' | 'createdAt'>) => {
+    if (!selectedVehicle) return;
+    
+    const newTransaction: VehicleTransaction = {
+      id: generateId(),
+      vehicleId: selectedVehicle.id,
+      date: data.date,
+      amount: data.amount,
+      partner: data.partner,
+      paymentType: data.paymentType,
+      description: data.description,
+      createdAt: new Date(),
+    };
+    
+    // تحديث المركبة بالمعاملة الجديدة
+    setVehicles(vehicles.map(v => {
+      if (v.id === selectedVehicle.id) {
+        const newTransactions = [...v.transactions, newTransaction];
+        const totals = calculateVehicleTotals(newTransactions);
+        return {
+          ...v,
+          transactions: newTransactions,
+          ...totals,
+        };
+      }
+      return v;
+    }));
+    
+    // تحديث المركبة المحددة
+    setSelectedVehicle(prev => {
+      if (!prev) return null;
+      const newTransactions = [...prev.transactions, newTransaction];
+      const totals = calculateVehicleTotals(newTransactions);
+      return {
+        ...prev,
+        transactions: newTransactions,
+        ...totals,
+      };
+    });
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: 'تم إضافة البند بنجاح',
+    });
+  };
+  
+  // تعديل معاملة
+  const handleUpdateTransaction = (updatedTransaction: VehicleTransaction) => {
+    if (!selectedVehicle) return;
+    
+    // تحديث المركبة
+    setVehicles(vehicles.map(v => {
+      if (v.id === selectedVehicle.id) {
+        const newTransactions = v.transactions.map(t => 
+          t.id === updatedTransaction.id ? updatedTransaction : t
+        );
+        const totals = calculateVehicleTotals(newTransactions);
+        return {
+          ...v,
+          transactions: newTransactions,
+          ...totals,
+        };
+      }
+      return v;
+    }));
+    
+    // تحديث المركبة المحددة
+    setSelectedVehicle(prev => {
+      if (!prev) return null;
+      const newTransactions = prev.transactions.map(t => 
+        t.id === updatedTransaction.id ? updatedTransaction : t
+      );
+      const totals = calculateVehicleTotals(newTransactions);
+      return {
+        ...prev,
+        transactions: newTransactions,
+        ...totals,
+      };
+    });
+  };
+  
+  // حذف معاملة
+  const handleDeleteTransaction = (transactionId: string) => {
+    if (!selectedVehicle) return;
+    
+    // تحديث المركبة
+    setVehicles(vehicles.map(v => {
+      if (v.id === selectedVehicle.id) {
+        const newTransactions = v.transactions.filter(t => t.id !== transactionId);
+        const totals = calculateVehicleTotals(newTransactions);
+        return {
+          ...v,
+          transactions: newTransactions,
+          ...totals,
+        };
+      }
+      return v;
+    }));
+    
+    // تحديث المركبة المحددة
+    setSelectedVehicle(prev => {
+      if (!prev) return null;
+      const newTransactions = prev.transactions.filter(t => t.id !== transactionId);
+      const totals = calculateVehicleTotals(newTransactions);
+      return {
+        ...prev,
+        transactions: newTransactions,
+        ...totals,
+      };
+    });
   };
 
   // ============================================
@@ -584,6 +704,8 @@ export function VehiclesPage() {
         vehicle={selectedVehicle}
         firstPartnerName={firstPartnerName}
         secondPartnerName={secondPartnerName}
+        onUpdateTransaction={handleUpdateTransaction}
+        onDeleteTransaction={handleDeleteTransaction}
       />
 
       {/* Vehicle Transaction Modal */}
@@ -593,6 +715,7 @@ export function VehiclesPage() {
         vehicle={selectedVehicle}
         firstPartnerName={firstPartnerName}
         secondPartnerName={secondPartnerName}
+        onSave={handleAddTransaction}
       />
 
       {/* Shared Transactions Modal */}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Plus, 
@@ -9,7 +9,8 @@ import {
   DollarSign,
   FileText,
   User,
-  CreditCard
+  CreditCard,
+  Edit2
 } from 'lucide-react';
 import {
   Dialog,
@@ -29,6 +30,18 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
+// Vehicle Transaction type
+export interface VehicleTransaction {
+  id: string;
+  vehicleId: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+  createdAt: Date;
+}
+
 interface VehicleTransactionModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -38,6 +51,8 @@ interface VehicleTransactionModalProps {
   } | null;
   firstPartnerName: string;
   secondPartnerName: string;
+  editTransaction?: VehicleTransaction | null; // للتعديل
+  onSave: (transaction: Omit<VehicleTransaction, 'id' | 'vehicleId' | 'createdAt'>) => void;
 }
 
 export function VehicleTransactionModal({
@@ -46,6 +61,8 @@ export function VehicleTransactionModal({
   vehicle,
   firstPartnerName,
   secondPartnerName,
+  editTransaction,
+  onSave,
 }: VehicleTransactionModalProps) {
   // Form state
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -54,28 +71,55 @@ export function VehicleTransactionModal({
   const [paymentType, setPaymentType] = useState<'cash' | 'deferred'>('cash');
   const [description, setDescription] = useState('');
 
+  // تحديث القيم عند فتح النافذة للتعديل
+  useEffect(() => {
+    if (editTransaction) {
+      setDate(new Date(editTransaction.date).toISOString().split('T')[0]);
+      setAmount(editTransaction.amount.toString());
+      setPartner(editTransaction.partner);
+      setPaymentType(editTransaction.paymentType);
+      setDescription(editTransaction.description);
+    } else {
+      // إعادة تعيين للإضافة الجديدة
+      setDate(new Date().toISOString().split('T')[0]);
+      setAmount('');
+      setPartner('first');
+      setPaymentType('cash');
+      setDescription('');
+    }
+  }, [editTransaction, isOpen]);
+
   const handleSave = () => {
-    // No accounting logic yet - just close
-    // Will be implemented later
-    onClose();
+    if (!amount || parseFloat(amount) <= 0) return;
+    
+    onSave({
+      date: new Date(date),
+      amount: parseFloat(amount),
+      partner,
+      paymentType,
+      description: description || 'بند',
+    });
     
     // Reset form
     setAmount('');
     setDescription('');
     setPartner('first');
     setPaymentType('cash');
+    onClose();
   };
 
   const handleClose = () => {
-    onClose();
     // Reset form
     setAmount('');
     setDescription('');
     setPartner('first');
     setPaymentType('cash');
+    onClose();
   };
 
   if (!vehicle) return null;
+
+  const isEditMode = !!editTransaction;
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
@@ -85,10 +129,16 @@ export function VehicleTransactionModal({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="p-2 rounded-lg bg-cyan-500/10">
-                <Plus className="w-5 h-5 text-cyan-500" />
+                {isEditMode ? (
+                  <Edit2 className="w-5 h-5 text-cyan-500" />
+                ) : (
+                  <Plus className="w-5 h-5 text-cyan-500" />
+                )}
               </div>
               <div>
-                <DialogTitle className="text-lg font-bold">إضافة بند جديد</DialogTitle>
+                <DialogTitle className="text-lg font-bold">
+                  {isEditMode ? 'تعديل البند' : 'إضافة بند جديد'}
+                </DialogTitle>
                 <p className="text-xs text-muted-foreground">{vehicle.name}</p>
               </div>
             </div>
@@ -221,8 +271,9 @@ export function VehicleTransactionModal({
             <Button
               className="h-12 bg-cyan-500 hover:bg-cyan-600"
               onClick={handleSave}
+              disabled={!amount || parseFloat(amount) <= 0}
             >
-              حفظ البند
+              {isEditMode ? 'حفظ التعديل' : 'حفظ البند'}
             </Button>
           </div>
         </div>

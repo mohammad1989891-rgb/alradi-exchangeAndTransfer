@@ -66,6 +66,11 @@ interface SharedTransactionsModalProps {
   firstPartnerTotal: number;
   secondPartnerTotal: number;
   totalBalance: number;
+  // 🆕 Props للتحكم من الخارج
+  transactions: SharedTransaction[];
+  onAddTransaction: (data: Omit<SharedTransaction, 'id' | 'createdAt'>) => void;
+  onUpdateTransaction: (transaction: SharedTransaction) => void;
+  onDeleteTransaction: (transactionId: string) => void;
 }
 
 export function SharedTransactionsModal({
@@ -76,11 +81,12 @@ export function SharedTransactionsModal({
   firstPartnerTotal,
   secondPartnerTotal,
   totalBalance,
+  transactions,
+  onAddTransaction,
+  onUpdateTransaction,
+  onDeleteTransaction,
 }: SharedTransactionsModalProps) {
   const { toast } = useToast();
-  
-  // State for shared transactions
-  const [transactions, setTransactions] = useState<SharedTransaction[]>([]);
   
   // State for add transaction form
   const [showAddForm, setShowAddForm] = useState(false);
@@ -102,24 +108,18 @@ export function SharedTransactionsModal({
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [transactionToDelete, setTransactionToDelete] = useState<SharedTransaction | null>(null);
 
-  // Generate unique ID
-  const generateId = () => 'shared_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
-
   // Handle add transaction
   const handleAddTransaction = () => {
     if (!amount || parseFloat(amount) <= 0) return;
 
-    const newTransaction: SharedTransaction = {
-      id: generateId(),
+    // استدعاء callback من props
+    onAddTransaction({
       date: new Date(date),
       amount: parseFloat(amount),
       partner,
       paymentType,
       description: description || 'بند عام',
-      createdAt: new Date(),
-    };
-
-    setTransactions([...transactions, newTransaction]);
+    });
     
     // Reset form
     setAmount('');
@@ -127,11 +127,6 @@ export function SharedTransactionsModal({
     setPartner('first');
     setPaymentType('cash');
     setShowAddForm(false);
-    
-    toast({
-      title: 'تمت الإضافة',
-      description: 'تم إضافة البند العام بنجاح',
-    });
   };
 
   // Cancel add form
@@ -159,26 +154,24 @@ export function SharedTransactionsModal({
   
   // Save edited transaction
   const handleSaveEdit = () => {
-    if (!editAmount || parseFloat(editAmount) <= 0) return;
+    if (!editAmount || parseFloat(editAmount) <= 0 || !editingTransactionId) return;
     
-    setTransactions(transactions.map(tx => 
-      tx.id === editingTransactionId 
-        ? {
-            ...tx,
-            date: new Date(editDate),
-            amount: parseFloat(editAmount),
-            partner: editPartner,
-            paymentType: editPaymentType,
-            description: editDescription || 'بند عام',
-          }
-        : tx
-    ));
+    // إيجاد المعاملة الأصلية للحصول على id و createdAt
+    const originalTx = transactions.find(t => t.id === editingTransactionId);
+    if (!originalTx) return;
+    
+    // استدعاء callback من props
+    onUpdateTransaction({
+      id: editingTransactionId,
+      date: new Date(editDate),
+      amount: parseFloat(editAmount),
+      partner: editPartner,
+      paymentType: editPaymentType,
+      description: editDescription || 'بند عام',
+      createdAt: originalTx.createdAt,
+    });
     
     setEditingTransactionId(null);
-    toast({
-      title: 'تم التعديل',
-      description: 'تم تعديل البند بنجاح',
-    });
   };
   
   // Cancel editing
@@ -199,11 +192,8 @@ export function SharedTransactionsModal({
   // Confirm delete transaction
   const handleConfirmDelete = () => {
     if (transactionToDelete) {
-      setTransactions(transactions.filter(tx => tx.id !== transactionToDelete.id));
-      toast({
-        title: 'تم الحذف',
-        description: 'تم حذف البند بنجاح',
-      });
+      // استدعاء callback من props
+      onDeleteTransaction(transactionToDelete.id);
     }
     setShowDeleteDialog(false);
     setTransactionToDelete(null);
@@ -214,15 +204,6 @@ export function SharedTransactionsModal({
     setShowDeleteDialog(false);
     setTransactionToDelete(null);
   };
-
-  // Calculate totals from transactions (for display only, actual totals come from parent)
-  const transactionsFirstTotal = transactions
-    .filter(t => t.partner === 'first')
-    .reduce((sum, t) => sum + t.amount, 0);
-  
-  const transactionsSecondTotal = transactions
-    .filter(t => t.partner === 'second')
-    .reduce((sum, t) => sum + t.amount, 0);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>

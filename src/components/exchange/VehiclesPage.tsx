@@ -36,6 +36,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
+import * as db from '@/lib/localDb';
 
 // Vehicle type for local state
 interface VehicleCard {
@@ -46,6 +47,17 @@ interface VehicleCard {
   totalCost: number;
   createdAt: Date;
   transactions: VehicleTransaction[];
+}
+
+// Shared Transaction type - البنود العامة
+interface SharedTransaction {
+  id: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+  createdAt: Date;
 }
 
 export function VehiclesPage() {
@@ -61,6 +73,9 @@ export function VehiclesPage() {
 
   // State for vehicles list
   const [vehicles, setVehicles] = useState<VehicleCard[]>([]);
+  
+  // State for shared transactions - البنود العامة
+  const [sharedTransactions, setSharedTransactions] = useState<SharedTransaction[]>([]);
 
   // Modal states
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
@@ -80,13 +95,28 @@ export function VehiclesPage() {
   // 🔹 حسابات تلقائية للبطاقة الرئيسية
   // 🔹 المعادلة: إجمالي الرصيد = الشريك الأول - الشريك الثاني
   // 🔹 موجب = لنا | سالب = علينا
+  // 🔹 تشمل: معاملات المركبات + البنود العامة
   // ============================================
   const calculatedTotals = useMemo(() => {
-    const firstPartnerTotal = vehicles.reduce((sum, v) => sum + v.firstPartnerTotal, 0);
-    const secondPartnerTotal = vehicles.reduce((sum, v) => sum + v.secondPartnerTotal, 0);
+    // إجمالي معاملات المركبات
+    const vehiclesFirstTotal = vehicles.reduce((sum, v) => sum + v.firstPartnerTotal, 0);
+    const vehiclesSecondTotal = vehicles.reduce((sum, v) => sum + v.secondPartnerTotal, 0);
+    
+    // إجمالي البنود العامة
+    const sharedFirstTotal = sharedTransactions
+      .filter(t => t.partner === 'first')
+      .reduce((sum, t) => sum + t.amount, 0);
+    const sharedSecondTotal = sharedTransactions
+      .filter(t => t.partner === 'second')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    // الإجمالي الكلي
+    const firstPartnerTotal = vehiclesFirstTotal + sharedFirstTotal;
+    const secondPartnerTotal = vehiclesSecondTotal + sharedSecondTotal;
     const totalBalance = firstPartnerTotal - secondPartnerTotal; // الشريك الأول - الشريك الثاني
+    
     return { firstPartnerTotal, secondPartnerTotal, totalBalance };
-  }, [vehicles]);
+  }, [vehicles, sharedTransactions]);
 
   const { totalBalance, firstPartnerTotal, secondPartnerTotal } = calculatedTotals;
 
@@ -157,7 +187,7 @@ export function VehiclesPage() {
   // ============================================
   
   // إضافة معاملة جديدة
-  const handleAddTransaction = (data: Omit<VehicleTransaction, 'id' | 'vehicleId' | 'createdAt'>) => {
+  const handleAddTransaction = async (data: Omit<VehicleTransaction, 'id' | 'vehicleId' | 'createdAt'>) => {
     if (!selectedVehicle) return;
     
     const newTransaction: VehicleTransaction = {
@@ -197,6 +227,11 @@ export function VehiclesPage() {
       };
     });
     
+    // تحديث الصندوق للمعاملات الكاش
+    if (data.paymentType === 'cash') {
+      await updateCashbox(data.amount, data.partner, true);
+    }
+    
     toast({
       title: 'تمت الإضافة',
       description: 'تم إضافة البند بنجاح',
@@ -204,8 +239,11 @@ export function VehiclesPage() {
   };
   
   // تعديل معاملة
-  const handleUpdateTransaction = (updatedTransaction: VehicleTransaction) => {
+  const handleUpdateTransaction = async (updatedTransaction: VehicleTransaction) => {
     if (!selectedVehicle) return;
+    
+    // إيجاد المعاملة القديمة
+    const oldTransaction = selectedVehicle.transactions.find(t => t.id === updatedTransaction.id);
     
     // تحديث المركبة
     setVehicles(vehicles.map(v => {
@@ -236,11 +274,31 @@ export function VehiclesPage() {
         ...totals,
       };
     });
+    
+    // تحديث الصندوق إذا تغيرت المعاملة
+    if (oldTransaction) {
+      // عكس تأثير المعاملة القديمة
+      if (oldTransaction.paymentType === 'cash') {
+        await updateCashbox(oldTransaction.amount, oldTransaction.partner, false);
+      }
+      // إضافة تأثير المعاملة الجديدة
+      if (updatedTransaction.paymentType === 'cash') {
+        await updateCashbox(updatedTransaction.amount, updatedTransaction.partner, true);
+      }
+    }
+    
+    toast({
+      title: 'تم التعديل',
+      description: 'تم تعديل البند بنجاح',
+    });
   };
   
   // حذف معاملة
-  const handleDeleteTransaction = (transactionId: string) => {
+  const handleDeleteTransaction = async (transactionId: string) => {
     if (!selectedVehicle) return;
+    
+    // إيجاد المعاملة قبل الحذف
+    const transaction = selectedVehicle.transactions.find(t => t.id === transactionId);
     
     // تحديث المركبة
     setVehicles(vehicles.map(v => {
@@ -256,6 +314,7 @@ export function VehiclesPage() {
       return v;
     }));
     
+    
     // تحديث المركبة المحددة
     setSelectedVehicle(prev => {
       if (!prev) return null;
@@ -266,6 +325,16 @@ export function VehiclesPage() {
         transactions: newTransactions,
         ...totals,
       };
+    });
+    
+    // عكس تأثير الصندوق للحذف
+    if (transaction && transaction.paymentType === 'cash') {
+      await updateCashbox(transaction.amount, transaction.partner, false);
+    }
+    
+    toast({
+      title: 'تم الحذف',
+      description: 'تم حذف البند بنجاح',
     });
   };
 
@@ -305,8 +374,15 @@ export function VehiclesPage() {
   };
   
   // Confirm delete vehicle
-  const handleConfirmDeleteVehicle = () => {
+  const handleConfirmDeleteVehicle = async () => {
     if (vehicleToDelete) {
+      // عكس تأثير جميع المعاملات الكاش قبل الحذف
+      for (const tx of vehicleToDelete.transactions) {
+        if (tx.paymentType === 'cash') {
+          await updateCashbox(tx.amount, tx.partner, false);
+        }
+      }
+      
       // حذف المركبة مع جميع معاملاتها
       setVehicles(vehicles.filter(v => v.id !== vehicleToDelete.id));
       toast({
@@ -322,6 +398,95 @@ export function VehiclesPage() {
   const handleCancelDeleteVehicle = () => {
     setShowDeleteDialog(false);
     setVehicleToDelete(null);
+  };
+
+  // ============================================
+  // 🔹 البنود العامة - إضافة/تعديل/حذف مع تكامل الصندوق
+  // 🔸 الشريك الأول (لنا) كاش = خصم من الصندوق
+  // 🔸 الشريك الثاني (علينا) كاش = إضافة للصندوق
+  // ============================================
+  
+  // تحديث الصندوق
+  const updateCashbox = async (amount: number, partner: 'first' | 'second', isAdd: boolean) => {
+    try {
+      // الشريك الأول (لنا) = خصم من الصندوق عند الإضافة
+      // الشريك الثاني (علينا) = إضافة للصندوق عند الإضافة
+      const direction = partner === 'first' ? -1 : 1; // first = خصم, second = إضافة
+      const multiplier = isAdd ? direction : -direction; // عكس العملية عند الحذف
+      
+      const balanceDelta = amount * multiplier;
+      await db.updateVaultBalance('cur_usd', balanceDelta);
+    } catch (error) {
+      console.error('Error updating cashbox:', error);
+    }
+  };
+  
+  // إضافة بند عام
+  const handleAddSharedTransaction = async (data: Omit<SharedTransaction, 'id' | 'createdAt'>) => {
+    const newTransaction: SharedTransaction = {
+      id: 'shared_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+      date: data.date,
+      amount: data.amount,
+      partner: data.partner,
+      paymentType: data.paymentType,
+      description: data.description,
+      createdAt: new Date(),
+    };
+    
+    setSharedTransactions([...sharedTransactions, newTransaction]);
+    
+    // تحديث الصندوق للمعاملات الكاش
+    if (data.paymentType === 'cash') {
+      await updateCashbox(data.amount, data.partner, true);
+    }
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: 'تم إضافة البند العام بنجاح',
+    });
+  };
+  
+  // تعديل بند عام
+  const handleUpdateSharedTransaction = async (updatedTransaction: SharedTransaction) => {
+    const oldTransaction = sharedTransactions.find(t => t.id === updatedTransaction.id);
+    
+    setSharedTransactions(sharedTransactions.map(t => 
+      t.id === updatedTransaction.id ? updatedTransaction : t
+    ));
+    
+    // تحديث الصندوق إذا تغيرت المعاملة
+    if (oldTransaction) {
+      // عكس تأثير المعاملة القديمة
+      if (oldTransaction.paymentType === 'cash') {
+        await updateCashbox(oldTransaction.amount, oldTransaction.partner, false);
+      }
+      // إضافة تأثير المعاملة الجديدة
+      if (updatedTransaction.paymentType === 'cash') {
+        await updateCashbox(updatedTransaction.amount, updatedTransaction.partner, true);
+      }
+    }
+    
+    toast({
+      title: 'تم التعديل',
+      description: 'تم تعديل البند العام بنجاح',
+    });
+  };
+  
+  // حذف بند عام
+  const handleDeleteSharedTransaction = async (transactionId: string) => {
+    const transaction = sharedTransactions.find(t => t.id === transactionId);
+    
+    setSharedTransactions(sharedTransactions.filter(t => t.id !== transactionId));
+    
+    // عكس تأثير الصندوق للحذف
+    if (transaction && transaction.paymentType === 'cash') {
+      await updateCashbox(transaction.amount, transaction.partner, false);
+    }
+    
+    toast({
+      title: 'تم الحذف',
+      description: 'تم حذف البند العام بنجاح',
+    });
   };
 
   // Edit partner name handlers
@@ -727,6 +892,10 @@ export function VehiclesPage() {
         firstPartnerTotal={firstPartnerTotal}
         secondPartnerTotal={secondPartnerTotal}
         totalBalance={totalBalance}
+        transactions={sharedTransactions}
+        onAddTransaction={handleAddSharedTransaction}
+        onUpdateTransaction={handleUpdateSharedTransaction}
+        onDeleteTransaction={handleDeleteSharedTransaction}
       />
 
       {/* Delete Vehicle Confirmation Dialog */}

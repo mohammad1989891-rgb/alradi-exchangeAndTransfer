@@ -458,6 +458,22 @@ export async function getVaults(): Promise<Vault[]> {
   return db.table<Vault>('vaults').toArray();
 }
 
+// ============================================
+// 🔹 دالة مساعدة لتحديث رصيد الصندوق مباشرة
+// 🔸 تستخدم لقسم المركبات
+// ============================================
+export async function updateVaultBalance(currencyId: string, balanceDelta: number): Promise<Vault | null> {
+  await initializeDatabase();
+  
+  const vault = await db.table<Vault>('vaults').where('currencyId').equals(currencyId).first();
+  if (vault) {
+    const newBalance = vault.balance + balanceDelta;
+    await db.table('vaults').update(vault.id, { balance: newBalance, updatedAt: new Date() });
+    return db.table<Vault>('vaults').get(vault.id) || null;
+  }
+  return null;
+}
+
 export async function updateVaultOpeningBalance(currencyId: string, openingBalance: number): Promise<Vault | null> {
   await initializeDatabase();
   

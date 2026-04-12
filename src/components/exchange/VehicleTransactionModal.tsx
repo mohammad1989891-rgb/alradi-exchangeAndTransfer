@@ -30,6 +30,26 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
+// ============================================
+// 🔹 دالة تحويل الأرقام العربية إلى إنجليزية
+// 🔹 Additive Fix: لا تغيير للمنطق المحاسبي
+// ============================================
+function toEnglishNumbers(num: number | string): string {
+  const arabicNumerals = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  let str = typeof num === 'number' ? num.toString() : num;
+  
+  // تحويل الأرقام العربية إلى إنجليزية
+  for (let i = 0; i < 10; i++) {
+    str = str.replace(new RegExp(arabicNumerals[i], 'g'), i.toString());
+  }
+  
+  // تنسيق الرقم مع فواصل
+  if (typeof num === 'number') {
+    return num.toLocaleString('en-US');
+  }
+  return str;
+}
+
 // Vehicle Transaction type
 export interface VehicleTransaction {
   id: string;

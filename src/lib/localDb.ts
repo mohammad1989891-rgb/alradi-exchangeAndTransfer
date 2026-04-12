@@ -2161,3 +2161,199 @@ export async function updateUser(userId: string, data: { name?: string }): Promi
   await db.table('users').update(userId, { ...data, updatedAt: new Date() });
   return db.table<User>('users').get(userId) || null;
 }
+
+// ============================================
+// 🔹 Vehicles Module Functions - دوال المركبات
+// 🔹 Additive Fix: حفظ واسترجاع البيانات
+// ============================================
+
+// الحصول على جميع المركبات
+export async function getVehicles(): Promise<Vehicle[]> {
+  await initializeDatabase();
+  return db.table<Vehicle>('vehicles').where('isActive').equals(1).toArray();
+}
+
+// إضافة مركبة جديدة
+export async function addVehicle(data: {
+  id: string;
+  name: string;
+  plateNumber?: string;
+  notes?: string;
+  isActive: boolean;
+}): Promise<Vehicle> {
+  await initializeDatabase();
+  const now = new Date();
+  
+  const vehicle: Vehicle = {
+    id: data.id,
+    name: data.name,
+    plateNumber: data.plateNumber,
+    notes: data.notes,
+    isActive: data.isActive,
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  await db.table('vehicles').add(vehicle);
+  return vehicle;
+}
+
+// تحديث مركبة
+export async function updateVehicle(id: string, data: Partial<Vehicle>): Promise<Vehicle | null> {
+  await initializeDatabase();
+  await db.table('vehicles').update(id, { ...data, updatedAt: new Date() });
+  return db.table<Vehicle>('vehicles').get(id) || null;
+}
+
+// حذف مركبة (حذف فعلي مع جميع معاملاتها)
+export async function deleteVehicle(id: string): Promise<void> {
+  await initializeDatabase();
+  
+  // حذف جميع معاملات المركبة
+  await db.table('vehicleTransactions').where('vehicleId').equals(id).delete();
+  
+  // حذف المركبة
+  await db.table('vehicles').delete(id);
+}
+
+// ============================================
+// 🔹 Vehicle Transactions Functions - معاملات المركبات
+// ============================================
+
+// الحصول على معاملات مركبة معينة
+export async function getVehicleTransactions(vehicleId: string): Promise<VehicleTransaction[]> {
+  await initializeDatabase();
+  return db.table<VehicleTransaction>('vehicleTransactions').where('vehicleId').equals(vehicleId).toArray();
+}
+
+// إضافة معاملة مركبة
+export async function addVehicleTransaction(data: {
+  id: string;
+  vehicleId: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+}): Promise<VehicleTransaction> {
+  await initializeDatabase();
+  const now = new Date();
+  
+  const transaction: VehicleTransaction = {
+    id: data.id,
+    vehicleId: data.vehicleId,
+    date: data.date,
+    amount: data.amount,
+    partner: data.partner,
+    paymentType: data.paymentType,
+    description: data.description,
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  await db.table('vehicleTransactions').add(transaction);
+  return transaction;
+}
+
+// تحديث معاملة مركبة
+export async function updateVehicleTransaction(id: string, data: Partial<VehicleTransaction>): Promise<VehicleTransaction | null> {
+  await initializeDatabase();
+  await db.table('vehicleTransactions').update(id, { ...data, updatedAt: new Date() });
+  return db.table<VehicleTransaction>('vehicleTransactions').get(id) || null;
+}
+
+// حذف معاملة مركبة
+export async function deleteVehicleTransaction(id: string): Promise<void> {
+  await initializeDatabase();
+  await db.table('vehicleTransactions').delete(id);
+}
+
+// ============================================
+// 🔹 Shared Transactions Functions - البنود العامة
+// ============================================
+
+// الحصول على جميع البنود العامة
+export async function getSharedTransactions(): Promise<SharedTransaction[]> {
+  await initializeDatabase();
+  return db.table<SharedTransaction>('sharedTransactions').toArray();
+}
+
+// إضافة بند عام
+export async function addSharedTransaction(data: {
+  id: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+}): Promise<SharedTransaction> {
+  await initializeDatabase();
+  const now = new Date();
+  
+  const transaction: SharedTransaction = {
+    id: data.id,
+    date: data.date,
+    amount: data.amount,
+    partner: data.partner,
+    paymentType: data.paymentType,
+    description: data.description,
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  await db.table('sharedTransactions').add(transaction);
+  return transaction;
+}
+
+// تحديث بند عام
+export async function updateSharedTransaction(id: string, data: Partial<SharedTransaction>): Promise<SharedTransaction | null> {
+  await initializeDatabase();
+  await db.table('sharedTransactions').update(id, { ...data, updatedAt: new Date() });
+  return db.table<SharedTransaction>('sharedTransactions').get(id) || null;
+}
+
+// حذف بند عام
+export async function deleteSharedTransaction(id: string): Promise<void> {
+  await initializeDatabase();
+  await db.table('sharedTransactions').delete(id);
+}
+
+// ============================================
+// 🔹 Vehicles Settings Functions - إعدادات المركبات
+// ============================================
+
+// الحصول على إعدادات المركبات
+export async function getVehiclesSettings(): Promise<VehiclesSettings | null> {
+  await initializeDatabase();
+  const settings = await db.table<VehiclesSettings>('vehiclesSettings').toArray();
+  return settings.length > 0 ? settings[0] : null;
+}
+
+// حفظ إعدادات المركبات
+export async function saveVehiclesSettings(data: {
+  firstPartnerName: string;
+  secondPartnerName: string;
+}): Promise<VehiclesSettings> {
+  await initializeDatabase();
+  const now = new Date();
+  
+  const existingSettings = await getVehiclesSettings();
+  
+  if (existingSettings) {
+    await db.table('vehiclesSettings').update(existingSettings.id, {
+      firstPartnerName: data.firstPartnerName,
+      secondPartnerName: data.secondPartnerName,
+      updatedAt: now,
+    });
+    return db.table<VehiclesSettings>('vehiclesSettings').get(existingSettings.id)!;
+  } else {
+    const newSettings: VehiclesSettings = {
+      id: 'vehicles_settings_1',
+      firstPartnerName: data.firstPartnerName,
+      secondPartnerName: data.secondPartnerName,
+      updatedAt: now,
+    };
+    await db.table('vehiclesSettings').add(newSettings);
+    return newSettings;
+  }
+}

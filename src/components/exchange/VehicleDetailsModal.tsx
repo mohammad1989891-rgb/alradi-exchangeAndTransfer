@@ -47,6 +47,26 @@ import {
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 
+// ============================================
+// 🔹 دالة تحويل الأرقام العربية إلى إنجليزية
+// 🔹 Additive Fix: لا تغيير للمنطق المحاسبي
+// ============================================
+function toEnglishNumbers(num: number | string): string {
+  const arabicNumerals = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  let str = typeof num === 'number' ? num.toString() : num;
+  
+  // تحويل الأرقام العربية إلى إنجليزية
+  for (let i = 0; i < 10; i++) {
+    str = str.replace(new RegExp(arabicNumerals[i], 'g'), i.toString());
+  }
+  
+  // تنسيق الرقم مع فواصل
+  if (typeof num === 'number') {
+    return num.toLocaleString('en-US');
+  }
+  return str;
+}
+
 // Vehicle Transaction type
 export interface VehicleTransaction {
   id: string;
@@ -214,7 +234,7 @@ export function VehicleDetailsModal({
                   <span className="text-[10px] text-muted-foreground">{firstPartnerName}</span>
                 </div>
                 <p className="text-lg font-bold text-emerald-500">
-                  {vehicle.firstPartnerTotal.toLocaleString('ar-SA')}
+                  {toEnglishNumbers(vehicle.firstPartnerTotal)}
                 </p>
               </div>
 
@@ -225,7 +245,7 @@ export function VehicleDetailsModal({
                   <span className="text-[10px] text-muted-foreground">{secondPartnerName}</span>
                 </div>
                 <p className="text-lg font-bold text-orange-500">
-                  {vehicle.secondPartnerTotal.toLocaleString('ar-SA')}
+                  {toEnglishNumbers(vehicle.secondPartnerTotal)}
                 </p>
               </div>
 
@@ -236,7 +256,7 @@ export function VehicleDetailsModal({
                   <span className="text-[10px] text-muted-foreground">الإجمالي</span>
                 </div>
                 <p className="text-lg font-bold text-primary">
-                  {(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal).toLocaleString('ar-SA')}
+                  {toEnglishNumbers(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal)}
                 </p>
               </div>
             </div>
@@ -340,7 +360,7 @@ export function VehicleDetailsModal({
                             <div className="flex-1">
                               <p className="font-medium text-foreground text-sm">{tx.description}</p>
                               <p className="text-xs text-muted-foreground mt-1">
-                                {new Date(tx.date).toLocaleDateString('ar-SA')}
+                                {new Date(tx.date).toLocaleDateString('en-US')}
                                 {' • '}
                                 <span className={tx.paymentType === 'cash' ? 'text-emerald-500' : 'text-orange-500'}>
                                   {tx.paymentType === 'cash' ? 'كاش' : 'آجل'}
@@ -353,7 +373,7 @@ export function VehicleDetailsModal({
                                   "font-bold",
                                   tx.partner === 'first' ? 'text-emerald-500' : 'text-orange-500'
                                 )}>
-                                  {tx.amount.toLocaleString('ar-SA')}
+                                  {toEnglishNumbers(tx.amount)}
                                 </p>
                                 <p className="text-[10px] text-muted-foreground">
                                   {tx.partner === 'first' ? firstPartnerName : secondPartnerName}
@@ -413,7 +433,7 @@ export function VehicleDetailsModal({
             <AlertDialogDescription>
               <span className="block">هل أنت متأكد من حذف هذا البند؟</span>
               <span className="block text-xs text-muted-foreground mt-2">
-                "{transactionToDelete?.description}" - {transactionToDelete?.amount.toLocaleString('ar-SA')}
+                "{transactionToDelete?.description}" - {transactionToDelete ? toEnglishNumbers(transactionToDelete.amount) : ''}
               </span>
             </AlertDialogDescription>
           </AlertDialogHeader>

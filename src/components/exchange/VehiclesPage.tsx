@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Car, 
@@ -21,6 +21,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { VehicleDetailsModal, VehicleTransaction } from './VehicleDetailsModal';
 import { VehicleTransactionModal } from './VehicleTransactionModal';
@@ -37,6 +45,26 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import * as db from '@/lib/localDb';
+
+// ============================================
+// 🔹 دالة تحويل الأرقام العربية إلى إنجليزية
+// 🔹 Additive Fix: لا تغيير للمنطق المحاسبي
+// ============================================
+function toEnglishNumbers(num: number | string): string {
+  const arabicNumerals = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  let str = typeof num === 'number' ? num.toString() : num;
+  
+  // تحويل الأرقام العربية إلى إنجليزية
+  for (let i = 0; i < 10; i++) {
+    str = str.replace(new RegExp(arabicNumerals[i], 'g'), i.toString());
+  }
+  
+  // تنسيق الرقم مع فواصل
+  if (typeof num === 'number') {
+    return num.toLocaleString('en-US');
+  }
+  return str;
+}
 
 // Vehicle type for local state
 interface VehicleCard {
@@ -91,6 +119,108 @@ export function VehiclesPage() {
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
   const [editingVehicleName, setEditingVehicleName] = useState('');
 
+  // 🆕 State for Add Vehicle Modal
+  const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
+  const [newVehicleName, setNewVehicleName] = useState('');
+
+  // 🆕 State for loading
+  const [isLoading, setIsLoading] = useState(true);
+
+  // ============================================
+  // 🔹 تحميل البيانات من قاعدة البيانات عند البداية
+  // 🔹 Additive Fix: حفظ واسترجاع البيانات
+  // ============================================
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        
+        // تحميل الإعدادات
+        const settings = await db.getVehiclesSettings();
+        if (settings) {
+          setFirstPartnerName(settings.firstPartnerName);
+          setSecondPartnerName(settings.secondPartnerName);
+        }
+        
+        // تحميل المركبات
+        const vehiclesData = await db.getVehicles();
+        const vehiclesWithTransactions = await Promise.all(
+          vehiclesData.map(async (v) => {
+            const transactions = await db.getVehicleTransactions(v.id);
+            return {
+              id: v.id,
+              name: v.name,
+              firstPartnerTotal: 0,
+              secondPartnerTotal: 0,
+              totalCost: 0,
+              createdAt: v.createdAt,
+              transactions: transactions.map(t => ({
+                id: t.id,
+                vehicleId: t.vehicleId,
+                date: t.date,
+                amount: t.amount,
+                partner: t.partner,
+                paymentType: t.paymentType,
+                description: t.description,
+                createdAt: t.createdAt,
+              })),
+            };
+          })
+        );
+        
+        // حساب المجاميع لكل مركبة
+        const vehiclesWithTotals = vehiclesWithTransactions.map(v => {
+          const firstPartnerTotal = v.transactions
+            .filter(t => t.partner === 'first')
+            .reduce((sum, t) => sum + t.amount, 0);
+          const secondPartnerTotal = v.transactions
+            .filter(t => t.partner === 'second')
+            .reduce((sum, t) => sum + t.amount, 0);
+          return {
+            ...v,
+            firstPartnerTotal,
+            secondPartnerTotal,
+            totalCost: firstPartnerTotal + secondPartnerTotal,
+          };
+        });
+        
+        setVehicles(vehiclesWithTotals);
+        
+        // تحميل المعاملات المشتركة
+        const sharedData = await db.getSharedTransactions();
+        setSharedTransactions(sharedData.map(t => ({
+          id: t.id,
+          date: t.date,
+          amount: t.amount,
+          partner: t.partner,
+          paymentType: t.paymentType,
+          description: t.description,
+          createdAt: t.createdAt,
+        })));
+        
+      } catch (error) {
+        console.error('Error loading vehicles data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
+  }, []);
+
+  // ============================================
+  // 🔹 حفظ الإعدادات عند تغيير أسماء الشركاء
+  // 🔹 Additive Fix: حفظ في قاعدة البيانات
+  // ============================================
+  useEffect(() => {
+    if (!isLoading) {
+      db.saveVehiclesSettings({
+        firstPartnerName,
+        secondPartnerName,
+      });
+    }
+  }, [firstPartnerName, secondPartnerName, isLoading]);
+
   // ============================================
   // 🔹 حسابات تلقائية للبطاقة الرئيسية
   // 🔹 المعادلة: إجمالي الرصيد = الشريك الأول - الشريك الثاني
@@ -138,18 +268,55 @@ export function VehiclesPage() {
     return { firstPartnerTotal, secondPartnerTotal };
   }, []);
 
-  // Add new vehicle handler
-  const handleAddVehicle = () => {
+  // ============================================
+  // 🔹 إضافة مركبة جديدة عبر Modal
+  // 🔹 Additive Fix: UI Enhancement
+  // ============================================
+  
+  // فتح نافذة الإضافة
+  const handleOpenAddVehicleModal = () => {
+    setNewVehicleName('');
+    setShowAddVehicleModal(true);
+  };
+  
+  // حفظ المركبة الجديدة
+  const handleSaveNewVehicle = async () => {
+    if (!newVehicleName.trim()) {
+      toast({
+        title: 'خطأ',
+        description: 'يرجى إدخال اسم المركبة',
+        variant: 'destructive',
+      });
+      return;
+    }
+    
     const newVehicle: VehicleCard = {
       id: generateId(),
-      name: `مركبة ${vehicles.length + 1}`,
+      name: newVehicleName.trim(),
       firstPartnerTotal: 0,
       secondPartnerTotal: 0,
       totalCost: 0,
       createdAt: new Date(),
       transactions: [],
     };
+    
+    // حفظ في قاعدة البيانات
+    await db.addVehicle({
+      id: newVehicle.id,
+      name: newVehicle.name,
+      plateNumber: '',
+      notes: '',
+      isActive: true,
+    });
+    
     setVehicles([...vehicles, newVehicle]);
+    setShowAddVehicleModal(false);
+    setNewVehicleName('');
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: `تم إضافة "${newVehicle.name}" بنجاح`,
+    });
   };
 
   // Open vehicle details
@@ -201,6 +368,17 @@ export function VehiclesPage() {
       createdAt: new Date(),
     };
     
+    // حفظ في قاعدة البيانات
+    await db.addVehicleTransaction({
+      id: newTransaction.id,
+      vehicleId: newTransaction.vehicleId,
+      date: newTransaction.date,
+      amount: newTransaction.amount,
+      partner: newTransaction.partner,
+      paymentType: newTransaction.paymentType,
+      description: newTransaction.description,
+    });
+    
     // تحديث المركبة بالمعاملة الجديدة
     setVehicles(vehicles.map(v => {
       if (v.id === selectedVehicle.id) {
@@ -244,6 +422,15 @@ export function VehiclesPage() {
     
     // إيجاد المعاملة القديمة
     const oldTransaction = selectedVehicle.transactions.find(t => t.id === updatedTransaction.id);
+    
+    // تحديث في قاعدة البيانات
+    await db.updateVehicleTransaction(updatedTransaction.id, {
+      date: updatedTransaction.date,
+      amount: updatedTransaction.amount,
+      partner: updatedTransaction.partner,
+      paymentType: updatedTransaction.paymentType,
+      description: updatedTransaction.description,
+    });
     
     // تحديث المركبة
     setVehicles(vehicles.map(v => {
@@ -300,6 +487,9 @@ export function VehiclesPage() {
     // إيجاد المعاملة قبل الحذف
     const transaction = selectedVehicle.transactions.find(t => t.id === transactionId);
     
+    // حذف من قاعدة البيانات
+    await db.deleteVehicleTransaction(transactionId);
+    
     // تحديث المركبة
     setVehicles(vehicles.map(v => {
       if (v.id === selectedVehicle.id) {
@@ -350,11 +540,19 @@ export function VehiclesPage() {
   };
   
   // Save vehicle name
-  const handleSaveVehicleName = (vehicleId: string) => {
+  const handleSaveVehicleName = async (vehicleId: string) => {
     if (editingVehicleName.trim()) {
       setVehicles(vehicles.map(v => 
         v.id === vehicleId ? { ...v, name: editingVehicleName.trim() } : v
       ));
+      
+      // تحديث في قاعدة البيانات
+      await db.updateVehicle(vehicleId, { name: editingVehicleName.trim() });
+      
+      toast({
+        title: 'تم التعديل',
+        description: 'تم تحديث اسم المركبة',
+      });
     }
     setEditingVehicleId(null);
     setEditingVehicleName('');
@@ -382,6 +580,9 @@ export function VehiclesPage() {
           await updateCashbox(tx.amount, tx.partner, false);
         }
       }
+      
+      // حذف المركبة من قاعدة البيانات
+      await db.deleteVehicle(vehicleToDelete.id);
       
       // حذف المركبة مع جميع معاملاتها
       setVehicles(vehicles.filter(v => v.id !== vehicleToDelete.id));
@@ -433,6 +634,16 @@ export function VehiclesPage() {
       createdAt: new Date(),
     };
     
+    // حفظ في قاعدة البيانات
+    await db.addSharedTransaction({
+      id: newTransaction.id,
+      date: newTransaction.date,
+      amount: newTransaction.amount,
+      partner: newTransaction.partner,
+      paymentType: newTransaction.paymentType,
+      description: newTransaction.description,
+    });
+    
     setSharedTransactions([...sharedTransactions, newTransaction]);
     
     // تحديث الصندوق للمعاملات الكاش
@@ -449,6 +660,15 @@ export function VehiclesPage() {
   // تعديل بند عام
   const handleUpdateSharedTransaction = async (updatedTransaction: SharedTransaction) => {
     const oldTransaction = sharedTransactions.find(t => t.id === updatedTransaction.id);
+    
+    // تحديث في قاعدة البيانات
+    await db.updateSharedTransaction(updatedTransaction.id, {
+      date: updatedTransaction.date,
+      amount: updatedTransaction.amount,
+      partner: updatedTransaction.partner,
+      paymentType: updatedTransaction.paymentType,
+      description: updatedTransaction.description,
+    });
     
     setSharedTransactions(sharedTransactions.map(t => 
       t.id === updatedTransaction.id ? updatedTransaction : t
@@ -476,6 +696,9 @@ export function VehiclesPage() {
   const handleDeleteSharedTransaction = async (transactionId: string) => {
     const transaction = sharedTransactions.find(t => t.id === transactionId);
     
+    // حذف من قاعدة البيانات
+    await db.deleteSharedTransaction(transactionId);
+    
     setSharedTransactions(sharedTransactions.filter(t => t.id !== transactionId));
     
     // عكس تأثير الصندوق للحذف
@@ -489,7 +712,11 @@ export function VehiclesPage() {
     });
   };
 
-  // Edit partner name handlers
+  // ============================================
+  // 🔹 تعديل أسماء الشركاء - تحسين UX
+  // 🔹 Additive Fix: واجهة أوضح
+  // ============================================
+  
   const handleEditFirstPartner = () => {
     setTempFirstName(firstPartnerName);
     setIsEditingFirstPartner(true);
@@ -516,15 +743,17 @@ export function VehiclesPage() {
 
   const handleCancelFirstPartner = () => {
     setIsEditingFirstPartner(false);
+    setTempFirstName('');
   };
 
   const handleCancelSecondPartner = () => {
     setIsEditingSecondPartner(false);
+    setTempSecondName('');
   };
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="space-y-4">
         {/* Header with Add Button */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -539,38 +768,38 @@ export function VehiclesPage() {
           
           <Button 
             className="gap-2 bg-primary hover:bg-primary/90"
-            onClick={handleAddVehicle}
+            onClick={handleOpenAddVehicleModal}
           >
             <Plus className="w-4 h-4" />
             <span>إضافة مركبة</span>
           </Button>
         </div>
 
-        {/* Main Summary Card - Clickable */}
+        {/* Main Summary Card - أصغر ومتناسق */}
         <Card 
-          className="border-2 border-primary/20 shadow-lg cursor-pointer hover:border-primary/50 hover:shadow-xl transition-all"
+          className="border-2 border-primary/20 shadow-md cursor-pointer hover:border-primary/40 hover:shadow-lg transition-all"
           onClick={handleOpenSharedModal}
         >
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Scale className="w-5 h-5 text-primary" />
+          <CardHeader className="pb-2 pt-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Scale className="w-4 h-4 text-primary" />
               ملخص الشراكة
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Total Balance */}
-            <div className="text-center p-6 rounded-2xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
-              <p className="text-sm text-muted-foreground mb-2">إجمالي الرصيد</p>
+          <CardContent className="space-y-4 pb-4">
+            {/* Total Balance - أصغر */}
+            <div className="text-center p-4 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
+              <p className="text-xs text-muted-foreground mb-1">إجمالي الرصيد</p>
               <p className={cn(
-                "text-4xl font-bold",
+                "text-3xl font-bold",
                 totalBalance >= 0 ? "text-emerald-500" : "text-red-500"
               )}>
-                {totalBalance.toLocaleString('ar-SA')}
+                {toEnglishNumbers(totalBalance)}
               </p>
               <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
               {/* Status Label: لنا / علينا */}
               <div className={cn(
-                "inline-flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full text-xs font-medium",
+                "inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full text-xs font-medium",
                 totalBalance >= 0 
                   ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
                   : "bg-red-500/10 text-red-600 dark:text-red-400"
@@ -589,119 +818,142 @@ export function VehiclesPage() {
               </div>
             </div>
 
-            {/* Partner Names Section */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* Partner Names Section - محسن */}
+            <div className="grid grid-cols-2 gap-3">
               {/* First Partner */}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-sm text-muted-foreground">اسم الشريك الأول</Label>
+                  <Label className="text-xs text-muted-foreground">الشريك الأول</Label>
                   {!isEditingFirstPartner && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0"
-                      onClick={handleEditFirstPartner}
+                      className="h-6 w-6 p-0 hover:bg-primary/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditFirstPartner();
+                      }}
                     >
                       <Edit2 className="w-3 h-3" />
                     </Button>
                   )}
                 </div>
                 {isEditingFirstPartner ? (
-                  <div className="flex gap-2">
+                  <div className="flex gap-1">
                     <Input
                       value={tempFirstName}
                       onChange={(e) => setTempFirstName(e.target.value)}
-                      className="text-sm"
+                      className="text-sm h-8"
                       autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="اسم الشريك الأول"
+                      dir="rtl"
                     />
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-emerald-500"
-                      onClick={handleSaveFirstPartner}
+                      className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSaveFirstPartner();
+                      }}
                     >
                       <Check className="w-4 h-4" />
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-red-500"
-                      onClick={handleCancelFirstPartner}
+                      className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCancelFirstPartner();
+                      }}
                     >
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
                 ) : (
-                  <div className="p-3 rounded-lg bg-muted/50 border border-border">
-                    <p className="font-medium text-foreground">{firstPartnerName}</p>
+                  <div className="p-2 rounded-lg bg-muted/50 border border-border">
+                    <p className="font-medium text-foreground text-sm">{firstPartnerName}</p>
                   </div>
                 )}
               </div>
 
               {/* Second Partner */}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <Label className="text-sm text-muted-foreground">اسم الشريك الثاني</Label>
+                  <Label className="text-xs text-muted-foreground">الشريك الثاني</Label>
                   {!isEditingSecondPartner && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0"
-                      onClick={handleEditSecondPartner}
+                      className="h-6 w-6 p-0 hover:bg-primary/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleEditSecondPartner();
+                      }}
                     >
                       <Edit2 className="w-3 h-3" />
                     </Button>
                   )}
                 </div>
                 {isEditingSecondPartner ? (
-                  <div className="flex gap-2">
+                  <div className="flex gap-1">
                     <Input
                       value={tempSecondName}
                       onChange={(e) => setTempSecondName(e.target.value)}
-                      className="text-sm"
+                      className="text-sm h-8"
                       autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                      placeholder="اسم الشريك الثاني"
+                      dir="rtl"
                     />
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-emerald-500"
-                      onClick={handleSaveSecondPartner}
+                      className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSaveSecondPartner();
+                      }}
                     >
                       <Check className="w-4 h-4" />
                     </Button>
                     <Button
                       size="sm"
                       variant="ghost"
-                      className="h-8 w-8 p-0 text-red-500"
-                      onClick={handleCancelSecondPartner}
+                      className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleCancelSecondPartner();
+                      }}
                     >
                       <X className="w-4 h-4" />
                     </Button>
                   </div>
                 ) : (
-                  <div className="p-3 rounded-lg bg-muted/50 border border-border">
-                    <p className="font-medium text-foreground">{secondPartnerName}</p>
+                  <div className="p-2 rounded-lg bg-muted/50 border border-border">
+                    <p className="font-medium text-foreground text-sm">{secondPartnerName}</p>
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Partners Totals */}
-            <div className="grid grid-cols-2 gap-4">
+            {/* Partners Totals - أصغر */}
+            <div className="grid grid-cols-2 gap-3">
               {/* First Partner Total */}
               <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="p-4 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20"
+                className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20"
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  <span className="text-sm text-muted-foreground">مجموع {firstPartnerName}</span>
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingUp className="w-3 h-3 text-emerald-500" />
+                  <span className="text-xs text-muted-foreground">{firstPartnerName}</span>
                 </div>
-                <p className="text-2xl font-bold text-emerald-500">
-                  {firstPartnerTotal.toLocaleString('ar-SA')}
+                <p className="text-xl font-bold text-emerald-500">
+                  {toEnglishNumbers(firstPartnerTotal)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
               </motion.div>
 
               {/* Second Partner Total */}
@@ -709,16 +961,15 @@ export function VehiclesPage() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="p-4 rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20"
+                className="p-3 rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20"
               >
-                <div className="flex items-center gap-2 mb-2">
-                  <TrendingDown className="w-4 h-4 text-orange-500" />
-                  <span className="text-sm text-muted-foreground">مجموع {secondPartnerName}</span>
+                <div className="flex items-center gap-2 mb-1">
+                  <TrendingDown className="w-3 h-3 text-orange-500" />
+                  <span className="text-xs text-muted-foreground">{secondPartnerName}</span>
                 </div>
-                <p className="text-2xl font-bold text-orange-500">
-                  {secondPartnerTotal.toLocaleString('ar-SA')}
+                <p className="text-xl font-bold text-orange-500">
+                  {toEnglishNumbers(secondPartnerTotal)}
                 </p>
-                <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
               </motion.div>
             </div>
           </CardContent>
@@ -726,11 +977,11 @@ export function VehiclesPage() {
 
         {/* Divider between main card and vehicle cards */}
         {vehicles.length > 0 && (
-          <div className="flex items-center gap-4 py-2">
+          <div className="flex items-center gap-4 py-1">
             <Separator className="flex-1" />
             <div className="flex items-center gap-2 text-muted-foreground">
               <Truck className="w-4 h-4" />
-              <span className="text-sm font-medium">المركبات ({vehicles.length})</span>
+              <span className="text-sm font-medium">المركبات ({toEnglishNumbers(vehicles.length)})</span>
             </div>
             <Separator className="flex-1" />
           </div>
@@ -750,26 +1001,27 @@ export function VehiclesPage() {
                 className="border border-border hover:border-cyan-500/50 hover:shadow-lg transition-all"
                 onClick={() => editingVehicleId !== vehicle.id && handleVehicleClick(vehicle)}
               >
-                <CardContent className="p-4">
+                <CardContent className="p-3">
                   {/* Vehicle Name with Edit/Delete Actions */}
-                  <div className="flex items-center justify-between mb-4">
-                    <div className="flex items-center gap-3 flex-1">
-                      <div className="p-2 rounded-lg bg-cyan-500/10">
-                        <Truck className="w-5 h-5 text-cyan-500" />
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="p-1.5 rounded-lg bg-cyan-500/10">
+                        <Truck className="w-4 h-4 text-cyan-500" />
                       </div>
                       {editingVehicleId === vehicle.id ? (
                         <div className="flex items-center gap-2 flex-1">
                           <Input
                             value={editingVehicleName}
                             onChange={(e) => setEditingVehicleName(e.target.value)}
-                            className="text-sm h-9"
+                            className="text-sm h-8"
                             autoFocus
                             onClick={(e) => e.stopPropagation()}
+                            dir="rtl"
                           />
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-9 w-9 p-0 text-emerald-500"
+                            className="h-8 w-8 p-0 text-emerald-500"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleSaveVehicleName(vehicle.id);
@@ -780,7 +1032,7 @@ export function VehiclesPage() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-9 w-9 p-0 text-red-500"
+                            className="h-8 w-8 p-0 text-red-500"
                             onClick={(e) => {
                               e.stopPropagation();
                               handleCancelEditVehicleName();
@@ -790,7 +1042,7 @@ export function VehiclesPage() {
                           </Button>
                         </div>
                       ) : (
-                        <h3 className="text-xl font-bold text-foreground">{vehicle.name}</h3>
+                        <h3 className="text-base font-bold text-foreground">{vehicle.name}</h3>
                       )}
                     </div>
                     
@@ -800,46 +1052,46 @@ export function VehiclesPage() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                           onClick={(e) => handleStartEditVehicleName(e, vehicle)}
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <Edit2 className="w-3.5 h-3.5" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
                           onClick={(e) => handleRequestDeleteVehicle(e, vehicle)}
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       </div>
                     )}
                   </div>
 
                   {/* Vehicle Stats */}
-                  <div className="grid grid-cols-3 gap-3">
+                  <div className="grid grid-cols-3 gap-2">
                     {/* First Partner Total */}
-                    <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">{firstPartnerName}</p>
-                      <p className="text-lg font-bold text-emerald-500">
-                        {vehicle.firstPartnerTotal.toLocaleString('ar-SA')}
+                    <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">{firstPartnerName}</p>
+                      <p className="text-sm font-bold text-emerald-500">
+                        {toEnglishNumbers(vehicle.firstPartnerTotal)}
                       </p>
                     </div>
 
                     {/* Second Partner Total */}
-                    <div className="p-3 rounded-xl bg-orange-500/5 border border-orange-500/20 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">{secondPartnerName}</p>
-                      <p className="text-lg font-bold text-orange-500">
-                        {vehicle.secondPartnerTotal.toLocaleString('ar-SA')}
+                    <div className="p-2 rounded-lg bg-orange-500/5 border border-orange-500/20 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">{secondPartnerName}</p>
+                      <p className="text-sm font-bold text-orange-500">
+                        {toEnglishNumbers(vehicle.secondPartnerTotal)}
                       </p>
                     </div>
 
                     {/* Total Cost = First + Second */}
-                    <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
-                      <p className="text-xs text-muted-foreground mb-1">التكلفة الإجمالية</p>
-                      <p className="text-lg font-bold text-primary">
-                        {(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal).toLocaleString('ar-SA')}
+                    <div className="p-2 rounded-lg bg-primary/5 border border-primary/20 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">التكلفة</p>
+                      <p className="text-sm font-bold text-primary">
+                        {toEnglishNumbers(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal)}
                       </p>
                     </div>
                   </div>
@@ -850,7 +1102,7 @@ export function VehiclesPage() {
         </AnimatePresence>
 
         {/* Empty State */}
-        {vehicles.length === 0 && (
+        {vehicles.length === 0 && !isLoading && (
           <div className="text-center py-12">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted/50 mb-4">
               <Car className="w-8 h-8 text-muted-foreground" />
@@ -860,6 +1112,57 @@ export function VehiclesPage() {
           </div>
         )}
       </div>
+
+      {/* 🆕 Add Vehicle Modal */}
+      <Dialog open={showAddVehicleModal} onOpenChange={setShowAddVehicleModal}>
+        <DialogContent className="max-w-sm w-[95vw]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <div className="p-2 rounded-lg bg-cyan-500/10">
+                <Plus className="w-5 h-5 text-cyan-500" />
+              </div>
+              إضافة مركبة جديدة
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground pt-2">
+              أدخل اسم المركبة لإضافتها إلى قائمة الشراكات
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <Label className="text-sm mb-2 block">اسم المركبة</Label>
+            <Input
+              value={newVehicleName}
+              onChange={(e) => setNewVehicleName(e.target.value)}
+              placeholder="مثال: سيارة تويوتا كامري"
+              className="text-right"
+              dir="rtl"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSaveNewVehicle();
+                }
+              }}
+            />
+          </div>
+          
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowAddVehicleModal(false)}
+              className="flex-1"
+            >
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleSaveNewVehicle}
+              disabled={!newVehicleName.trim()}
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600"
+            >
+              حفظ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Vehicle Details Modal */}
       <VehicleDetailsModal

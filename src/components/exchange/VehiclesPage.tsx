@@ -23,6 +23,7 @@ import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import { VehicleDetailsModal } from './VehicleDetailsModal';
 import { VehicleTransactionModal } from './VehicleTransactionModal';
+import { SharedTransactionsModal } from './SharedTransactionsModal';
 
 // Vehicle type for local state
 interface VehicleCard {
@@ -49,6 +50,7 @@ export function VehiclesPage() {
   // Modal states
   const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
+  const [isSharedModalOpen, setIsSharedModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCard | null>(null);
 
   // ============================================
@@ -99,6 +101,16 @@ export function VehiclesPage() {
 
   const handleCloseTransactionModal = () => {
     setIsTransactionModalOpen(false);
+  };
+
+  // Open shared transactions modal
+  const handleOpenSharedModal = () => {
+    setIsSharedModalOpen(true);
+  };
+
+  // Close shared transactions modal
+  const handleCloseSharedModal = () => {
+    setIsSharedModalOpen(false);
   };
 
   // Edit partner name handlers
@@ -158,8 +170,11 @@ export function VehiclesPage() {
           </Button>
         </div>
 
-        {/* Main Summary Card */}
-        <Card className="border-2 border-primary/20 shadow-lg">
+        {/* Main Summary Card - Clickable */}
+        <Card 
+          className="border-2 border-primary/20 shadow-lg cursor-pointer hover:border-primary/50 hover:shadow-xl transition-all"
+          onClick={handleOpenSharedModal}
+        >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-lg">
               <Scale className="w-5 h-5 text-primary" />
@@ -428,6 +443,17 @@ export function VehiclesPage() {
         vehicle={selectedVehicle}
         firstPartnerName={firstPartnerName}
         secondPartnerName={secondPartnerName}
+      />
+
+      {/* Shared Transactions Modal */}
+      <SharedTransactionsModal
+        isOpen={isSharedModalOpen}
+        onClose={handleCloseSharedModal}
+        firstPartnerName={firstPartnerName}
+        secondPartnerName={secondPartnerName}
+        firstPartnerTotal={firstPartnerTotal}
+        secondPartnerTotal={secondPartnerTotal}
+        totalBalance={totalBalance}
       />
     </>
   );

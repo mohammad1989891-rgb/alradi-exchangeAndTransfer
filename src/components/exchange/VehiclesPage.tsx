@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Car, 
   Plus, 
@@ -12,13 +12,25 @@ import {
   Scale,
   Edit2,
   Check,
-  X
+  X,
+  Truck
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
+
+// Vehicle type for local state
+interface VehicleCard {
+  id: string;
+  name: string;
+  firstPartnerTotal: number;
+  secondPartnerTotal: number;
+  totalCost: number;
+  createdAt: Date;
+}
 
 export function VehiclesPage() {
   // State for partner names (editable)
@@ -29,10 +41,29 @@ export function VehiclesPage() {
   const [tempFirstName, setTempFirstName] = useState('');
   const [tempSecondName, setTempSecondName] = useState('');
 
+  // State for vehicles list
+  const [vehicles, setVehicles] = useState<VehicleCard[]>([]);
+
   // Placeholder values (no accounting logic yet)
   const totalBalance = 0;
   const firstPartnerTotal = 0;
   const secondPartnerTotal = 0;
+
+  // Generate unique ID
+  const generateId = () => 'vehicle_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+
+  // Add new vehicle handler
+  const handleAddVehicle = () => {
+    const newVehicle: VehicleCard = {
+      id: generateId(),
+      name: `مركبة ${vehicles.length + 1}`,
+      firstPartnerTotal: 0,
+      secondPartnerTotal: 0,
+      totalCost: 0,
+      createdAt: new Date(),
+    };
+    setVehicles([...vehicles, newVehicle]);
+  };
 
   // Edit partner name handlers
   const handleEditFirstPartner = () => {
@@ -83,9 +114,7 @@ export function VehiclesPage() {
         
         <Button 
           className="gap-2 bg-primary hover:bg-primary/90"
-          onClick={() => {
-            // Add vehicle logic will be implemented later
-          }}
+          onClick={handleAddVehicle}
         >
           <Plus className="w-4 h-4" />
           <span>إضافة مركبة</span>
@@ -248,14 +277,80 @@ export function VehiclesPage() {
         </CardContent>
       </Card>
 
-      {/* Vehicles List Placeholder */}
-      <div className="text-center py-12">
-        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted/50 mb-4">
-          <Car className="w-8 h-8 text-muted-foreground" />
+      {/* Divider between main card and vehicle cards */}
+      {vehicles.length > 0 && (
+        <div className="flex items-center gap-4 py-2">
+          <Separator className="flex-1" />
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Truck className="w-4 h-4" />
+            <span className="text-sm font-medium">المركبات ({vehicles.length})</span>
+          </div>
+          <Separator className="flex-1" />
         </div>
-        <p className="text-muted-foreground">لا توجد مركبات حالياً</p>
-        <p className="text-xs text-muted-foreground mt-1">اضغط على "إضافة مركبة" لبدء الإضافة</p>
-      </div>
+      )}
+
+      {/* Vehicle Cards */}
+      <AnimatePresence>
+        {vehicles.map((vehicle, index) => (
+          <motion.div
+            key={vehicle.id}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ delay: index * 0.05 }}
+          >
+            <Card className="border border-border hover:border-primary/30 transition-colors">
+              <CardContent className="p-4">
+                {/* Vehicle Name */}
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2 rounded-lg bg-cyan-500/10">
+                    <Truck className="w-5 h-5 text-cyan-500" />
+                  </div>
+                  <h3 className="text-xl font-bold text-foreground">{vehicle.name}</h3>
+                </div>
+
+                {/* Vehicle Stats */}
+                <div className="grid grid-cols-3 gap-3">
+                  {/* First Partner Total */}
+                  <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-center">
+                    <p className="text-xs text-muted-foreground mb-1">{firstPartnerName}</p>
+                    <p className="text-lg font-bold text-emerald-500">
+                      {vehicle.firstPartnerTotal.toLocaleString('ar-SA')}
+                    </p>
+                  </div>
+
+                  {/* Second Partner Total */}
+                  <div className="p-3 rounded-xl bg-orange-500/5 border border-orange-500/20 text-center">
+                    <p className="text-xs text-muted-foreground mb-1">{secondPartnerName}</p>
+                    <p className="text-lg font-bold text-orange-500">
+                      {vehicle.secondPartnerTotal.toLocaleString('ar-SA')}
+                    </p>
+                  </div>
+
+                  {/* Total Cost */}
+                  <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
+                    <p className="text-xs text-muted-foreground mb-1">التكلفة الإجمالية</p>
+                    <p className="text-lg font-bold text-primary">
+                      {vehicle.totalCost.toLocaleString('ar-SA')}
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        ))}
+      </AnimatePresence>
+
+      {/* Empty State */}
+      {vehicles.length === 0 && (
+        <div className="text-center py-12">
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted/50 mb-4">
+            <Car className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <p className="text-muted-foreground">لا توجد مركبات حالياً</p>
+          <p className="text-xs text-muted-foreground mt-1">اضغط على "إضافة مركبة" لبدء الإضافة</p>
+        </div>
+      )}
     </div>
   );
 }

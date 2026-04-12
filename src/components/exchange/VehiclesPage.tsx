@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Car, 
@@ -51,10 +51,19 @@ export function VehiclesPage() {
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCard | null>(null);
 
-  // Placeholder values (no accounting logic yet)
-  const totalBalance = 0;
-  const firstPartnerTotal = 0;
-  const secondPartnerTotal = 0;
+  // ============================================
+  // 🔹 حسابات تلقائية للبطاقة الرئيسية
+  // 🔹 المعادلة: إجمالي الرصيد = الشريك الأول - الشريك الثاني
+  // 🔹 موجب = لنا | سالب = علينا
+  // ============================================
+  const calculatedTotals = useMemo(() => {
+    const firstPartnerTotal = vehicles.reduce((sum, v) => sum + v.firstPartnerTotal, 0);
+    const secondPartnerTotal = vehicles.reduce((sum, v) => sum + v.secondPartnerTotal, 0);
+    const totalBalance = firstPartnerTotal - secondPartnerTotal; // الشريك الأول - الشريك الثاني
+    return { firstPartnerTotal, secondPartnerTotal, totalBalance };
+  }, [vehicles]);
+
+  const { totalBalance, firstPartnerTotal, secondPartnerTotal } = calculatedTotals;
 
   // Generate unique ID
   const generateId = () => 'vehicle_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
@@ -168,6 +177,25 @@ export function VehiclesPage() {
                 {totalBalance.toLocaleString('ar-SA')}
               </p>
               <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
+              {/* Status Label: لنا / علينا */}
+              <div className={cn(
+                "inline-flex items-center gap-1.5 mt-3 px-3 py-1 rounded-full text-xs font-medium",
+                totalBalance >= 0 
+                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
+                  : "bg-red-500/10 text-red-600 dark:text-red-400"
+              )}>
+                {totalBalance >= 0 ? (
+                  <>
+                    <TrendingUp className="w-3 h-3" />
+                    <span>لنا</span>
+                  </>
+                ) : (
+                  <>
+                    <TrendingDown className="w-3 h-3" />
+                    <span>علينا</span>
+                  </>
+                )}
+              </div>
             </div>
 
             {/* Partner Names Section */}
@@ -357,11 +385,11 @@ export function VehiclesPage() {
                       </p>
                     </div>
 
-                    {/* Total Cost */}
+                    {/* Total Cost = First + Second */}
                     <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
                       <p className="text-xs text-muted-foreground mb-1">التكلفة الإجمالية</p>
                       <p className="text-lg font-bold text-primary">
-                        {vehicle.totalCost.toLocaleString('ar-SA')}
+                        {(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal).toLocaleString('ar-SA')}
                       </p>
                     </div>
                   </div>

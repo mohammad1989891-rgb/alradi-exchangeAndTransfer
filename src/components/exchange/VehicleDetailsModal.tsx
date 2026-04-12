@@ -98,14 +98,14 @@ export function VehicleDetailsModal({
               </p>
             </div>
 
-            {/* Total Cost */}
+            {/* Total Cost = First + Second */}
             <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
               <div className="flex items-center justify-center gap-1 mb-1">
                 <DollarSign className="w-3 h-3 text-primary" />
                 <span className="text-[10px] text-muted-foreground">الإجمالي</span>
               </div>
               <p className="text-lg font-bold text-primary">
-                {vehicle.totalCost.toLocaleString('ar-SA')}
+                {(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal).toLocaleString('ar-SA')}
               </p>
             </div>
           </div>

@@ -12,7 +12,10 @@ import {
   DollarSign,
   Calendar,
   User,
-  CreditCard
+  CreditCard,
+  Edit2,
+  Trash2,
+  Check
 } from 'lucide-react';
 import {
   Dialog,
@@ -31,7 +34,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { useToast } from '@/hooks/use-toast';
 
 // Shared Transaction type
 interface SharedTransaction {
@@ -63,6 +77,8 @@ export function SharedTransactionsModal({
   secondPartnerTotal,
   totalBalance,
 }: SharedTransactionsModalProps) {
+  const { toast } = useToast();
+  
   // State for shared transactions
   const [transactions, setTransactions] = useState<SharedTransaction[]>([]);
   
@@ -73,6 +89,18 @@ export function SharedTransactionsModal({
   const [partner, setPartner] = useState<'first' | 'second'>('first');
   const [paymentType, setPaymentType] = useState<'cash' | 'deferred'>('cash');
   const [description, setDescription] = useState('');
+  
+  // State for edit transaction
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState('');
+  const [editAmount, setEditAmount] = useState('');
+  const [editPartner, setEditPartner] = useState<'first' | 'second'>('first');
+  const [editPaymentType, setEditPaymentType] = useState<'cash' | 'deferred'>('cash');
+  const [editDescription, setEditDescription] = useState('');
+  
+  // State for delete confirmation
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<SharedTransaction | null>(null);
 
   // Generate unique ID
   const generateId = () => 'shared_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
@@ -99,6 +127,11 @@ export function SharedTransactionsModal({
     setPartner('first');
     setPaymentType('cash');
     setShowAddForm(false);
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: 'تم إضافة البند العام بنجاح',
+    });
   };
 
   // Cancel add form
@@ -108,6 +141,78 @@ export function SharedTransactionsModal({
     setPartner('first');
     setPaymentType('cash');
     setShowAddForm(false);
+  };
+  
+  // ============================================
+  // 🔹 تعديل البنود
+  // ============================================
+  
+  // Start editing transaction
+  const handleStartEdit = (tx: SharedTransaction) => {
+    setEditingTransactionId(tx.id);
+    setEditDate(new Date(tx.date).toISOString().split('T')[0]);
+    setEditAmount(tx.amount.toString());
+    setEditPartner(tx.partner);
+    setEditPaymentType(tx.paymentType);
+    setEditDescription(tx.description);
+  };
+  
+  // Save edited transaction
+  const handleSaveEdit = () => {
+    if (!editAmount || parseFloat(editAmount) <= 0) return;
+    
+    setTransactions(transactions.map(tx => 
+      tx.id === editingTransactionId 
+        ? {
+            ...tx,
+            date: new Date(editDate),
+            amount: parseFloat(editAmount),
+            partner: editPartner,
+            paymentType: editPaymentType,
+            description: editDescription || 'بند عام',
+          }
+        : tx
+    ));
+    
+    setEditingTransactionId(null);
+    toast({
+      title: 'تم التعديل',
+      description: 'تم تعديل البند بنجاح',
+    });
+  };
+  
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setEditingTransactionId(null);
+  };
+  
+  // ============================================
+  // 🔹 حذف البنود
+  // ============================================
+  
+  // Request delete transaction
+  const handleRequestDelete = (tx: SharedTransaction) => {
+    setTransactionToDelete(tx);
+    setShowDeleteDialog(true);
+  };
+  
+  // Confirm delete transaction
+  const handleConfirmDelete = () => {
+    if (transactionToDelete) {
+      setTransactions(transactions.filter(tx => tx.id !== transactionToDelete.id));
+      toast({
+        title: 'تم الحذف',
+        description: 'تم حذف البند بنجاح',
+      });
+    }
+    setShowDeleteDialog(false);
+    setTransactionToDelete(null);
+  };
+  
+  // Cancel delete
+  const handleCancelDelete = () => {
+    setShowDeleteDialog(false);
+    setTransactionToDelete(null);
   };
 
   // Calculate totals from transactions (for display only, actual totals come from parent)
@@ -372,29 +477,106 @@ export function SharedTransactionsModal({
                           : "bg-orange-500/5 border-orange-500/20"
                       )}
                     >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <p className="font-medium text-foreground text-sm">{tx.description}</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {new Date(tx.date).toLocaleDateString('ar-SA')}
-                            {' • '}
-                            <span className={tx.paymentType === 'cash' ? 'text-emerald-500' : 'text-orange-500'}>
-                              {tx.paymentType === 'cash' ? 'كاش' : 'آجل'}
-                            </span>
-                          </p>
+                      {editingTransactionId === tx.id ? (
+                        /* Edit Form */
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <Input
+                              type="date"
+                              value={editDate}
+                              onChange={(e) => setEditDate(e.target.value)}
+                              className="h-8 text-xs"
+                            />
+                            <Input
+                              type="number"
+                              value={editAmount}
+                              onChange={(e) => setEditAmount(e.target.value)}
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          <Input
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            className="h-8 text-xs"
+                            placeholder="البيان"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <Select value={editPartner} onValueChange={(v) => setEditPartner(v as 'first' | 'second')}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="first">{firstPartnerName}</SelectItem>
+                                <SelectItem value="second">{secondPartnerName}</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <Select value={editPaymentType} onValueChange={(v) => setEditPaymentType(v as 'cash' | 'deferred')}>
+                              <SelectTrigger className="h-8 text-xs">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="cash">كاش</SelectItem>
+                                <SelectItem value="deferred">آجل</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="flex justify-end gap-1">
+                            <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleCancelEdit}>
+                              إلغاء
+                            </Button>
+                            <Button size="sm" className="h-7 text-xs bg-emerald-500 hover:bg-emerald-600" onClick={handleSaveEdit}>
+                              <Check className="w-3 h-3 mr-1" />
+                              حفظ
+                            </Button>
+                          </div>
                         </div>
-                        <div className="text-left">
-                          <p className={cn(
-                            "font-bold",
-                            tx.partner === 'first' ? 'text-emerald-500' : 'text-orange-500'
-                          )}>
-                            {tx.amount.toLocaleString('ar-SA')}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground">
-                            {tx.partner === 'first' ? firstPartnerName : secondPartnerName}
-                          </p>
+                      ) : (
+                        /* View Mode */
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <p className="font-medium text-foreground text-sm">{tx.description}</p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {new Date(tx.date).toLocaleDateString('ar-SA')}
+                              {' • '}
+                              <span className={tx.paymentType === 'cash' ? 'text-emerald-500' : 'text-orange-500'}>
+                                {tx.paymentType === 'cash' ? 'كاش' : 'آجل'}
+                              </span>
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-left">
+                              <p className={cn(
+                                "font-bold",
+                                tx.partner === 'first' ? 'text-emerald-500' : 'text-orange-500'
+                              )}>
+                                {tx.amount.toLocaleString('ar-SA')}
+                              </p>
+                              <p className="text-[10px] text-muted-foreground">
+                                {tx.partner === 'first' ? firstPartnerName : secondPartnerName}
+                              </p>
+                            </div>
+                            {/* Action Buttons */}
+                            <div className="flex items-center gap-1 mr-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0"
+                                onClick={() => handleStartEdit(tx)}
+                              >
+                                <Edit2 className="w-3 h-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
+                                onClick={() => handleRequestDelete(tx)}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </motion.div>
                   ))}
                 </AnimatePresence>
@@ -415,6 +597,33 @@ export function SharedTransactionsModal({
           </Button>
         </div>
       </DialogContent>
+      
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-500">
+              <Trash2 className="w-5 h-5" />
+              حذف البند
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="block">هل أنت متأكد من حذف هذا البند؟</span>
+              <span className="block text-xs text-muted-foreground mt-2">
+                "{transactionToDelete?.description}" - {transactionToDelete?.amount.toLocaleString('ar-SA')}
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelDelete}>إلغاء</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDelete}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              حذف
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

@@ -13,7 +13,8 @@ import {
   Edit2,
   Check,
   X,
-  Truck
+  Truck,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -24,6 +25,17 @@ import { cn } from '@/lib/utils';
 import { VehicleDetailsModal } from './VehicleDetailsModal';
 import { VehicleTransactionModal } from './VehicleTransactionModal';
 import { SharedTransactionsModal } from './SharedTransactionsModal';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { useToast } from '@/hooks/use-toast';
 
 // Vehicle type for local state
 interface VehicleCard {
@@ -33,9 +45,24 @@ interface VehicleCard {
   secondPartnerTotal: number;
   totalCost: number;
   createdAt: Date;
+  transactions: VehicleTransaction[]; // إضافة المعاملات للمركبة
+}
+
+// Vehicle Transaction type
+interface VehicleTransaction {
+  id: string;
+  vehicleId: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+  createdAt: Date;
 }
 
 export function VehiclesPage() {
+  const { toast } = useToast();
+  
   // State for partner names (editable)
   const [firstPartnerName, setFirstPartnerName] = useState('الشريك الأول');
   const [secondPartnerName, setSecondPartnerName] = useState('الشريك الثاني');
@@ -52,6 +79,14 @@ export function VehiclesPage() {
   const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
   const [isSharedModalOpen, setIsSharedModalOpen] = useState(false);
   const [selectedVehicle, setSelectedVehicle] = useState<VehicleCard | null>(null);
+  
+  // Delete confirmation states
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [vehicleToDelete, setVehicleToDelete] = useState<VehicleCard | null>(null);
+  
+  // Edit vehicle name states
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [editingVehicleName, setEditingVehicleName] = useState('');
 
   // ============================================
   // 🔹 حسابات تلقائية للبطاقة الرئيسية
@@ -79,6 +114,7 @@ export function VehiclesPage() {
       secondPartnerTotal: 0,
       totalCost: 0,
       createdAt: new Date(),
+      transactions: [],
     };
     setVehicles([...vehicles, newVehicle]);
   };
@@ -111,6 +147,61 @@ export function VehiclesPage() {
   // Close shared transactions modal
   const handleCloseSharedModal = () => {
     setIsSharedModalOpen(false);
+  };
+
+  // ============================================
+  // 🔹 تعديل وحذف المركبات
+  // ============================================
+  
+  // Start editing vehicle name
+  const handleStartEditVehicleName = (e: React.MouseEvent, vehicle: VehicleCard) => {
+    e.stopPropagation();
+    setEditingVehicleId(vehicle.id);
+    setEditingVehicleName(vehicle.name);
+  };
+  
+  // Save vehicle name
+  const handleSaveVehicleName = (vehicleId: string) => {
+    if (editingVehicleName.trim()) {
+      setVehicles(vehicles.map(v => 
+        v.id === vehicleId ? { ...v, name: editingVehicleName.trim() } : v
+      ));
+    }
+    setEditingVehicleId(null);
+    setEditingVehicleName('');
+  };
+  
+  // Cancel editing vehicle name
+  const handleCancelEditVehicleName = () => {
+    setEditingVehicleId(null);
+    setEditingVehicleName('');
+  };
+  
+  // Request delete vehicle
+  const handleRequestDeleteVehicle = (e: React.MouseEvent, vehicle: VehicleCard) => {
+    e.stopPropagation();
+    setVehicleToDelete(vehicle);
+    setShowDeleteDialog(true);
+  };
+  
+  // Confirm delete vehicle
+  const handleConfirmDeleteVehicle = () => {
+    if (vehicleToDelete) {
+      // حذف المركبة مع جميع معاملاتها
+      setVehicles(vehicles.filter(v => v.id !== vehicleToDelete.id));
+      toast({
+        title: 'تم الحذف',
+        description: `تم حذف "${vehicleToDelete.name}" وجميع معاملاتها`,
+      });
+    }
+    setShowDeleteDialog(false);
+    setVehicleToDelete(null);
+  };
+  
+  // Cancel delete vehicle
+  const handleCancelDeleteVehicle = () => {
+    setShowDeleteDialog(false);
+    setVehicleToDelete(null);
   };
 
   // Edit partner name handlers
@@ -369,17 +460,76 @@ export function VehiclesPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
               transition={{ delay: index * 0.05 }}
-              onClick={() => handleVehicleClick(vehicle)}
-              className="cursor-pointer"
             >
-              <Card className="border border-border hover:border-cyan-500/50 hover:shadow-lg transition-all">
+              <Card 
+                className="border border-border hover:border-cyan-500/50 hover:shadow-lg transition-all"
+                onClick={() => editingVehicleId !== vehicle.id && handleVehicleClick(vehicle)}
+              >
                 <CardContent className="p-4">
-                  {/* Vehicle Name */}
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="p-2 rounded-lg bg-cyan-500/10">
-                      <Truck className="w-5 h-5 text-cyan-500" />
+                  {/* Vehicle Name with Edit/Delete Actions */}
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="p-2 rounded-lg bg-cyan-500/10">
+                        <Truck className="w-5 h-5 text-cyan-500" />
+                      </div>
+                      {editingVehicleId === vehicle.id ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <Input
+                            value={editingVehicleName}
+                            onChange={(e) => setEditingVehicleName(e.target.value)}
+                            className="text-sm h-9"
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-9 w-9 p-0 text-emerald-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveVehicleName(vehicle.id);
+                            }}
+                          >
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-9 w-9 p-0 text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEditVehicleName();
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <h3 className="text-xl font-bold text-foreground">{vehicle.name}</h3>
+                      )}
                     </div>
-                    <h3 className="text-xl font-bold text-foreground">{vehicle.name}</h3>
+                    
+                    {/* Action Buttons */}
+                    {editingVehicleId !== vehicle.id && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                          onClick={(e) => handleStartEditVehicleName(e, vehicle)}
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 w-8 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={(e) => handleRequestDeleteVehicle(e, vehicle)}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
 
                   {/* Vehicle Stats */}
@@ -455,6 +605,33 @@ export function VehiclesPage() {
         secondPartnerTotal={secondPartnerTotal}
         totalBalance={totalBalance}
       />
+
+      {/* Delete Vehicle Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-500">
+              <Trash2 className="w-5 h-5" />
+              حذف المركبة
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="block">هل أنت متأكد من حذف "{vehicleToDelete?.name}"؟</span>
+              <span className="block text-xs text-red-500 mt-2">
+                ⚠️ سيتم حذف جميع المعاملات المرتبطة بهذه المركبة
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleCancelDeleteVehicle}>إلغاء</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDeleteVehicle}
+              className="bg-red-500 hover:bg-red-600"
+            >
+              حذف
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

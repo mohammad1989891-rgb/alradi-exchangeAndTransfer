@@ -10,6 +10,7 @@ import { TransactionsPage } from '@/components/exchange/TransactionsPage';
 import { DebtsPage } from '@/components/exchange/DebtsPage';
 import { SettingsPage } from '@/components/exchange/SettingsPage';
 import { CurrencyExchangePage } from '@/components/exchange/CurrencyExchangePage';
+import { VehiclesPage } from '@/components/exchange/VehiclesPage';
 import { SideMenu } from '@/components/exchange/SideMenu';
 import { CurrencyTransactionsModal } from '@/components/exchange/CurrencyTransactionsModal';
 import { VaultQueryModal } from '@/components/exchange/VaultQueryModal';
@@ -226,6 +227,8 @@ export default function Home() {
         return <CurrencyExchangePage />;
       case 'settings':
         return <SettingsPage />;
+      case 'vehicles':
+        return <VehiclesPage />;
       default:
         return <BalancesPage />;
     }

@@ -31,6 +31,7 @@ import {
   PiggyBank,
   LogOut,
   ShieldCheck,
+  Car,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { useToast } from '@/hooks/use-toast';
@@ -58,6 +59,13 @@ const menuItems = [
     color: 'bg-purple-500',
   },
   {
+    id: 'vehicles',
+    title: 'المركبات',
+    description: 'إدارة شراكات المركبات',
+    icon: Car,
+    color: 'bg-cyan-500',
+  },
+  {
     id: 'currencies',
     title: 'إدارة العملات',
     description: 'إضافة وحذف العملات',
@@ -81,7 +89,7 @@ const menuItems = [
 ];
 
 export function SideMenu() {
-  const { isSideMenuOpen, closeSideMenu, openVaultQuery, openAccountStatement, openCurrencyModal, openOpeningBalanceModal } = useAppStore();
+  const { isSideMenuOpen, closeSideMenu, openVaultQuery, openAccountStatement, openCurrencyModal, openOpeningBalanceModal, setActiveTab } = useAppStore();
   const { toast } = useToast();
   const [showExitDialog, setShowExitDialog] = useState(false);
   
@@ -98,6 +106,9 @@ export function SideMenu() {
         break;
       case 'opening-balance':
         openOpeningBalanceModal();
+        break;
+      case 'vehicles':
+        setActiveTab('vehicles');
         break;
     }
     closeSideMenu();

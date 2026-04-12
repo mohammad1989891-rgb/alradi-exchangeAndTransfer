@@ -161,7 +161,51 @@ export interface User {
   updatedAt: Date;
 }
 
-db.version(3).stores({
+// ============================================
+// Vehicles Module - قسم المركبات
+// ============================================
+
+export interface Vehicle {
+  id: string;
+  name: string;           // اسم المركبة
+  plateNumber?: string;   // رقم اللوحة
+  notes?: string;         // ملاحظات
+  isActive: boolean;      // نشطة/غير نشطة
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface VehicleTransaction {
+  id: string;
+  vehicleId: string;      // ربط بالمركبة
+  date: Date;
+  amount: number;         // المبلغ
+  partner: 'first' | 'second';  // الشريك الأول أو الثاني
+  paymentType: 'cash' | 'deferred';  // كاش أو آجل
+  description: string;    // البيان
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface SharedTransaction {
+  id: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface VehiclesSettings {
+  id: string;
+  firstPartnerName: string;   // اسم الشريك الأول
+  secondPartnerName: string;  // اسم الشريك الثاني
+  updatedAt: Date;
+}
+
+db.version(4).stores({
   currencies: 'id, code, name, isDefault, isActive, exchangeRate',
   vaults: 'id, currencyId',
   accounts: 'id, name, type, isActive',
@@ -172,6 +216,11 @@ db.version(3).stores({
   currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
   // جدول المستخدمين
   users: 'id, username',
+  // جداول المركبات
+  vehicles: 'id, name, plateNumber, isActive',
+  vehicleTransactions: 'id, vehicleId, partner, paymentType, date',
+  sharedTransactions: 'id, partner, paymentType, date',
+  vehiclesSettings: 'id',
 });
 
 // Helper function

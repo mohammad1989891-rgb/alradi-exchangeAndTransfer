@@ -11,7 +11,7 @@ import {
   getTotalDebtRemaining,
 } from '@/lib/localDb';
 
-type Tab = 'balances' | 'accounts' | 'transactions' | 'debts' | 'settings' | 'exchange';
+type Tab = 'balances' | 'accounts' | 'transactions' | 'debts' | 'settings' | 'exchange' | 'vehicles';
 
 interface AppState {
   // Navigation

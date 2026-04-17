@@ -2168,10 +2168,13 @@ export async function updateUser(userId: string, data: { name?: string }): Promi
 // ============================================
 
 // الحصول على جميع المركبات
+// 🔹 Fix: استخدام toArray + filter بدلاً من where('isActive').equals(1)
+// 🔸 السبب: IndexedDB يخزن boolean كـ true/false وليس 1/0
+// 🔸 where('isActive').equals(1) لا يتطابق مع true فيعيد مصفوفة فارغة
 export async function getVehicles(): Promise<Vehicle[]> {
   await initializeDatabase();
   const all = await db.table<Vehicle>('vehicles').toArray();
-    return all.filter(v => v.isActive);;
+  return all.filter(v => v.isActive);
 }
 
 // إضافة مركبة جديدة

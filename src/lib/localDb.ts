@@ -2170,7 +2170,8 @@ export async function updateUser(userId: string, data: { name?: string }): Promi
 // الحصول على جميع المركبات
 export async function getVehicles(): Promise<Vehicle[]> {
   await initializeDatabase();
-  return db.table<Vehicle>('vehicles').where('isActive').equals(1).toArray();
+  const all = await db.table<Vehicle>('vehicles').toArray();
+    return all.filter(v => v.isActive);;
 }
 
 // إضافة مركبة جديدة

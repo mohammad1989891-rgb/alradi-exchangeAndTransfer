@@ -78,3 +78,37 @@ Stage Summary:
 - ✅ تحديث القيم فوراً عند أي تغيير
 - ✅ لا يوجد تعارض مع باقي التطبيق
 - ✅ الحفاظ على جميع الميزات الحالية
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: إضافة ميزة عرض تفاصيل مساهمات الشريك عند الضغط على بطاقته
+
+Work Log:
+- تحليل الكود الحالي (VehiclesPage.tsx, VehicleDetailsModal.tsx, localDb.ts)
+- إنشاء مكون PartnerDetailsModal.tsx جديد بتصميم مطابق للتصميم الحالي:
+  - نفس نمط Dialog المستخدم في VehicleDetailsModal
+  - ألوان emerald للشريك الأول و orange للشريك الثاني
+  - عرض ملخص (إجمالي، كاش، آجل)
+  - قائمة بنود مرتبة بالتاريخ (الأحدث أولاً)
+  - عرض مصدر كل بند (مركبة مع اسمها / بند عام)
+  - حالة فارغة عند عدم وجود مساهمات
+- تحديث VehiclesPage.tsx (Patch / Incremental Update):
+  - استيراد PartnerDetailsModal و PartnerTransactionItem
+  - إضافة state: isPartnerDetailsOpen, selectedPartner
+  - إضافة handleOpenPartnerDetails و handleClosePartnerDetails
+  - إضافة useMemo partnerTransactions لجمع البنود من المركبات + البنود العامة
+  - إضافة onClick على بطاقتي الشركاء لفتح النافذة
+  - إضافة cursor-pointer على بطاقات الشركاء
+  - إضافة stopPropagation على أزرار التعديل والإدخال لمنع فتح النافذة بالخطأ
+  - إضافة مكون PartnerDetailsModal في JSX
+- التحقق من عدم وجود أخطاء TypeScript في الملفات المعدلة
+- تشغيل الخادم والتأكد من الترجمة الناجحة
+
+Stage Summary:
+- ✅ ملف جديد: src/components/exchange/PartnerDetailsModal.tsx
+- ✅ ملف معدّل: src/components/exchange/VehiclesPage.tsx
+- ✅ لا تغيير في التصميم العام (UI Freeze محفوظ)
+- ✅ لا تغيير في شكل البطاقات أو الألوان أو الخطوط
+- ✅ البيانات تتحدث مباشرة (reactive عبر useMemo)
+- ✅ تعديل جزئي فقط (Patch / Incremental Update)

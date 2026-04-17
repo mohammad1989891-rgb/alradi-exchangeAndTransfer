@@ -33,6 +33,7 @@ import { cn } from '@/lib/utils';
 import { VehicleDetailsModal, VehicleTransaction } from './VehicleDetailsModal';
 import { VehicleTransactionModal } from './VehicleTransactionModal';
 import { SharedTransactionsModal } from './SharedTransactionsModal';
+import { PartnerDetailsModal, PartnerTransactionItem } from './PartnerDetailsModal';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -125,6 +126,10 @@ export function VehiclesPage() {
 
   // 🆕 State for loading
   const [isLoading, setIsLoading] = useState(true);
+
+  // 🆕 State for Partner Details Modal
+  const [isPartnerDetailsOpen, setIsPartnerDetailsOpen] = useState(false);
+  const [selectedPartner, setSelectedPartner] = useState<'first' | 'second'>('first');
 
   // ============================================
   // 🔹 تحميل البيانات من قاعدة البيانات عند البداية
@@ -751,6 +756,61 @@ export function VehiclesPage() {
     setTempSecondName('');
   };
 
+  // ============================================
+  // 🔹 فتح نافذة تفاصيل الشريك
+  // 🔹 Additive Feature: عرض مساهمات الشريك
+  // ============================================
+  const handleOpenPartnerDetails = (partnerType: 'first' | 'second') => {
+    setSelectedPartner(partnerType);
+    setIsPartnerDetailsOpen(true);
+  };
+
+  const handleClosePartnerDetails = () => {
+    setIsPartnerDetailsOpen(false);
+  };
+
+  // ============================================
+  // 🔹 حساب بنود الشريك المحدد
+  // 🔹 تجمع من: معاملات المركبات + البنود العامة
+  // ============================================
+  const partnerTransactions = useMemo((): PartnerTransactionItem[] => {
+    const items: PartnerTransactionItem[] = [];
+    
+    // بنود من المركبات
+    for (const vehicle of vehicles) {
+      for (const tx of vehicle.transactions) {
+        if (tx.partner === selectedPartner) {
+          items.push({
+            id: tx.id,
+            date: tx.date,
+            amount: tx.amount,
+            paymentType: tx.paymentType,
+            description: tx.description,
+            source: 'vehicle',
+            vehicleName: vehicle.name,
+            vehicleId: vehicle.id,
+          });
+        }
+      }
+    }
+    
+    // بنود عامة
+    for (const tx of sharedTransactions) {
+      if (tx.partner === selectedPartner) {
+        items.push({
+          id: tx.id,
+          date: tx.date,
+          amount: tx.amount,
+          paymentType: tx.paymentType,
+          description: tx.description,
+          source: 'shared',
+        });
+      }
+    }
+    
+    return items;
+  }, [vehicles, sharedTransactions, selectedPartner]);
+
   return (
     <>
       <div className="space-y-4">
@@ -782,7 +842,7 @@ export function VehiclesPage() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
           >
-            <Card className="border-2 border-emerald-500/20 shadow-md hover:border-emerald-500/40 hover:shadow-lg transition-all">
+            <Card className="border-2 border-emerald-500/20 shadow-md hover:border-emerald-500/40 hover:shadow-lg transition-all cursor-pointer" onClick={() => !isEditingFirstPartner && handleOpenPartnerDetails('first')}>
               <CardContent className="p-3 space-y-3">
                 {/* اسم الشريك الأول مع زر التعديل */}
                 <div className="flex items-center justify-between">
@@ -799,12 +859,13 @@ export function VehiclesPage() {
                           autoFocus
                           placeholder="اسم الشريك الأول"
                           dir="rtl"
+                          onClick={(e) => e.stopPropagation()}
                         />
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
-                          onClick={() => handleSaveFirstPartner()}
+                          onClick={(e) => { e.stopPropagation(); handleSaveFirstPartner(); }}
                         >
                           <Check className="w-4 h-4" />
                         </Button>
@@ -812,7 +873,7 @@ export function VehiclesPage() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
-                          onClick={() => handleCancelFirstPartner()}
+                          onClick={(e) => { e.stopPropagation(); handleCancelFirstPartner(); }}
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -826,7 +887,7 @@ export function VehiclesPage() {
                       variant="ghost"
                       size="sm"
                       className="h-6 w-6 p-0 hover:bg-emerald-500/10"
-                      onClick={() => handleEditFirstPartner()}
+                      onClick={(e) => { e.stopPropagation(); handleEditFirstPartner(); }}
                     >
                       <Edit2 className="w-3 h-3" />
                     </Button>
@@ -850,7 +911,7 @@ export function VehiclesPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
           >
-            <Card className="border-2 border-orange-500/20 shadow-md hover:border-orange-500/40 hover:shadow-lg transition-all">
+            <Card className="border-2 border-orange-500/20 shadow-md hover:border-orange-500/40 hover:shadow-lg transition-all cursor-pointer" onClick={() => !isEditingSecondPartner && handleOpenPartnerDetails('second')}>
               <CardContent className="p-3 space-y-3">
                 {/* اسم الشريك الثاني مع زر التعديل */}
                 <div className="flex items-center justify-between">
@@ -867,12 +928,13 @@ export function VehiclesPage() {
                           autoFocus
                           placeholder="اسم الشريك الثاني"
                           dir="rtl"
+                          onClick={(e) => e.stopPropagation()}
                         />
                         <Button
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
-                          onClick={() => handleSaveSecondPartner()}
+                          onClick={(e) => { e.stopPropagation(); handleSaveSecondPartner(); }}
                         >
                           <Check className="w-4 h-4" />
                         </Button>
@@ -880,7 +942,7 @@ export function VehiclesPage() {
                           size="sm"
                           variant="ghost"
                           className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
-                          onClick={() => handleCancelSecondPartner()}
+                          onClick={(e) => { e.stopPropagation(); handleCancelSecondPartner(); }}
                         >
                           <X className="w-4 h-4" />
                         </Button>
@@ -894,7 +956,7 @@ export function VehiclesPage() {
                       variant="ghost"
                       size="sm"
                       className="h-6 w-6 p-0 hover:bg-orange-500/10"
-                      onClick={() => handleEditSecondPartner()}
+                      onClick={(e) => { e.stopPropagation(); handleEditSecondPartner(); }}
                     >
                       <Edit2 className="w-3 h-3" />
                     </Button>
@@ -1122,6 +1184,16 @@ export function VehiclesPage() {
         firstPartnerName={firstPartnerName}
         secondPartnerName={secondPartnerName}
         onSave={handleAddTransaction}
+      />
+
+      {/* 🆕 Partner Details Modal */}
+      <PartnerDetailsModal
+        isOpen={isPartnerDetailsOpen}
+        onClose={handleClosePartnerDetails}
+        partnerType={selectedPartner}
+        partnerName={selectedPartner === 'first' ? firstPartnerName : secondPartnerName}
+        totalAmount={selectedPartner === 'first' ? firstPartnerTotal : secondPartnerTotal}
+        transactions={partnerTransactions}
       />
 
       {/* Shared Transactions Modal */}

@@ -775,205 +775,143 @@ export function VehiclesPage() {
           </Button>
         </div>
 
-        {/* Main Summary Card - أصغر ومتناسق */}
-        <Card 
-          className="border-2 border-primary/20 shadow-md cursor-pointer hover:border-primary/40 hover:shadow-lg transition-all"
-          onClick={handleOpenSharedModal}
-        >
-          <CardHeader className="pb-2 pt-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Scale className="w-4 h-4 text-primary" />
-              ملخص الشراكة
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 pb-4">
-            {/* Total Balance - أصغر */}
-            <div className="text-center p-4 rounded-xl bg-gradient-to-br from-primary/10 to-primary/5 border border-primary/20">
-              <p className="text-xs text-muted-foreground mb-1">إجمالي الرصيد</p>
-              <p className={cn(
-                "text-3xl font-bold",
-                totalBalance >= 0 ? "text-emerald-500" : "text-red-500"
-              )}>
-                {toEnglishNumbers(totalBalance)}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
-              {/* Status Label: لنا / علينا */}
-              <div className={cn(
-                "inline-flex items-center gap-1.5 mt-2 px-3 py-1 rounded-full text-xs font-medium",
-                totalBalance >= 0 
-                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
-                  : "bg-red-500/10 text-red-600 dark:text-red-400"
-              )}>
-                {totalBalance >= 0 ? (
-                  <>
-                    <TrendingUp className="w-3 h-3" />
-                    <span>لنا</span>
-                  </>
-                ) : (
-                  <>
-                    <TrendingDown className="w-3 h-3" />
-                    <span>علينا</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Partner Names Section - محسن */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* First Partner */}
-              <div className="space-y-2">
+        {/* 🔹 بطاقتا الشركاء - بديل البطاقة الرئيسية */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* بطاقة الشريك الأول */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <Card className="border-2 border-emerald-500/20 shadow-md hover:border-emerald-500/40 hover:shadow-lg transition-all">
+              <CardContent className="p-3 space-y-3">
+                {/* اسم الشريك الأول مع زر التعديل */}
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">الشريك الأول</Label>
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10">
+                      <TrendingUp className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    {isEditingFirstPartner ? (
+                      <div className="flex gap-1">
+                        <Input
+                          value={tempFirstName}
+                          onChange={(e) => setTempFirstName(e.target.value)}
+                          className="text-sm h-8"
+                          autoFocus
+                          placeholder="اسم الشريك الأول"
+                          dir="rtl"
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
+                          onClick={() => handleSaveFirstPartner()}
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                          onClick={() => handleCancelFirstPartner()}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <h3 className="text-sm font-bold text-foreground">{firstPartnerName}</h3>
+                    )}
+                  </div>
                   {!isEditingFirstPartner && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0 hover:bg-primary/10"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditFirstPartner();
-                      }}
+                      className="h-6 w-6 p-0 hover:bg-emerald-500/10"
+                      onClick={() => handleEditFirstPartner()}
                     >
                       <Edit2 className="w-3 h-3" />
                     </Button>
                   )}
                 </div>
-                {isEditingFirstPartner ? (
-                  <div className="flex gap-1">
-                    <Input
-                      value={tempFirstName}
-                      onChange={(e) => setTempFirstName(e.target.value)}
-                      className="text-sm h-8"
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                      placeholder="اسم الشريك الأول"
-                      dir="rtl"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSaveFirstPartner();
-                      }}
-                    >
-                      <Check className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCancelFirstPartner();
-                      }}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="p-2 rounded-lg bg-muted/50 border border-border">
-                    <p className="font-medium text-foreground text-sm">{firstPartnerName}</p>
-                  </div>
-                )}
-              </div>
+                {/* إجمالي الشريك الأول */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">إجمالي المبالغ</p>
+                  <p className="text-2xl font-bold text-emerald-500">
+                    {toEnglishNumbers(firstPartnerTotal)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
 
-              {/* Second Partner */}
-              <div className="space-y-2">
+          {/* بطاقة الشريك الثاني */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <Card className="border-2 border-orange-500/20 shadow-md hover:border-orange-500/40 hover:shadow-lg transition-all">
+              <CardContent className="p-3 space-y-3">
+                {/* اسم الشريك الثاني مع زر التعديل */}
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs text-muted-foreground">الشريك الثاني</Label>
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-orange-500/10">
+                      <TrendingDown className="w-4 h-4 text-orange-500" />
+                    </div>
+                    {isEditingSecondPartner ? (
+                      <div className="flex gap-1">
+                        <Input
+                          value={tempSecondName}
+                          onChange={(e) => setTempSecondName(e.target.value)}
+                          className="text-sm h-8"
+                          autoFocus
+                          placeholder="اسم الشريك الثاني"
+                          dir="rtl"
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
+                          onClick={() => handleSaveSecondPartner()}
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                          onClick={() => handleCancelSecondPartner()}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <h3 className="text-sm font-bold text-foreground">{secondPartnerName}</h3>
+                    )}
+                  </div>
                   {!isEditingSecondPartner && (
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 w-6 p-0 hover:bg-primary/10"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditSecondPartner();
-                      }}
+                      className="h-6 w-6 p-0 hover:bg-orange-500/10"
+                      onClick={() => handleEditSecondPartner()}
                     >
                       <Edit2 className="w-3 h-3" />
                     </Button>
                   )}
                 </div>
-                {isEditingSecondPartner ? (
-                  <div className="flex gap-1">
-                    <Input
-                      value={tempSecondName}
-                      onChange={(e) => setTempSecondName(e.target.value)}
-                      className="text-sm h-8"
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                      placeholder="اسم الشريك الثاني"
-                      dir="rtl"
-                    />
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSaveSecondPartner();
-                      }}
-                    >
-                      <Check className="w-4 h-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleCancelSecondPartner();
-                      }}
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="p-2 rounded-lg bg-muted/50 border border-border">
-                    <p className="font-medium text-foreground text-sm">{secondPartnerName}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Partners Totals - أصغر */}
-            <div className="grid grid-cols-2 gap-3">
-              {/* First Partner Total */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingUp className="w-3 h-3 text-emerald-500" />
-                  <span className="text-xs text-muted-foreground">{firstPartnerName}</span>
+                {/* إجمالي الشريك الثاني */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">إجمالي المبالغ</p>
+                  <p className="text-2xl font-bold text-orange-500">
+                    {toEnglishNumbers(secondPartnerTotal)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
                 </div>
-                <p className="text-xl font-bold text-emerald-500">
-                  {toEnglishNumbers(firstPartnerTotal)}
-                </p>
-              </motion.div>
-
-              {/* Second Partner Total */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-                className="p-3 rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <TrendingDown className="w-3 h-3 text-orange-500" />
-                  <span className="text-xs text-muted-foreground">{secondPartnerName}</span>
-                </div>
-                <p className="text-xl font-bold text-orange-500">
-                  {toEnglishNumbers(secondPartnerTotal)}
-                </p>
-              </motion.div>
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
 
         {/* Divider between main card and vehicle cards */}
         {vehicles.length > 0 && (

@@ -1,43 +1,39 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
-import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
-import { useTheme } from 'next-themes';
-import { motion } from 'framer-motion';
-import {
-  Settings,
-  Moon,
-  Sun,
-  Palette,
-  Currency,
-  Database,
-  ChevronLeft,
-  Plus,
-  Trash2,
-  Download,
-  Upload,
-  AlertTriangle,
-  FileJson,
-  Merge,
-  Replace,
-  Lock,
-  User,
-  Eye,
-  EyeOff,
+import { useState, useMemo, useCallback, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Car, 
+  Plus, 
+  Users, 
+  DollarSign, 
+  TrendingUp, 
+  TrendingDown,
+  Scale,
+  Edit2,
+  Check,
+  X,
+  Truck,
+  Trash2
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+import { Separator } from '@/components/ui/separator';
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog';
+import { cn } from '@/lib/utils';
+import { VehicleDetailsModal, VehicleTransaction } from './VehicleDetailsModal';
+import { VehicleTransactionModal } from './VehicleTransactionModal';
+import { SharedTransactionsModal } from './SharedTransactionsModal';
+import { PartnerDetailsModal, PartnerTransactionItem } from './PartnerDetailsModal';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,864 +44,1199 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { cn } from '@/lib/utils';
-import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers } from '@/lib/localDb';
-import type { Currency as CurrencyType } from '@/types';
+import * as db from '@/lib/localDb';
 
-export function SettingsPage() {
-  const { theme, setTheme } = useTheme();
-  const { currencies, setCurrencies, vaults, accounts, transactions, debts } = useAppStore();
-  const { refreshData: refreshLocalData } = useLocalData();
+// ============================================
+// 🔹 دالة تحويل الأرقام العربية إلى إنجليزية
+// 🔹 Additive Fix: لا تغيير للمنطق المحاسبي
+// ============================================
+function toEnglishNumbers(num: number | string): string {
+  const arabicNumerals = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
+  let str = typeof num === 'number' ? num.toString() : num;
+  
+  // تحويل الأرقام العربية إلى إنجليزية
+  for (let i = 0; i < 10; i++) {
+    str = str.replace(new RegExp(arabicNumerals[i], 'g'), i.toString());
+  }
+  
+  // تنسيق الرقم مع فواصل
+  if (typeof num === 'number') {
+    return num.toLocaleString('en-US');
+  }
+  return str;
+}
+
+// Vehicle type for local state
+interface VehicleCard {
+  id: string;
+  name: string;
+  firstPartnerTotal: number;
+  secondPartnerTotal: number;
+  totalCost: number;
+  createdAt: Date;
+  transactions: VehicleTransaction[];
+}
+
+// Shared Transaction type - البنود العامة
+interface SharedTransaction {
+  id: string;
+  date: Date;
+  amount: number;
+  partner: 'first' | 'second';
+  paymentType: 'cash' | 'deferred';
+  description: string;
+  createdAt: Date;
+}
+
+export function VehiclesPage() {
   const { toast } = useToast();
   
-  const [expandedSection, setExpandedSection] = useState<string | null>('appearance');
-  const [isAddCurrencyOpen, setIsAddCurrencyOpen] = useState(false);
-  const [newCurrency, setNewCurrency] = useState({ code: '', name: '', symbol: '' });
-  const [deleteCurrency, setDeleteCurrency] = useState<CurrencyType | null>(null);
+  // State for partner names (editable)
+  const [firstPartnerName, setFirstPartnerName] = useState('الشريك الأول');
+  const [secondPartnerName, setSecondPartnerName] = useState('الشريك الثاني');
+  const [isEditingFirstPartner, setIsEditingFirstPartner] = useState(false);
+  const [isEditingSecondPartner, setIsEditingSecondPartner] = useState(false);
+  const [tempFirstName, setTempFirstName] = useState('');
+  const [tempSecondName, setTempSecondName] = useState('');
+
+  // State for vehicles list
+  const [vehicles, setVehicles] = useState<VehicleCard[]>([]);
   
-  // Backup & Restore
-  const [isExporting, setIsExporting] = useState(false);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
-  const [showImportDialog, setShowImportDialog] = useState(false);
-  const [showClearDialog, setShowClearDialog] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // State for shared transactions - البنود العامة
+  const [sharedTransactions, setSharedTransactions] = useState<SharedTransaction[]>([]);
 
-  // Password Change
-  const [oldPassword, setOldPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [showOldPassword, setShowOldPassword] = useState(false);
-  const [showNewPassword, setShowNewPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isChangingPassword, setIsChangingPassword] = useState(false);
-  const [currentUsername, setCurrentUsername] = useState('');
-  const [newUsername, setNewUsername] = useState('');
-  const [isChangingUsername, setIsChangingUsername] = useState(false);
+  // Modal states
+  const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+  const [isTransactionModalOpen, setIsTransactionModalOpen] = useState(false);
+  const [isSharedModalOpen, setIsSharedModalOpen] = useState(false);
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleCard | null>(null);
+  
+  // Delete confirmation states
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [vehicleToDelete, setVehicleToDelete] = useState<VehicleCard | null>(null);
+  
+  // Edit vehicle name states
+  const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [editingVehicleName, setEditingVehicleName] = useState('');
 
-  // Load current username on mount
+  // 🆕 State for Add Vehicle Modal
+  const [showAddVehicleModal, setShowAddVehicleModal] = useState(false);
+  const [newVehicleName, setNewVehicleName] = useState('');
+
+  // 🆕 State for loading
+  const [isLoading, setIsLoading] = useState(true);
+
+  // 🆕 State for Partner Details Modal
+  const [isPartnerDetailsOpen, setIsPartnerDetailsOpen] = useState(false);
+  const [selectedPartner, setSelectedPartner] = useState<'first' | 'second'>('first');
+
+  // ============================================
+  // 🔹 تحميل البيانات من قاعدة البيانات عند البداية
+  // 🔹 Additive Fix: حفظ واسترجاع البيانات
+  // ============================================
   useEffect(() => {
-    const savedUsername = localStorage.getItem('currentUsername');
-    if (savedUsername) {
-      setCurrentUsername(savedUsername);
-    }
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        
+        // تحميل الإعدادات
+        const settings = await db.getVehiclesSettings();
+        if (settings) {
+          setFirstPartnerName(settings.firstPartnerName);
+          setSecondPartnerName(settings.secondPartnerName);
+        }
+        
+        // تحميل المركبات
+        const vehiclesData = await db.getVehicles();
+        const vehiclesWithTransactions = await Promise.all(
+          vehiclesData.map(async (v) => {
+            const transactions = await db.getVehicleTransactions(v.id);
+            return {
+              id: v.id,
+              name: v.name,
+              firstPartnerTotal: 0,
+              secondPartnerTotal: 0,
+              totalCost: 0,
+              createdAt: v.createdAt,
+              transactions: transactions.map(t => ({
+                id: t.id,
+                vehicleId: t.vehicleId,
+                date: t.date,
+                amount: t.amount,
+                partner: t.partner,
+                paymentType: t.paymentType,
+                description: t.description,
+                createdAt: t.createdAt,
+              })),
+            };
+          })
+        );
+        
+        // حساب المجاميع لكل مركبة
+        const vehiclesWithTotals = vehiclesWithTransactions.map(v => {
+          const firstPartnerTotal = v.transactions
+            .filter(t => t.partner === 'first')
+            .reduce((sum, t) => sum + t.amount, 0);
+          const secondPartnerTotal = v.transactions
+            .filter(t => t.partner === 'second')
+            .reduce((sum, t) => sum + t.amount, 0);
+          return {
+            ...v,
+            firstPartnerTotal,
+            secondPartnerTotal,
+            totalCost: firstPartnerTotal + secondPartnerTotal,
+          };
+        });
+        
+        setVehicles(vehiclesWithTotals);
+        
+        // تحميل المعاملات المشتركة
+        const sharedData = await db.getSharedTransactions();
+        setSharedTransactions(sharedData.map(t => ({
+          id: t.id,
+          date: t.date,
+          amount: t.amount,
+          partner: t.partner,
+          paymentType: t.paymentType,
+          description: t.description,
+          createdAt: t.createdAt,
+        })));
+        
+      } catch (error) {
+        console.error('Error loading vehicles data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    
+    loadData();
   }, []);
 
-  // Statistics
-  const stats = {
-    currencies: currencies.length,
-    vaults: vaults.length,
-    accounts: accounts.length,
-    transactions: transactions.length,
-    debts: debts.length,
-  };
-
-  // Add Currency
-  const handleAddCurrency = async () => {
-    if (!newCurrency.code || !newCurrency.name || !newCurrency.symbol) return;
-
-    try {
-      const response = await fetch('/api/currencies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newCurrency),
+  // ============================================
+  // 🔹 حفظ الإعدادات عند تغيير أسماء الشركاء
+  // 🔹 Additive Fix: حفظ في قاعدة البيانات
+  // ============================================
+  useEffect(() => {
+    if (!isLoading) {
+      db.saveVehiclesSettings({
+        firstPartnerName,
+        secondPartnerName,
       });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setCurrencies([...currencies, result.data]);
-        setNewCurrency({ code: '', name: '', symbol: '' });
-        setIsAddCurrencyOpen(false);
-      }
-    } catch (error) {
-      console.error('Error adding currency:', error);
     }
+  }, [firstPartnerName, secondPartnerName, isLoading]);
+
+  // ============================================
+  // 🔹 حسابات تلقائية للبطاقة الرئيسية
+  // 🔹 المعادلة: إجمالي الرصيد = الشريك الأول - الشريك الثاني
+  // 🔹 موجب = لنا | سالب = علينا
+  // 🔹 تشمل: معاملات المركبات + البنود العامة
+  // ============================================
+  const calculatedTotals = useMemo(() => {
+    // إجمالي معاملات المركبات
+    const vehiclesFirstTotal = vehicles.reduce((sum, v) => sum + v.firstPartnerTotal, 0);
+    const vehiclesSecondTotal = vehicles.reduce((sum, v) => sum + v.secondPartnerTotal, 0);
+    
+    // إجمالي البنود العامة
+    const sharedFirstTotal = sharedTransactions
+      .filter(t => t.partner === 'first')
+      .reduce((sum, t) => sum + t.amount, 0);
+    const sharedSecondTotal = sharedTransactions
+      .filter(t => t.partner === 'second')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    // الإجمالي الكلي
+    const firstPartnerTotal = vehiclesFirstTotal + sharedFirstTotal;
+    const secondPartnerTotal = vehiclesSecondTotal + sharedSecondTotal;
+    const totalBalance = firstPartnerTotal - secondPartnerTotal; // الشريك الأول - الشريك الثاني
+    
+    return { firstPartnerTotal, secondPartnerTotal, totalBalance };
+  }, [vehicles, sharedTransactions]);
+
+  const { totalBalance, firstPartnerTotal, secondPartnerTotal } = calculatedTotals;
+
+  // Generate unique ID
+  const generateId = () => 'vehicle_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+
+  // ============================================
+  // 🔹 حسابات المركبة الواحدة
+  // ============================================
+  const calculateVehicleTotals = useCallback((transactions: VehicleTransaction[]) => {
+    const firstPartnerTotal = transactions
+      .filter(t => t.partner === 'first')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    const secondPartnerTotal = transactions
+      .filter(t => t.partner === 'second')
+      .reduce((sum, t) => sum + t.amount, 0);
+    
+    return { firstPartnerTotal, secondPartnerTotal };
+  }, []);
+
+  // ============================================
+  // 🔹 إضافة مركبة جديدة عبر Modal
+  // 🔹 Additive Fix: UI Enhancement
+  // ============================================
+  
+  // فتح نافذة الإضافة
+  const handleOpenAddVehicleModal = () => {
+    setNewVehicleName('');
+    setShowAddVehicleModal(true);
   };
-
-  // Delete Currency
-  const handleDeleteCurrency = async () => {
-    if (!deleteCurrency) return;
-
-    try {
-      await fetch(`/api/currencies?id=${deleteCurrency.id}`, { method: 'DELETE' });
-      setCurrencies(currencies.filter(c => c.id !== deleteCurrency.id));
-      setDeleteCurrency(null);
-    } catch (error) {
-      console.error('Error deleting currency:', error);
-    }
-  };
-
-  // Export Data
-  const handleExportData = async () => {
-    setIsExporting(true);
-    try {
-      const data = await exportAllData();
-      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `backup-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-
-      toast({
-        title: 'تم التصدير',
-        description: 'تم إنشاء النسخة الاحتياطية بنجاح',
-      });
-    } catch (error) {
-      console.error('Error exporting data:', error);
-      toast({
-        title: 'خطأ',
-        description: 'حدث خطأ أثناء التصدير',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
-  // Import Data
-  const handleImportData = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setIsImporting(true);
-    try {
-      const text = await file.text();
-      const data = JSON.parse(text);
-      const result = await importAllData(data, importMode === 'merge');
-
-      if (result.success) {
-        await refreshLocalData();
-        toast({
-          title: 'تم الاستيراد',
-          description: result.message,
-        });
-      } else {
-        toast({
-          title: 'خطأ',
-          description: result.message,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      console.error('Error importing data:', error);
+  
+  // حفظ المركبة الجديدة
+  const handleSaveNewVehicle = async () => {
+    if (!newVehicleName.trim()) {
       toast({
         title: 'خطأ',
-        description: 'فشل قراءة الملف. تأكد من صحة الملف',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsImporting(false);
-      setShowImportDialog(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-    }
-  };
-
-  // Clear Data
-  const handleClearData = async () => {
-    try {
-      const result = await clearAllData();
-      if (result.success) {
-        await refreshLocalData();
-        toast({
-          title: 'تم المسح',
-          description: result.message,
-        });
-      } else {
-        toast({
-          title: 'خطأ',
-          description: result.message,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      console.error('Error clearing data:', error);
-      toast({
-        title: 'خطأ',
-        description: 'حدث خطأ أثناء مسح البيانات',
-        variant: 'destructive',
-      });
-    } finally {
-      setShowClearDialog(false);
-    }
-  };
-
-  // Change Password
-  const handleChangePassword = async () => {
-    if (!oldPassword || !newPassword || !confirmPassword) {
-      toast({
-        title: 'خطأ',
-        description: 'يرجى ملء جميع الحقول',
+        description: 'يرجى إدخال اسم المركبة',
         variant: 'destructive',
       });
       return;
     }
+    
+    const newVehicle: VehicleCard = {
+      id: generateId(),
+      name: newVehicleName.trim(),
+      firstPartnerTotal: 0,
+      secondPartnerTotal: 0,
+      totalCost: 0,
+      createdAt: new Date(),
+      transactions: [],
+    };
+    
+    // حفظ في قاعدة البيانات
+    await db.addVehicle({
+      id: newVehicle.id,
+      name: newVehicle.name,
+      plateNumber: '',
+      notes: '',
+      isActive: true,
+    });
+    
+    setVehicles([...vehicles, newVehicle]);
+    setShowAddVehicleModal(false);
+    setNewVehicleName('');
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: `تم إضافة "${newVehicle.name}" بنجاح`,
+    });
+  };
 
-    if (newPassword !== confirmPassword) {
-      toast({
-        title: 'خطأ',
-        description: 'كلمة المرور الجديدة غير متطابقة',
-        variant: 'destructive',
-      });
-      return;
-    }
+  // Open vehicle details
+  const handleVehicleClick = (vehicle: VehicleCard) => {
+    setSelectedVehicle(vehicle);
+    setIsDetailsModalOpen(true);
+  };
 
-    if (newPassword.length < 4) {
-      toast({
-        title: 'خطأ',
-        description: 'كلمة المرور يجب أن تكون 4 أحرف على الأقل',
-        variant: 'destructive',
-      });
-      return;
-    }
+  // Open transaction modal from details modal
+  const handleOpenTransactionModal = () => {
+    setIsTransactionModalOpen(true);
+  };
 
-    setIsChangingPassword(true);
-    try {
-      const userId = localStorage.getItem('currentUserId');
-      if (!userId) {
-        toast({
-          title: 'خطأ',
-          description: 'لم يتم العثور على المستخدم',
-          variant: 'destructive',
-        });
-        return;
+  // Close all modals
+  const handleCloseDetailsModal = () => {
+    setIsDetailsModalOpen(false);
+  };
+
+  const handleCloseTransactionModal = () => {
+    setIsTransactionModalOpen(false);
+  };
+
+  // Open shared transactions modal
+  const handleOpenSharedModal = () => {
+    setIsSharedModalOpen(true);
+  };
+
+  // Close shared transactions modal
+  const handleCloseSharedModal = () => {
+    setIsSharedModalOpen(false);
+  };
+
+  // ============================================
+  // 🔹 إضافة/تعديل/حذف المعاملات
+  // ============================================
+  
+  // إضافة معاملة جديدة
+  const handleAddTransaction = async (data: Omit<VehicleTransaction, 'id' | 'vehicleId' | 'createdAt'>) => {
+    if (!selectedVehicle) return;
+    
+    const newTransaction: VehicleTransaction = {
+      id: generateId(),
+      vehicleId: selectedVehicle.id,
+      date: data.date,
+      amount: data.amount,
+      partner: data.partner,
+      paymentType: data.paymentType,
+      description: data.description,
+      createdAt: new Date(),
+    };
+    
+    // حفظ في قاعدة البيانات
+    await db.addVehicleTransaction({
+      id: newTransaction.id,
+      vehicleId: newTransaction.vehicleId,
+      date: newTransaction.date,
+      amount: newTransaction.amount,
+      partner: newTransaction.partner,
+      paymentType: newTransaction.paymentType,
+      description: newTransaction.description,
+    });
+    
+    // تحديث المركبة بالمعاملة الجديدة
+    setVehicles(vehicles.map(v => {
+      if (v.id === selectedVehicle.id) {
+        const newTransactions = [...v.transactions, newTransaction];
+        const totals = calculateVehicleTotals(newTransactions);
+        return {
+          ...v,
+          transactions: newTransactions,
+          ...totals,
+        };
       }
+      return v;
+    }));
+    
+    // تحديث المركبة المحددة
+    setSelectedVehicle(prev => {
+      if (!prev) return null;
+      const newTransactions = [...prev.transactions, newTransaction];
+      const totals = calculateVehicleTotals(newTransactions);
+      return {
+        ...prev,
+        transactions: newTransactions,
+        ...totals,
+      };
+    });
+    
+    // تحديث الصندوق للمعاملات الكاش
+    if (data.paymentType === 'cash') {
+      await updateCashbox(data.amount, data.partner, true);
+    }
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: 'تم إضافة البند بنجاح',
+    });
+  };
+  
+  // تعديل معاملة
+  const handleUpdateTransaction = async (updatedTransaction: VehicleTransaction) => {
+    if (!selectedVehicle) return;
+    
+    // إيجاد المعاملة القديمة
+    const oldTransaction = selectedVehicle.transactions.find(t => t.id === updatedTransaction.id);
+    
+    // تحديث في قاعدة البيانات
+    await db.updateVehicleTransaction(updatedTransaction.id, {
+      date: updatedTransaction.date,
+      amount: updatedTransaction.amount,
+      partner: updatedTransaction.partner,
+      paymentType: updatedTransaction.paymentType,
+      description: updatedTransaction.description,
+    });
+    
+    // تحديث المركبة
+    setVehicles(vehicles.map(v => {
+      if (v.id === selectedVehicle.id) {
+        const newTransactions = v.transactions.map(t => 
+          t.id === updatedTransaction.id ? updatedTransaction : t
+        );
+        const totals = calculateVehicleTotals(newTransactions);
+        return {
+          ...v,
+          transactions: newTransactions,
+          ...totals,
+        };
+      }
+      return v;
+    }));
+    
+    // تحديث المركبة المحددة
+    setSelectedVehicle(prev => {
+      if (!prev) return null;
+      const newTransactions = prev.transactions.map(t => 
+        t.id === updatedTransaction.id ? updatedTransaction : t
+      );
+      const totals = calculateVehicleTotals(newTransactions);
+      return {
+        ...prev,
+        transactions: newTransactions,
+        ...totals,
+      };
+    });
+    
+    // تحديث الصندوق إذا تغيرت المعاملة
+    if (oldTransaction) {
+      // عكس تأثير المعاملة القديمة
+      if (oldTransaction.paymentType === 'cash') {
+        await updateCashbox(oldTransaction.amount, oldTransaction.partner, false);
+      }
+      // إضافة تأثير المعاملة الجديدة
+      if (updatedTransaction.paymentType === 'cash') {
+        await updateCashbox(updatedTransaction.amount, updatedTransaction.partner, true);
+      }
+    }
+    
+    toast({
+      title: 'تم التعديل',
+      description: 'تم تعديل البند بنجاح',
+    });
+  };
+  
+  // حذف معاملة
+  const handleDeleteTransaction = async (transactionId: string) => {
+    if (!selectedVehicle) return;
+    
+    // إيجاد المعاملة قبل الحذف
+    const transaction = selectedVehicle.transactions.find(t => t.id === transactionId);
+    
+    // حذف من قاعدة البيانات
+    await db.deleteVehicleTransaction(transactionId);
+    
+    // تحديث المركبة
+    setVehicles(vehicles.map(v => {
+      if (v.id === selectedVehicle.id) {
+        const newTransactions = v.transactions.filter(t => t.id !== transactionId);
+        const totals = calculateVehicleTotals(newTransactions);
+        return {
+          ...v,
+          transactions: newTransactions,
+          ...totals,
+        };
+      }
+      return v;
+    }));
+    
+    
+    // تحديث المركبة المحددة
+    setSelectedVehicle(prev => {
+      if (!prev) return null;
+      const newTransactions = prev.transactions.filter(t => t.id !== transactionId);
+      const totals = calculateVehicleTotals(newTransactions);
+      return {
+        ...prev,
+        transactions: newTransactions,
+        ...totals,
+      };
+    });
+    
+    // عكس تأثير الصندوق للحذف
+    if (transaction && transaction.paymentType === 'cash') {
+      await updateCashbox(transaction.amount, transaction.partner, false);
+    }
+    
+    toast({
+      title: 'تم الحذف',
+      description: 'تم حذف البند بنجاح',
+    });
+  };
 
-      const result = await changePassword(userId, oldPassword, newPassword);
+  // ============================================
+  // 🔹 تعديل وحذف المركبات
+  // ============================================
+  
+  // Start editing vehicle name
+  const handleStartEditVehicleName = (e: React.MouseEvent, vehicle: VehicleCard) => {
+    e.stopPropagation();
+    setEditingVehicleId(vehicle.id);
+    setEditingVehicleName(vehicle.name);
+  };
+  
+  // Save vehicle name
+  const handleSaveVehicleName = async (vehicleId: string) => {
+    if (editingVehicleName.trim()) {
+      setVehicles(vehicles.map(v => 
+        v.id === vehicleId ? { ...v, name: editingVehicleName.trim() } : v
+      ));
       
-      if (result.success) {
-        toast({
-          title: 'تم بنجاح',
-          description: result.message,
-        });
-        setOldPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-      } else {
-        toast({
-          title: 'خطأ',
-          description: result.message,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
-      toast({
-        title: 'خطأ',
-        description: 'حدث خطأ غير متوقع',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsChangingPassword(false);
-    }
-  };
-
-  // Change Username
-  const handleChangeUsername = async () => {
-    if (!newUsername.trim()) {
-      toast({
-        title: 'خطأ',
-        description: 'يرجى إدخال اسم المستخدم الجديد',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    if (newUsername.length < 3) {
-      toast({
-        title: 'خطأ',
-        description: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsChangingUsername(true);
-    try {
-      const userId = localStorage.getItem('currentUserId');
-      if (!userId) {
-        toast({
-          title: 'خطأ',
-          description: 'لم يتم العثور على المستخدم',
-          variant: 'destructive',
-        });
-        return;
-      }
-
-      const result = await changeUsername(userId, newUsername);
+      // تحديث في قاعدة البيانات
+      await db.updateVehicle(vehicleId, { name: editingVehicleName.trim() });
       
-      if (result.success) {
-        toast({
-          title: 'تم بنجاح',
-          description: result.message,
-        });
-        setCurrentUsername(newUsername);
-        setNewUsername('');
-      } else {
-        toast({
-          title: 'خطأ',
-          description: result.message,
-          variant: 'destructive',
-        });
-      }
-    } catch (error) {
       toast({
-        title: 'خطأ',
-        description: 'حدث خطأ غير متوقع',
-        variant: 'destructive',
+        title: 'تم التعديل',
+        description: 'تم تحديث اسم المركبة',
       });
-    } finally {
-      setIsChangingUsername(false);
     }
+    setEditingVehicleId(null);
+    setEditingVehicleName('');
+  };
+  
+  // Cancel editing vehicle name
+  const handleCancelEditVehicleName = () => {
+    setEditingVehicleId(null);
+    setEditingVehicleName('');
+  };
+  
+  // Request delete vehicle
+  const handleRequestDeleteVehicle = (e: React.MouseEvent, vehicle: VehicleCard) => {
+    e.stopPropagation();
+    setVehicleToDelete(vehicle);
+    setShowDeleteDialog(true);
+  };
+  
+  // Confirm delete vehicle
+  const handleConfirmDeleteVehicle = async () => {
+    if (vehicleToDelete) {
+      // عكس تأثير جميع المعاملات الكاش قبل الحذف
+      for (const tx of vehicleToDelete.transactions) {
+        if (tx.paymentType === 'cash') {
+          await updateCashbox(tx.amount, tx.partner, false);
+        }
+      }
+      
+      // حذف المركبة من قاعدة البيانات
+      await db.deleteVehicle(vehicleToDelete.id);
+      
+      // حذف المركبة مع جميع معاملاتها
+      setVehicles(vehicles.filter(v => v.id !== vehicleToDelete.id));
+      toast({
+        title: 'تم الحذف',
+        description: `تم حذف "${vehicleToDelete.name}" وجميع معاملاتها`,
+      });
+    }
+    setShowDeleteDialog(false);
+    setVehicleToDelete(null);
+  };
+  
+  // Cancel delete vehicle
+  const handleCancelDeleteVehicle = () => {
+    setShowDeleteDialog(false);
+    setVehicleToDelete(null);
   };
 
-  const sections = [
-    {
-      id: 'account',
-      title: 'الحساب',
-      icon: User,
-      content: (
-        <div className="space-y-4">
-          {/* Change Username */}
-          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <User className="w-5 h-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="font-medium">تغيير اسم المستخدم</p>
-                <p className="text-xs text-muted-foreground">اسم المستخدم الحالي: {currentUsername || localStorage.getItem('currentUsername') || 'admin'}</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Input
-                placeholder="اسم المستخدم الجديد"
-                value={newUsername}
-                onChange={(e) => setNewUsername(e.target.value)}
-                className="flex-1"
-              />
-              <Button
-                onClick={handleChangeUsername}
-                disabled={isChangingUsername || !newUsername.trim()}
-                className="bg-blue-500 hover:bg-blue-600"
-              >
-                {isChangingUsername ? '...' : 'حفظ'}
-              </Button>
-            </div>
-          </div>
+  // ============================================
+  // 🔹 البنود العامة - إضافة/تعديل/حذف مع تكامل الصندوق
+  // 🔸 الشريك الأول (لنا) كاش = خصم من الصندوق
+  // 🔸 الشريك الثاني (علينا) كاش = إضافة للصندوق
+  // ============================================
+  
+  // تحديث الصندوق
+  const updateCashbox = async (amount: number, partner: 'first' | 'second', isAdd: boolean) => {
+    try {
+      // الشريك الأول (لنا) = خصم من الصندوق عند الإضافة
+      // الشريك الثاني (علينا) = إضافة للصندوق عند الإضافة
+      const direction = partner === 'first' ? -1 : 1; // first = خصم, second = إضافة
+      const multiplier = isAdd ? direction : -direction; // عكس العملية عند الحذف
+      
+      const balanceDelta = amount * multiplier;
+      await db.updateVaultBalance('cur_usd', balanceDelta);
+    } catch (error) {
+      console.error('Error updating cashbox:', error);
+    }
+  };
+  
+  // إضافة بند عام
+  const handleAddSharedTransaction = async (data: Omit<SharedTransaction, 'id' | 'createdAt'>) => {
+    const newTransaction: SharedTransaction = {
+      id: 'shared_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+      date: data.date,
+      amount: data.amount,
+      partner: data.partner,
+      paymentType: data.paymentType,
+      description: data.description,
+      createdAt: new Date(),
+    };
+    
+    // حفظ في قاعدة البيانات
+    await db.addSharedTransaction({
+      id: newTransaction.id,
+      date: newTransaction.date,
+      amount: newTransaction.amount,
+      partner: newTransaction.partner,
+      paymentType: newTransaction.paymentType,
+      description: newTransaction.description,
+    });
+    
+    setSharedTransactions([...sharedTransactions, newTransaction]);
+    
+    // تحديث الصندوق للمعاملات الكاش
+    if (data.paymentType === 'cash') {
+      await updateCashbox(data.amount, data.partner, true);
+    }
+    
+    toast({
+      title: 'تمت الإضافة',
+      description: 'تم إضافة البند العام بنجاح',
+    });
+  };
+  
+  // تعديل بند عام
+  const handleUpdateSharedTransaction = async (updatedTransaction: SharedTransaction) => {
+    const oldTransaction = sharedTransactions.find(t => t.id === updatedTransaction.id);
+    
+    // تحديث في قاعدة البيانات
+    await db.updateSharedTransaction(updatedTransaction.id, {
+      date: updatedTransaction.date,
+      amount: updatedTransaction.amount,
+      partner: updatedTransaction.partner,
+      paymentType: updatedTransaction.paymentType,
+      description: updatedTransaction.description,
+    });
+    
+    setSharedTransactions(sharedTransactions.map(t => 
+      t.id === updatedTransaction.id ? updatedTransaction : t
+    ));
+    
+    // تحديث الصندوق إذا تغيرت المعاملة
+    if (oldTransaction) {
+      // عكس تأثير المعاملة القديمة
+      if (oldTransaction.paymentType === 'cash') {
+        await updateCashbox(oldTransaction.amount, oldTransaction.partner, false);
+      }
+      // إضافة تأثير المعاملة الجديدة
+      if (updatedTransaction.paymentType === 'cash') {
+        await updateCashbox(updatedTransaction.amount, updatedTransaction.partner, true);
+      }
+    }
+    
+    toast({
+      title: 'تم التعديل',
+      description: 'تم تعديل البند العام بنجاح',
+    });
+  };
+  
+  // حذف بند عام
+  const handleDeleteSharedTransaction = async (transactionId: string) => {
+    const transaction = sharedTransactions.find(t => t.id === transactionId);
+    
+    // حذف من قاعدة البيانات
+    await db.deleteSharedTransaction(transactionId);
+    
+    setSharedTransactions(sharedTransactions.filter(t => t.id !== transactionId));
+    
+    // عكس تأثير الصندوق للحذف
+    if (transaction && transaction.paymentType === 'cash') {
+      await updateCashbox(transaction.amount, transaction.partner, false);
+    }
+    
+    toast({
+      title: 'تم الحذف',
+      description: 'تم حذف البند العام بنجاح',
+    });
+  };
 
-          {/* Change Password */}
-          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <Lock className="w-5 h-5 text-emerald-500" />
-              </div>
-              <div>
-                <p className="font-medium">تغيير كلمة المرور</p>
-                <p className="text-xs text-muted-foreground">يُنصح باستخدام كلمة مرور قوية</p>
-              </div>
-            </div>
-            
-            {/* Old Password */}
-            <div className="relative">
-              <Input
-                type={showOldPassword ? 'text' : 'password'}
-                placeholder="كلمة المرور الحالية"
-                value={oldPassword}
-                onChange={(e) => setOldPassword(e.target.value)}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowOldPassword(!showOldPassword)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+  // ============================================
+  // 🔹 تعديل أسماء الشركاء - تحسين UX
+  // 🔹 Additive Fix: واجهة أوضح
+  // ============================================
+  
+  const handleEditFirstPartner = () => {
+    setTempFirstName(firstPartnerName);
+    setIsEditingFirstPartner(true);
+  };
 
-            {/* New Password */}
-            <div className="relative">
-              <Input
-                type={showNewPassword ? 'text' : 'password'}
-                placeholder="كلمة المرور الجديدة"
-                value={newPassword}
-                onChange={(e) => setNewPassword(e.target.value)}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowNewPassword(!showNewPassword)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+  const handleEditSecondPartner = () => {
+    setTempSecondName(secondPartnerName);
+    setIsEditingSecondPartner(true);
+  };
 
-            {/* Confirm Password */}
-            <div className="relative">
-              <Input
-                type={showConfirmPassword ? 'text' : 'password'}
-                placeholder="تأكيد كلمة المرور الجديدة"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="pr-10"
-              />
-              <button
-                type="button"
-                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-              >
-                {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
+  const handleSaveFirstPartner = () => {
+    if (tempFirstName.trim()) {
+      setFirstPartnerName(tempFirstName.trim());
+    }
+    setIsEditingFirstPartner(false);
+  };
 
-            <Button
-              onClick={handleChangePassword}
-              disabled={isChangingPassword || !oldPassword || !newPassword || !confirmPassword}
-              className="w-full bg-emerald-500 hover:bg-emerald-600"
-            >
-              {isChangingPassword ? 'جاري الحفظ...' : 'تغيير كلمة المرور'}
-            </Button>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'appearance',
-      title: 'المظهر',
-      icon: Palette,
-      content: (
-        <div className="space-y-4">
-          {/* Theme Toggle */}
-          <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
-            <div className="flex items-center gap-3">
-              {theme === 'dark' ? (
-                <Moon className="w-5 h-5 text-blue-400" />
-              ) : (
-                <Sun className="w-5 h-5 text-amber-500" />
-              )}
-              <div>
-                <p className="font-medium">الوضع الليلي</p>
-                <p className="text-xs text-muted-foreground">
-                  {theme === 'dark' ? 'مفعل' : 'غير مفعل'}
-                </p>
-              </div>
-            </div>
-            <Switch
-              checked={theme === 'dark'}
-              onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
-            />
-          </div>
+  const handleSaveSecondPartner = () => {
+    if (tempSecondName.trim()) {
+      setSecondPartnerName(tempSecondName.trim());
+    }
+    setIsEditingSecondPartner(false);
+  };
 
-          {/* Color Theme */}
-          <div className="p-4 rounded-xl bg-muted/50">
-            <p className="font-medium mb-3">ألوان التمييز</p>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center">
-                <div className="w-10 h-10 rounded-full bg-emerald-500 mx-auto mb-1" />
-                <p className="text-xs">لنا</p>
-              </div>
-              <div className="text-center">
-                <div className="w-10 h-10 rounded-full bg-red-500 mx-auto mb-1" />
-                <p className="text-xs">علينا</p>
-              </div>
-              <div className="text-center">
-                <div className="w-10 h-10 rounded-full bg-amber-500 mx-auto mb-1" />
-                <p className="text-xs">ديون</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'currencies',
-      title: 'إدارة العملات',
-      icon: Currency,
-      content: (
-        <div className="space-y-4">
-          {/* Currency List */}
-          <div className="space-y-2 max-h-60 overflow-y-auto">
-            {currencies.map((currency) => (
-              <motion.div
-                key={currency.id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center font-bold">
-                    {currency.symbol}
-                  </div>
-                  <div>
-                    <p className="font-medium">{currency.name}</p>
-                    <p className="text-xs text-muted-foreground">{currency.code}</p>
-                  </div>
-                  {currency.isDefault && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">
-                      افتراضي
-                    </span>
-                  )}
-                </div>
-                {!currency.isDefault && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setDeleteCurrency(currency)}
-                    className="text-red-500 hover:text-red-600"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
-                )}
-              </motion.div>
-            ))}
-          </div>
+  const handleCancelFirstPartner = () => {
+    setIsEditingFirstPartner(false);
+    setTempFirstName('');
+  };
 
-          {/* Add Currency Button */}
-          <Dialog open={isAddCurrencyOpen} onOpenChange={setIsAddCurrencyOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="w-full gap-2">
-                <Plus className="w-4 h-4" />
-                إضافة عملة جديدة
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-sm">
-              <DialogHeader>
-                <DialogTitle>إضافة عملة جديدة</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4 mt-4">
-                <div className="space-y-2">
-                  <Label>رمز العملة</Label>
-                  <Input
-                    placeholder="USD"
-                    value={newCurrency.code}
-                    onChange={(e) => setNewCurrency({ ...newCurrency, code: e.target.value.toUpperCase() })}
-                    maxLength={3}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>اسم العملة</Label>
-                  <Input
-                    placeholder="دولار أمريكي"
-                    value={newCurrency.name}
-                    onChange={(e) => setNewCurrency({ ...newCurrency, name: e.target.value })}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>الرمز</Label>
-                  <Input
-                    placeholder="$"
-                    value={newCurrency.symbol}
-                    onChange={(e) => setNewCurrency({ ...newCurrency, symbol: e.target.value })}
-                    maxLength={3}
-                  />
-                </div>
-                <Button
-                  onClick={handleAddCurrency}
-                  disabled={!newCurrency.code || !newCurrency.name || !newCurrency.symbol}
-                  className="w-full"
-                >
-                  إضافة العملة
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
-      ),
-    },
-    {
-      id: 'backup',
-      title: 'النسخ الاحتياطي',
-      icon: FileJson,
-      content: (
-        <div className="space-y-4">
-          {/* Export Section */}
-          <div className="p-4 rounded-xl bg-muted/50">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
-                <Download className="w-5 h-5 text-emerald-500" />
-              </div>
-              <div>
-                <p className="font-medium">تصدير البيانات</p>
-                <p className="text-xs text-muted-foreground">إنشاء نسخة احتياطية</p>
-              </div>
-            </div>
-            <Button
-              onClick={handleExportData}
-              disabled={isExporting}
-              className="w-full bg-emerald-500 hover:bg-emerald-600"
-            >
-              {isExporting ? 'جاري التصدير...' : 'تصدير النسخة الاحتياطية'}
-            </Button>
-          </div>
+  const handleCancelSecondPartner = () => {
+    setIsEditingSecondPartner(false);
+    setTempSecondName('');
+  };
 
-          {/* Import Section */}
-          <div className="p-4 rounded-xl bg-muted/50">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
-                <Upload className="w-5 h-5 text-blue-500" />
-              </div>
-              <div>
-                <p className="font-medium">استيراد البيانات</p>
-                <p className="text-xs text-muted-foreground">استعادة نسخة احتياطية</p>
-              </div>
-            </div>
-            <Button
-              onClick={() => setShowImportDialog(true)}
-              variant="outline"
-              className="w-full"
-            >
-              استيراد نسخة احتياطية
-            </Button>
-          </div>
+  // ============================================
+  // 🔹 فتح نافذة تفاصيل الشريك
+  // 🔹 Additive Feature: عرض مساهمات الشريك
+  // ============================================
+  const handleOpenPartnerDetails = (partnerType: 'first' | 'second') => {
+    setSelectedPartner(partnerType);
+    setIsPartnerDetailsOpen(true);
+  };
 
-          {/* Clear Data */}
-          <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
-                <Trash2 className="w-5 h-5 text-red-500" />
-              </div>
-              <div>
-                <p className="font-medium text-red-600 dark:text-red-400">مسح البيانات</p>
-                <p className="text-xs text-muted-foreground">حذف الحركات والديون وعمليات الصرافة</p>
-              </div>
-            </div>
-            <Button
-              onClick={() => setShowClearDialog(true)}
-              variant="destructive"
-              className="w-full"
-            >
-              مسح جميع البيانات
-            </Button>
-          </div>
-        </div>
-      ),
-    },
-    {
-      id: 'data',
-      title: 'إحصائيات البيانات',
-      icon: Database,
-      content: (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="text-center p-4 rounded-xl bg-muted/50">
-              <p className="text-2xl font-bold text-primary">{stats.currencies}</p>
-              <p className="text-xs text-muted-foreground">عملة</p>
-            </div>
-            <div className="text-center p-4 rounded-xl bg-muted/50">
-              <p className="text-2xl font-bold text-primary">{stats.vaults}</p>
-              <p className="text-xs text-muted-foreground">صندوق</p>
-            </div>
-            <div className="text-center p-4 rounded-xl bg-muted/50">
-              <p className="text-2xl font-bold text-primary">{stats.accounts}</p>
-              <p className="text-xs text-muted-foreground">حساب</p>
-            </div>
-            <div className="text-center p-4 rounded-xl bg-muted/50">
-              <p className="text-2xl font-bold text-primary">{stats.transactions}</p>
-              <p className="text-xs text-muted-foreground">حركة</p>
-            </div>
-            <div className="text-center p-4 rounded-xl bg-muted/50 col-span-2">
-              <p className="text-2xl font-bold text-primary">{stats.debts}</p>
-              <p className="text-xs text-muted-foreground">دين</p>
-            </div>
-          </div>
-        </div>
-      ),
-    },
-  ];
+  const handleClosePartnerDetails = () => {
+    setIsPartnerDetailsOpen(false);
+  };
+
+  // ============================================
+  // 🔹 حساب بنود الشريك المحدد
+  // 🔹 تجمع من: معاملات المركبات + البنود العامة
+  // ============================================
+  const partnerTransactions = useMemo((): PartnerTransactionItem[] => {
+    const items: PartnerTransactionItem[] = [];
+    
+    // بنود من المركبات
+    for (const vehicle of vehicles) {
+      for (const tx of vehicle.transactions) {
+        if (tx.partner === selectedPartner) {
+          items.push({
+            id: tx.id,
+            date: tx.date,
+            amount: tx.amount,
+            paymentType: tx.paymentType,
+            description: tx.description,
+            source: 'vehicle',
+            vehicleName: vehicle.name,
+            vehicleId: vehicle.id,
+          });
+        }
+      }
+    }
+    
+    // بنود عامة
+    for (const tx of sharedTransactions) {
+      if (tx.partner === selectedPartner) {
+        items.push({
+          id: tx.id,
+          date: tx.date,
+          amount: tx.amount,
+          paymentType: tx.paymentType,
+          description: tx.description,
+          source: 'shared',
+        });
+      }
+    }
+    
+    return items;
+  }, [vehicles, sharedTransactions, selectedPartner]);
 
   return (
-    <div className="space-y-6 pb-4">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
-          <Settings className="w-6 h-6 text-primary" />
+    <>
+      <div className="space-y-4">
+        {/* Header with Add Button */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-xl bg-primary/10">
+              <Car className="w-6 h-6 text-primary" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-foreground">المركبات</h1>
+              <p className="text-xs text-muted-foreground">إدارة شراكات المركبات</p>
+            </div>
+          </div>
+          
+          <Button 
+            className="gap-2 bg-primary hover:bg-primary/90"
+            onClick={handleOpenAddVehicleModal}
+          >
+            <Plus className="w-4 h-4" />
+            <span>إضافة مركبة</span>
+          </Button>
         </div>
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">الإعدادات</h1>
-          <p className="text-sm text-muted-foreground">تخصيص التطبيق</p>
-        </div>
-      </div>
 
-      {/* Settings Sections */}
-      <div className="space-y-3">
-        {sections.map((section) => {
-          const Icon = section.icon;
-          const isExpanded = expandedSection === section.id;
-
-          return (
-            <motion.div
-              key={section.id}
-              initial={false}
-              className="rounded-2xl bg-card border border-border overflow-hidden"
-            >
-              {/* Section Header */}
-              <button
-                onClick={() => setExpandedSection(isExpanded ? null : section.id)}
-                className="w-full flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center">
-                    <Icon className="w-5 h-5 text-primary" />
+        {/* 🔹 بطاقتا الشركاء - بديل البطاقة الرئيسية */}
+        <div className="grid grid-cols-2 gap-3">
+          {/* بطاقة الشريك الأول */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <Card className="border-2 border-emerald-500/20 shadow-md hover:border-emerald-500/40 hover:shadow-lg transition-all cursor-pointer" onClick={() => !isEditingFirstPartner && handleOpenPartnerDetails('first')}>
+              <CardContent className="p-3 space-y-3">
+                {/* اسم الشريك الأول مع زر التعديل */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-emerald-500/10">
+                      <TrendingUp className="w-4 h-4 text-emerald-500" />
+                    </div>
+                    {isEditingFirstPartner ? (
+                      <div className="flex gap-1">
+                        <Input
+                          value={tempFirstName}
+                          onChange={(e) => setTempFirstName(e.target.value)}
+                          className="text-sm h-8"
+                          autoFocus
+                          placeholder="اسم الشريك الأول"
+                          dir="rtl"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
+                          onClick={(e) => { e.stopPropagation(); handleSaveFirstPartner(); }}
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                          onClick={(e) => { e.stopPropagation(); handleCancelFirstPartner(); }}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <h3 className="text-sm font-bold text-foreground">{firstPartnerName}</h3>
+                    )}
                   </div>
-                  <span className="font-medium">{section.title}</span>
-                </div>
-                <ChevronLeft
-                  className={cn(
-                    'w-5 h-5 text-muted-foreground transition-transform duration-200',
-                    isExpanded && '-rotate-90'
+                  {!isEditingFirstPartner && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 hover:bg-emerald-500/10"
+                      onClick={(e) => { e.stopPropagation(); handleEditFirstPartner(); }}
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </Button>
                   )}
-                />
-              </button>
-
-              {/* Section Content */}
-              <motion.div
-                initial={false}
-                animate={{
-                  height: isExpanded ? 'auto' : 0,
-                  opacity: isExpanded ? 1 : 0,
-                }}
-                transition={{ duration: 0.2 }}
-                className="overflow-hidden"
-              >
-                <div className="p-4 pt-0">
-                  {section.content}
                 </div>
-              </motion.div>
+                {/* إجمالي الشريك الأول */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-500/5 border border-emerald-500/20 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">إجمالي المبالغ</p>
+                  <p className="text-2xl font-bold text-emerald-500">
+                    {toEnglishNumbers(firstPartnerTotal)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+
+          {/* بطاقة الشريك الثاني */}
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <Card className="border-2 border-orange-500/20 shadow-md hover:border-orange-500/40 hover:shadow-lg transition-all cursor-pointer" onClick={() => !isEditingSecondPartner && handleOpenPartnerDetails('second')}>
+              <CardContent className="p-3 space-y-3">
+                {/* اسم الشريك الثاني مع زر التعديل */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-orange-500/10">
+                      <TrendingDown className="w-4 h-4 text-orange-500" />
+                    </div>
+                    {isEditingSecondPartner ? (
+                      <div className="flex gap-1">
+                        <Input
+                          value={tempSecondName}
+                          onChange={(e) => setTempSecondName(e.target.value)}
+                          className="text-sm h-8"
+                          autoFocus
+                          placeholder="اسم الشريك الثاني"
+                          dir="rtl"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-emerald-500 hover:bg-emerald-50"
+                          onClick={(e) => { e.stopPropagation(); handleSaveSecondPartner(); }}
+                        >
+                          <Check className="w-4 h-4" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-red-500 hover:bg-red-50"
+                          onClick={(e) => { e.stopPropagation(); handleCancelSecondPartner(); }}
+                        >
+                          <X className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <h3 className="text-sm font-bold text-foreground">{secondPartnerName}</h3>
+                    )}
+                  </div>
+                  {!isEditingSecondPartner && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 hover:bg-orange-500/10"
+                      onClick={(e) => { e.stopPropagation(); handleEditSecondPartner(); }}
+                    >
+                      <Edit2 className="w-3 h-3" />
+                    </Button>
+                  )}
+                </div>
+                {/* إجمالي الشريك الثاني */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-500/5 border border-orange-500/20 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">إجمالي المبالغ</p>
+                  <p className="text-2xl font-bold text-orange-500">
+                    {toEnglishNumbers(secondPartnerTotal)}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">دولار أمريكي</p>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
+
+        {/* Divider between main card and vehicle cards */}
+        {vehicles.length > 0 && (
+          <div className="flex items-center gap-4 py-1">
+            <Separator className="flex-1" />
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Truck className="w-4 h-4" />
+              <span className="text-sm font-medium">المركبات ({toEnglishNumbers(vehicles.length)})</span>
+            </div>
+            <Separator className="flex-1" />
+          </div>
+        )}
+
+        {/* Vehicle Cards */}
+        <AnimatePresence>
+          {vehicles.map((vehicle, index) => (
+            <motion.div
+              key={vehicle.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ delay: index * 0.05 }}
+            >
+              <Card 
+                className="border border-border hover:border-cyan-500/50 hover:shadow-lg transition-all"
+                onClick={() => editingVehicleId !== vehicle.id && handleVehicleClick(vehicle)}
+              >
+                <CardContent className="p-3">
+                  {/* Vehicle Name with Edit/Delete Actions */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2 flex-1">
+                      <div className="p-1.5 rounded-lg bg-cyan-500/10">
+                        <Truck className="w-4 h-4 text-cyan-500" />
+                      </div>
+                      {editingVehicleId === vehicle.id ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <Input
+                            value={editingVehicleName}
+                            onChange={(e) => setEditingVehicleName(e.target.value)}
+                            className="text-sm h-8"
+                            autoFocus
+                            onClick={(e) => e.stopPropagation()}
+                            dir="rtl"
+                          />
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-emerald-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleSaveVehicleName(vehicle.id);
+                            }}
+                          >
+                            <Check className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0 text-red-500"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleCancelEditVehicleName();
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <h3 className="text-base font-bold text-foreground">{vehicle.name}</h3>
+                      )}
+                    </div>
+                    
+                    {/* Action Buttons */}
+                    {editingVehicleId !== vehicle.id && (
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                          onClick={(e) => handleStartEditVehicleName(e, vehicle)}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-red-500 hover:text-red-600 hover:bg-red-50"
+                          onClick={(e) => handleRequestDeleteVehicle(e, vehicle)}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Vehicle Stats */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {/* First Partner Total */}
+                    <div className="p-2 rounded-lg bg-emerald-500/5 border border-emerald-500/20 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">{firstPartnerName}</p>
+                      <p className="text-sm font-bold text-emerald-500">
+                        {toEnglishNumbers(vehicle.firstPartnerTotal)}
+                      </p>
+                    </div>
+
+                    {/* Second Partner Total */}
+                    <div className="p-2 rounded-lg bg-orange-500/5 border border-orange-500/20 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">{secondPartnerName}</p>
+                      <p className="text-sm font-bold text-orange-500">
+                        {toEnglishNumbers(vehicle.secondPartnerTotal)}
+                      </p>
+                    </div>
+
+                    {/* Total Cost = First + Second */}
+                    <div className="p-2 rounded-lg bg-primary/5 border border-primary/20 text-center">
+                      <p className="text-[10px] text-muted-foreground mb-0.5">التكلفة</p>
+                      <p className="text-sm font-bold text-primary">
+                        {toEnglishNumbers(vehicle.firstPartnerTotal + vehicle.secondPartnerTotal)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
             </motion.div>
-          );
-        })}
+          ))}
+        </AnimatePresence>
+
+        {/* Empty State */}
+        {vehicles.length === 0 && !isLoading && (
+          <div className="text-center py-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-muted/50 mb-4">
+              <Car className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <p className="text-muted-foreground">لا توجد مركبات حالياً</p>
+            <p className="text-xs text-muted-foreground mt-1">اضغط على "إضافة مركبة" لبدء الإضافة</p>
+          </div>
+        )}
       </div>
 
-      {/* App Version */}
-      <div className="text-center py-4">
-        <p className="text-xs text-muted-foreground">الإصدار 1.0.0</p>
-      </div>
+      {/* 🆕 Add Vehicle Modal */}
+      <Dialog open={showAddVehicleModal} onOpenChange={setShowAddVehicleModal}>
+        <DialogContent className="max-w-sm w-[95vw]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <div className="p-2 rounded-lg bg-cyan-500/10">
+                <Plus className="w-5 h-5 text-cyan-500" />
+              </div>
+              إضافة مركبة جديدة
+            </DialogTitle>
+            <DialogDescription className="text-sm text-muted-foreground pt-2">
+              أدخل اسم المركبة لإضافتها إلى قائمة الشراكات
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="py-4">
+            <Label className="text-sm mb-2 block">اسم المركبة</Label>
+            <Input
+              value={newVehicleName}
+              onChange={(e) => setNewVehicleName(e.target.value)}
+              placeholder="مثال: سيارة تويوتا كامري"
+              className="text-right"
+              dir="rtl"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  handleSaveNewVehicle();
+                }
+              }}
+            />
+          </div>
+          
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowAddVehicleModal(false)}
+              className="flex-1"
+            >
+              إلغاء
+            </Button>
+            <Button
+              onClick={handleSaveNewVehicle}
+              disabled={!newVehicleName.trim()}
+              className="flex-1 bg-cyan-500 hover:bg-cyan-600"
+            >
+              حفظ
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      {/* Delete Currency Confirmation */}
-      <AlertDialog open={!!deleteCurrency} onOpenChange={() => setDeleteCurrency(null)}>
+      {/* Vehicle Details Modal */}
+      <VehicleDetailsModal
+        isOpen={isDetailsModalOpen}
+        onClose={handleCloseDetailsModal}
+        onAddTransaction={handleOpenTransactionModal}
+        vehicle={selectedVehicle}
+        firstPartnerName={firstPartnerName}
+        secondPartnerName={secondPartnerName}
+        onUpdateTransaction={handleUpdateTransaction}
+        onDeleteTransaction={handleDeleteTransaction}
+      />
+
+      {/* Vehicle Transaction Modal */}
+      <VehicleTransactionModal
+        isOpen={isTransactionModalOpen}
+        onClose={handleCloseTransactionModal}
+        vehicle={selectedVehicle}
+        firstPartnerName={firstPartnerName}
+        secondPartnerName={secondPartnerName}
+        onSave={handleAddTransaction}
+      />
+
+      {/* 🆕 Partner Details Modal */}
+      <PartnerDetailsModal
+        isOpen={isPartnerDetailsOpen}
+        onClose={handleClosePartnerDetails}
+        partnerType={selectedPartner}
+        partnerName={selectedPartner === 'first' ? firstPartnerName : secondPartnerName}
+        totalAmount={selectedPartner === 'first' ? firstPartnerTotal : secondPartnerTotal}
+        transactions={partnerTransactions}
+      />
+
+      {/* Shared Transactions Modal */}
+      <SharedTransactionsModal
+        isOpen={isSharedModalOpen}
+        onClose={handleCloseSharedModal}
+        firstPartnerName={firstPartnerName}
+        secondPartnerName={secondPartnerName}
+        firstPartnerTotal={firstPartnerTotal}
+        secondPartnerTotal={secondPartnerTotal}
+        totalBalance={totalBalance}
+        transactions={sharedTransactions}
+        onAddTransaction={handleAddSharedTransaction}
+        onUpdateTransaction={handleUpdateSharedTransaction}
+        onDeleteTransaction={handleDeleteSharedTransaction}
+      />
+
+      {/* Delete Vehicle Confirmation Dialog */}
+      <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>حذف العملة</AlertDialogTitle>
+            <AlertDialogTitle className="flex items-center gap-2 text-red-500">
+              <Trash2 className="w-5 h-5" />
+              حذف المركبة
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              هل أنت متأكد من حذف عملة "{deleteCurrency?.name}"؟
+              <span className="block">هل أنت متأكد من حذف "{vehicleToDelete?.name}"؟</span>
+              <span className="block text-xs text-red-500 mt-2">
+                ⚠️ سيتم حذف جميع المعاملات المرتبطة بهذه المركبة
+              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDeleteCurrency} className="bg-red-500 hover:bg-red-600">
+            <AlertDialogCancel onClick={handleCancelDeleteVehicle}>إلغاء</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={handleConfirmDeleteVehicle}
+              className="bg-red-500 hover:bg-red-600"
+            >
               حذف
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Import Mode Dialog */}
-      <Dialog open={showImportDialog} onOpenChange={setShowImportDialog}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>استيراد نسخة احتياطية</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-4">
-            <p className="text-sm text-muted-foreground">
-              اختر طريقة الاستيراد:
-            </p>
-            
-            <div className="space-y-2">
-              <div
-                onClick={() => setImportMode('merge')}
-                className={cn(
-                  'p-3 rounded-xl border-2 cursor-pointer transition-all',
-                  importMode === 'merge'
-                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/20'
-                    : 'border-border hover:border-muted-foreground'
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <Merge className="w-5 h-5 text-emerald-500" />
-                  <div>
-                    <p className="font-medium">دمج مع البيانات الحالية</p>
-                    <p className="text-xs text-muted-foreground">إضافة البيانات الجديدة فقط</p>
-                  </div>
-                </div>
-              </div>
-              
-              <div
-                onClick={() => setImportMode('replace')}
-                className={cn(
-                  'p-3 rounded-xl border-2 cursor-pointer transition-all',
-                  importMode === 'replace'
-                    ? 'border-red-500 bg-red-50 dark:bg-red-950/20'
-                    : 'border-border hover:border-muted-foreground'
-                )}
-              >
-                <div className="flex items-center gap-3">
-                  <Replace className="w-5 h-5 text-red-500" />
-                  <div>
-                    <p className="font-medium">استبدال البيانات</p>
-                    <p className="text-xs text-muted-foreground">حذف البيانات الحالية واستبدالها</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleImportData}
-              className="hidden"
-            />
-
-            <Button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isImporting}
-              className="w-full"
-            >
-              {isImporting ? 'جاري الاستيراد...' : 'اختر ملف النسخة الاحتياطية'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Clear Data Confirmation */}
-      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              مسح البيانات
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="block">هل أنت متأكد من مسح جميع البيانات؟</span>
-              <span className="block text-xs mt-2">سيتم حذف جميع الحركات والديون وعمليات الصرافة وإعادة تعيين أرصدة الصناديق.</span>
-              <span className="block text-xs text-emerald-600 dark:text-emerald-400 mt-1">
-                سيتم الحفاظ على الحسابات والعملات.
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
-            <AlertDialogAction onClick={handleClearData} className="bg-red-500 hover:bg-red-600">
-              مسح البيانات
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+    </>
   );
 }

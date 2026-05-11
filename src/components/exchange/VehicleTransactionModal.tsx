@@ -97,7 +97,8 @@ export function VehicleTransactionModal({
       setDate(new Date(editTransaction.date).toISOString().split('T')[0]);
       setAmount(editTransaction.amount.toString());
       setPartner(editTransaction.partner);
-      setPaymentType(editTransaction.paymentType);
+      // الشريك الثاني دائماً آجل
+      setPaymentType(editTransaction.partner === 'second' ? 'deferred' : editTransaction.paymentType);
       setDescription(editTransaction.description);
     } else {
       // إعادة تعيين للإضافة الجديدة
@@ -109,6 +110,17 @@ export function VehicleTransactionModal({
     }
   }, [editTransaction, isOpen]);
 
+  // 🔹 عند تغيير الشريك: تعيين نوع الدفع تلقائياً
+  // الشريك الثاني → آجل دائماً
+  // الشريك الأول → يختار المستخدم
+  const handlePartnerChange = (v: string) => {
+    const newPartner = v as 'first' | 'second';
+    setPartner(newPartner);
+    if (newPartner === 'second') {
+      setPaymentType('deferred');
+    }
+  };
+
   const handleSave = () => {
     if (!amount || parseFloat(amount) <= 0) return;
     
@@ -116,7 +128,8 @@ export function VehicleTransactionModal({
       date: new Date(date),
       amount: parseFloat(amount),
       partner,
-      paymentType,
+      // الشريك الثاني دائماً آجل - لا تأثير على الصندوق
+      paymentType: partner === 'second' ? 'deferred' : paymentType,
       description: description || 'بند',
     });
     
@@ -210,7 +223,7 @@ export function VehicleTransactionModal({
               <User className="w-4 h-4 text-muted-foreground" />
               الشريك
             </Label>
-            <Select value={partner} onValueChange={(v) => setPartner(v as 'first' | 'second')}>
+            <Select value={partner} onValueChange={handlePartnerChange}>
               <SelectTrigger>
                 <SelectValue placeholder="اختر الشريك" />
               </SelectTrigger>
@@ -231,7 +244,8 @@ export function VehicleTransactionModal({
             </Select>
           </div>
 
-          {/* Payment Type */}
+          {/* Payment Type - يظهر فقط للشريك الأول */}
+          {partner === 'first' && (
           <div className="space-y-2">
             <Label className="flex items-center gap-2 text-sm">
               <CreditCard className="w-4 h-4 text-muted-foreground" />
@@ -262,6 +276,7 @@ export function VehicleTransactionModal({
               </Button>
             </div>
           </div>
+          )}
 
           {/* Description */}
           <div className="space-y-2">

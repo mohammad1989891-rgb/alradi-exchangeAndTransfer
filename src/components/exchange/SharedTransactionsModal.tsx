@@ -115,6 +115,17 @@ export function SharedTransactionsModal({
   const [partner, setPartner] = useState<'first' | 'second'>('first');
   const [paymentType, setPaymentType] = useState<'cash' | 'deferred'>('cash');
   const [description, setDescription] = useState('');
+
+  // 🔹 عند تغيير الشريك: تعيين نوع الدفع تلقائياً
+  // الشريك الثاني → آجل دائماً
+  // الشريك الأول → يختار المستخدم
+  const handlePartnerChange = (v: string) => {
+    const newPartner = v as 'first' | 'second';
+    setPartner(newPartner);
+    if (newPartner === 'second') {
+      setPaymentType('deferred');
+    }
+  };
   
   // State for edit transaction
   const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
@@ -137,7 +148,8 @@ export function SharedTransactionsModal({
       date: new Date(date),
       amount: parseFloat(amount),
       partner,
-      paymentType,
+      // الشريك الثاني دائماً آجل - لا تأثير على الصندوق
+      paymentType: partner === 'second' ? 'deferred' : paymentType,
       description: description || 'بند عام',
     });
     
@@ -168,7 +180,8 @@ export function SharedTransactionsModal({
     setEditDate(new Date(tx.date).toISOString().split('T')[0]);
     setEditAmount(tx.amount.toString());
     setEditPartner(tx.partner);
-    setEditPaymentType(tx.paymentType);
+    // الشريك الثاني دائماً آجل
+    setEditPaymentType(tx.partner === 'second' ? 'deferred' : tx.paymentType);
     setEditDescription(tx.description);
   };
   
@@ -186,7 +199,8 @@ export function SharedTransactionsModal({
       date: new Date(editDate),
       amount: parseFloat(editAmount),
       partner: editPartner,
-      paymentType: editPaymentType,
+      // الشريك الثاني دائماً آجل - لا تأثير على الصندوق
+      paymentType: editPartner === 'second' ? 'deferred' : editPaymentType,
       description: editDescription || 'بند عام',
       createdAt: originalTx.createdAt,
     });
@@ -355,7 +369,7 @@ export function SharedTransactionsModal({
                     <User className="w-3 h-3" />
                     الشريك
                   </Label>
-                  <Select value={partner} onValueChange={(v) => setPartner(v as 'first' | 'second')}>
+                  <Select value={partner} onValueChange={handlePartnerChange}>
                     <SelectTrigger className="h-9">
                       <SelectValue />
                     </SelectTrigger>
@@ -376,7 +390,8 @@ export function SharedTransactionsModal({
                   </Select>
                 </div>
 
-                {/* Payment Type */}
+                {/* Payment Type - يظهر فقط للشريك الأول */}
+                {partner === 'first' && (
                 <div className="space-y-1.5">
                   <Label className="text-xs flex items-center gap-1">
                     <CreditCard className="w-3 h-3" />
@@ -409,6 +424,7 @@ export function SharedTransactionsModal({
                     </Button>
                   </div>
                 </div>
+                )}
 
                 {/* Description */}
                 <div className="space-y-1.5">
@@ -502,7 +518,11 @@ export function SharedTransactionsModal({
                             placeholder="البيان"
                           />
                           <div className="grid grid-cols-2 gap-2">
-                            <Select value={editPartner} onValueChange={(v) => setEditPartner(v as 'first' | 'second')}>
+                            <Select value={editPartner} onValueChange={(v) => {
+                              const newPartner = v as 'first' | 'second';
+                              setEditPartner(newPartner);
+                              if (newPartner === 'second') setEditPaymentType('deferred');
+                            }}>
                               <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
                               </SelectTrigger>
@@ -511,6 +531,8 @@ export function SharedTransactionsModal({
                                 <SelectItem value="second">{secondPartnerName}</SelectItem>
                               </SelectContent>
                             </Select>
+                            {/* نوع الدفع - يظهر فقط للشريك الأول */}
+                            {editPartner === 'first' ? (
                             <Select value={editPaymentType} onValueChange={(v) => setEditPaymentType(v as 'cash' | 'deferred')}>
                               <SelectTrigger className="h-8 text-xs">
                                 <SelectValue />
@@ -520,6 +542,11 @@ export function SharedTransactionsModal({
                                 <SelectItem value="deferred">آجل</SelectItem>
                               </SelectContent>
                             </Select>
+                            ) : (
+                            <div className="h-8 flex items-center justify-center text-xs text-muted-foreground bg-muted/50 rounded-md border">
+                              آجل (تلقائي)
+                            </div>
+                            )}
                           </div>
                           <div className="flex justify-end gap-1">
                             <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={handleCancelEdit}>

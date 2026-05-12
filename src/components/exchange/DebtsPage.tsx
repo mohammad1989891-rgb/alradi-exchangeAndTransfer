@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -68,6 +68,8 @@ export function DebtsPage() {
   const { toast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [selectedAccountSummary, setSelectedAccountSummary] = useState<CumulativeAccountSummary | null>(null);
   const [accountSummaries, setAccountSummaries] = useState<CumulativeAccountSummary[]>([]);
   const [isLoadingSummaries, setIsLoadingSummaries] = useState(false);
@@ -113,15 +115,32 @@ export function DebtsPage() {
   };
 
   // ============================================
-  // 🔹 إنشاء قائمة الحركات الموحدة
+  // 🔹 إنشاء قائمة الحركات الموحدة مع فلتر التاريخ
   // ============================================
-  const getUnifiedMovements = (summary: CumulativeAccountSummary | null): UnifiedMovement[] => {
+  const getUnifiedMovements = useCallback((summary: CumulativeAccountSummary | null, filterFromDate?: string, filterToDate?: string): UnifiedMovement[] => {
     if (!summary) return [];
     
     const movements: UnifiedMovement[] = [];
     
     // إضافة جميع الديون (نقدية وآجلة)
-    [...summary.cashDebts, ...summary.deferredDebts].forEach(debt => {
+    const allDebts = [...summary.cashDebts, ...summary.deferredDebts];
+    allDebts.forEach(debt => {
+      // فلتر التاريخ على الديون
+      if (filterFromDate || filterToDate) {
+        const debtDate = new Date(debt.date);
+        debtDate.setHours(0, 0, 0, 0);
+        if (filterFromDate) {
+          const from = new Date(filterFromDate);
+          from.setHours(0, 0, 0, 0);
+          if (debtDate < from) return; // تخطي إذا قبل تاريخ البداية
+        }
+        if (filterToDate) {
+          const to = new Date(filterToDate);
+          to.setHours(23, 59, 59, 999);
+          if (debtDate > to) return; // تخطي إذا بعد تاريخ النهاية
+        }
+      }
+
       movements.push({
         id: debt.id,
         type: 'DEBT',
@@ -136,11 +155,27 @@ export function DebtsPage() {
     });
     
     // إضافة جميع الدفعات
-    const accountDebtIds = [...summary.cashDebts, ...summary.deferredDebts].map(d => d.id);
+    const accountDebtIds = allDebts.map(d => d.id);
     const accountPayments = debtPayments.filter(p => accountDebtIds.includes(p.debtId));
     
     accountPayments.forEach(payment => {
-      const debt = [...summary.cashDebts, ...summary.deferredDebts].find(d => d.id === payment.debtId);
+      // فلتر التاريخ على الدفعات
+      if (filterFromDate || filterToDate) {
+        const payDate = new Date(payment.date);
+        payDate.setHours(0, 0, 0, 0);
+        if (filterFromDate) {
+          const from = new Date(filterFromDate);
+          from.setHours(0, 0, 0, 0);
+          if (payDate < from) return;
+        }
+        if (filterToDate) {
+          const to = new Date(filterToDate);
+          to.setHours(23, 59, 59, 999);
+          if (payDate > to) return;
+        }
+      }
+
+      const debt = allDebts.find(d => d.id === payment.debtId);
       movements.push({
         id: payment.id,
         type: 'PAYMENT',
@@ -156,7 +191,7 @@ export function DebtsPage() {
     
     // ترتيب حسب التاريخ (الأحدث أولاً)
     return movements.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  };
+  }, [debtPayments]);
 
   // حساب الملخص التراكمي للحساب
   const calculateCumulativeSummary = (summary: AccountDebtSummary): CumulativeAccountSummary => {
@@ -301,11 +336,71 @@ export function DebtsPage() {
     }
   }, [accounts, debtRemaining, debtPayments]);
 
-  // Filter account summaries by search
-  const filteredSummaries = accountSummaries.filter(summary => {
-    if (!searchQuery) return true;
-    return summary.account?.name.toLowerCase().includes(searchQuery.toLowerCase());
-  });
+  // هل يوجد فلتر تاريخ مفعل
+  const hasDateFilter = fromDate || toDate;
+
+  // تنظيف فلتر التاريخ
+  const clearDateFilter = () => {
+    setFromDate('');
+    setToDate('');
+  };
+
+  // Filter account summaries by search and date
+  const filteredSummaries = useMemo(() => {
+    return accountSummaries.filter(summary => {
+      // فلتر البحث
+      if (searchQuery && !summary.account?.name.toLowerCase().includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+
+      // فلتر التاريخ - إظهار الحسابات التي لديها ديون أو دفعات ضمن الفترة
+      if (hasDateFilter) {
+        const allDebts = [...summary.cashDebts, ...summary.deferredDebts];
+        const hasDebtInRange = allDebts.some(debt => {
+          const debtDate = new Date(debt.date);
+          debtDate.setHours(0, 0, 0, 0);
+          let matchesFrom = true;
+          let matchesTo = true;
+          if (fromDate) {
+            const from = new Date(fromDate);
+            from.setHours(0, 0, 0, 0);
+            matchesFrom = debtDate >= from;
+          }
+          if (toDate) {
+            const to = new Date(toDate);
+            to.setHours(23, 59, 59, 999);
+            matchesTo = debtDate <= to;
+          }
+          return matchesFrom && matchesTo;
+        });
+
+        // التحقق من الدفعات أيضاً
+        const accountDebtIds = allDebts.map(d => d.id);
+        const accountPayments = debtPayments.filter(p => accountDebtIds.includes(p.debtId));
+        const hasPaymentInRange = accountPayments.some(payment => {
+          const payDate = new Date(payment.date);
+          payDate.setHours(0, 0, 0, 0);
+          let matchesFrom = true;
+          let matchesTo = true;
+          if (fromDate) {
+            const from = new Date(fromDate);
+            from.setHours(0, 0, 0, 0);
+            matchesFrom = payDate >= from;
+          }
+          if (toDate) {
+            const to = new Date(toDate);
+            to.setHours(23, 59, 59, 999);
+            matchesTo = payDate <= to;
+          }
+          return matchesFrom && matchesTo;
+        });
+
+        if (!hasDebtInRange && !hasPaymentInRange) return false;
+      }
+
+      return true;
+    });
+  }, [accountSummaries, searchQuery, hasDateFilter, fromDate, toDate, debtPayments]);
 
   // إضافة دفعة جديدة للإجمالي التراكمي
   const handleAddCumulativePayment = async () => {
@@ -555,15 +650,49 @@ export function DebtsPage() {
         </Button>
       </div>
 
-      {/* Search */}
-      <div className="relative">
-        <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-        <Input
-          placeholder="بحث عن حساب..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pr-10"
-        />
+      {/* Search & Date Filter */}
+      <div className="space-y-3">
+        <div className="relative">
+          <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <Input
+            placeholder="بحث عن حساب..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pr-10"
+          />
+        </div>
+
+        {/* فلتر التاريخ */}
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground mb-1 block">من تاريخ</label>
+            <Input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground mb-1 block">إلى تاريخ</label>
+            <Input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
+          {hasDateFilter && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearDateFilter}
+              className="h-9 px-2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Account Cards List */}
@@ -575,9 +704,9 @@ export function DebtsPage() {
         <div className="text-center py-12 rounded-2xl bg-muted/30">
           <AlertCircle className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
           <p className="text-muted-foreground mb-4">
-            {searchQuery ? 'لا توجد نتائج' : 'لا توجد ديون'}
+            {searchQuery || hasDateFilter ? 'لا توجد نتائج' : 'لا توجد ديون'}
           </p>
-          {!searchQuery && (
+          {!searchQuery && !hasDateFilter && (
             <Button onClick={() => openDebtModal()} className="bg-amber-500 hover:bg-amber-600">
               إضافة دين جديد
             </Button>
@@ -813,7 +942,7 @@ export function DebtsPage() {
                 <List className="w-4 h-4" />
                 عرض جميع الحركات
                 <span className="text-xs text-muted-foreground mr-auto">
-                  ({getUnifiedMovements(selectedAccountSummary).length} حركة)
+                  ({getUnifiedMovements(selectedAccountSummary, fromDate, toDate).length} حركة)
                 </span>
               </Button>
 
@@ -940,12 +1069,12 @@ export function DebtsPage() {
           
           {selectedAccountSummary && (
             <div className="space-y-2 mt-4">
-              {getUnifiedMovements(selectedAccountSummary).length === 0 ? (
+              {getUnifiedMovements(selectedAccountSummary, fromDate, toDate).length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   لا توجد حركات
                 </div>
               ) : (
-                getUnifiedMovements(selectedAccountSummary).map(movement => {
+                getUnifiedMovements(selectedAccountSummary, fromDate, toDate).map(movement => {
                   const isReceivable = movement.direction === 'RECEIVABLE';
                   const isCash = movement.mode === 'CASH';
                   const isOverflow = movement.type === 'PAYMENT' && movement.overflowTransactionId;

@@ -201,3 +201,22 @@ Key insight: There are TWO different "exchange rate" contexts:
 1. Currency.exchangeRate = "1 SYP = X USD" (inverse/tiny) → needs inverse conversion (×100 for NEW display)
 2. Transaction.conversionFactor = "1 USD = X SYP" (normal/large) → needs normal conversion (÷100 for NEW display)
 The old code used the same functions for both, causing reversed logic.
+---
+Task ID: 1
+Agent: Main
+Task: Add sorting (newest to oldest) and date range filter to Debts, Exchange, and Movements sections
+
+Work Log:
+- Explored the codebase to find all three sections and their current sorting/filtering status
+- CurrencyExchangePage already had sorting and date filter - no changes needed
+- TransactionsPage: Added fromDate/toDate state, date range filter UI (من تاريخ / إلى تاريخ), filtered transactions by date range, added explicit sort by date (newest first)
+- DebtsPage: Added fromDate/toDate state, date range filter UI on main page, filtered account summaries by date range, updated getUnifiedMovements to accept date filter params, passed date filter to all getUnifiedMovements calls
+- Both pages use useMemo for filtered results for performance
+- Both pages have clear button (X) to reset date filter
+- Ran lint check - no new errors introduced
+
+Stage Summary:
+- TransactionsPage.tsx: Added date range filter + explicit sort (newest first)
+- DebtsPage.tsx: Added date range filter for main view + all movements modal
+- CurrencyExchangePage.tsx: Already complete, no changes needed
+- Dev server running successfully on port 3000

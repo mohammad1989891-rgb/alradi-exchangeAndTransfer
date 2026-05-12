@@ -1,10 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2 } from 'lucide-react';
+import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X } from 'lucide-react';
 import { TransactionCard } from './TransactionCard';
 import { TransactionModal } from './TransactionModal';
 import { Button } from '@/components/ui/button';
@@ -50,18 +50,55 @@ export function TransactionsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'INCOME' | 'EXPENSE'>('all');
   const [filterPaymentType, setFilterPaymentType] = useState<'all' | 'CASH' | 'DEFERRED'>('all');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [deleteTransactionState, setDeleteTransaction] = useState<Transaction | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const filteredTransactions = transactions.filter(t => {
-    const matchesSearch =
-      t.account?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      t.description?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = filterType === 'all' || t.type === filterType;
-    const matchesPaymentType = filterPaymentType === 'all' || t.paymentType === filterPaymentType;
-    return matchesSearch && matchesType && matchesPaymentType;
-  });
+  // هل يوجد فلتر تاريخ مفعل
+  const hasDateFilter = fromDate || toDate;
+
+  // تنظيف فلتر التاريخ
+  const clearDateFilter = () => {
+    setFromDate('');
+    setToDate('');
+  };
+
+  const filteredTransactions = useMemo(() => {
+    // تطبيق الفلاتر
+    let result = transactions.filter(t => {
+      const matchesSearch =
+        t.account?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        t.description?.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesType = filterType === 'all' || t.type === filterType;
+      const matchesPaymentType = filterPaymentType === 'all' || t.paymentType === filterPaymentType;
+
+      // فلتر التاريخ
+      let matchesDate = true;
+      if (fromDate || toDate) {
+        const txDate = new Date(t.date);
+        txDate.setHours(0, 0, 0, 0);
+        if (fromDate) {
+          const from = new Date(fromDate);
+          from.setHours(0, 0, 0, 0);
+          matchesDate = matchesDate && txDate >= from;
+        }
+        if (toDate) {
+          const to = new Date(toDate);
+          to.setHours(23, 59, 59, 999);
+          matchesDate = matchesDate && txDate <= to;
+        }
+      }
+
+      return matchesSearch && matchesType && matchesPaymentType && matchesDate;
+    });
+
+    // ترتيب من الأحدث إلى الأقدم
+    result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return result;
+  }, [transactions, searchQuery, filterType, filterPaymentType, fromDate, toDate]);
 
   const handleEdit = (transaction: Transaction) => {
     setSelectedTransaction(null);
@@ -159,6 +196,38 @@ export function TransactionsPage() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* فلتر التاريخ */}
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground mb-1 block">من تاريخ</label>
+            <Input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="text-xs text-muted-foreground mb-1 block">إلى تاريخ</label>
+            <Input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="h-9 text-sm"
+            />
+          </div>
+          {hasDateFilter && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={clearDateFilter}
+              className="h-9 px-2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
       </div>
       
       {/* Transactions List */}
@@ -166,11 +235,11 @@ export function TransactionsPage() {
         <div className="text-center py-12 rounded-2xl bg-muted/30">
           <ArrowLeftRight className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
           <p className="text-muted-foreground mb-4">
-            {searchQuery || filterType !== 'all' || filterPaymentType !== 'all' 
+            {searchQuery || filterType !== 'all' || filterPaymentType !== 'all' || hasDateFilter
               ? 'لا توجد نتائج' 
               : 'لا توجد حركات'}
           </p>
-          {!searchQuery && filterType === 'all' && filterPaymentType === 'all' && (
+          {!searchQuery && filterType === 'all' && filterPaymentType === 'all' && !hasDateFilter && (
             <Button onClick={() => openTransactionModal()}>
               إضافة حركة جديدة
             </Button>

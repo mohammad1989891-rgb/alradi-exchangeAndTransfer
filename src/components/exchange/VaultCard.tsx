@@ -7,7 +7,7 @@ import { formatNumber } from '@/lib/format';
 import type { Vault, Currency } from '@/lib/localDb';
 import { useAppStore } from '@/store/useAppStore';
 import { useSYPSettings } from '@/store/useSYPSettings';
-import { isSYPCurrency, formatAmountWithBothVersions, convertExchangeRateForDisplay } from '@/lib/syp-conversion';
+import { isSYPCurrency, formatAmountWithBothVersions, getSypPerUnitRate } from '@/lib/syp-conversion';
 
 interface VaultCardProps {
   vault: Vault;
@@ -32,8 +32,9 @@ export function VaultCard({ vault, index }: VaultCardProps) {
   const openingBalanceFormatted = isSYP
     ? formatAmountWithBothVersions(Math.abs(openingBalance), currency?.id, currency?.code, displayVersion)
     : { main: formatNumber(Math.abs(openingBalance)) };
+  // لعرض "كم ليرة = 1 دولار" نستخدم الدالة المخصصة التي تحسب 1/exchangeRate مع التحويل
   const displayRate = isSYP
-    ? convertExchangeRateForDisplay(currency?.exchangeRate || 1, displayVersion)
+    ? getSypPerUnitRate(currency?.exchangeRate || 0, displayVersion)
     : currency?.exchangeRate || 1;
   
   // Calculate balance in USD using the correct conversion method
@@ -176,10 +177,13 @@ export function VaultCard({ vault, index }: VaultCardProps) {
                 <span>يعادل {formatNumber(balanceInUSD, 2)} USD</span>
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">
-                {currency?.conversionMethod === 'DIVIDE' ? (
-                  <>{formatNumber(displayRate, 4)} {currency?.code} = 1 ${isSYP && displayVersion === 'NEW' ? ' (إصدار جديد)' : ''}</>
+                {isSYP ? (
+                  // لليرة السورية: نعرض دائماً "X ليرة = 1 دولار" لأنه الأكثر فائدة
+                  <>{formatNumber(displayRate, 2)} {currency?.code}{displayVersion === 'NEW' ? ' جديد' : ' قديم'} = 1 $</>
+                ) : currency?.conversionMethod === 'DIVIDE' ? (
+                  <>{formatNumber(displayRate, 4)} {currency?.code} = 1 $</>
                 ) : (
-                  <>1 {currency?.code} = {formatNumber(displayRate, 4)} ${isSYP && displayVersion === 'NEW' ? ' (إصدار جديد)' : ''}</>
+                  <>1 {currency?.code} = {formatNumber(displayRate, 4)} $</>
                 )}
               </p>
             </div>

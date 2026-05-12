@@ -325,3 +325,94 @@ export function convertExchangeRateForInternal(
   }
   return userInputRate;
 }
+
+// ============================================
+// 🔹 دوال تحويل سعر الصرف العكسي
+// للتعامل مع Currency.exchangeRate (قيمة الدولار بليرة سورية)
+// هذا الاتجاه عكسي: 1 ليرة = X دولار (صغير)
+// بينما معامل التحويل: 1 دولار = X ليرة (كبير)
+// ============================================
+
+/**
+ * تحويل سعر الصرف العكسي لليرة السورية للعرض
+ * 
+ * يستخدم مع Currency.exchangeRate الذي يمثل "كم دولار يساوي 1 ليرة"
+ * مثال: exchangeRate = 0.00004 (1 ليرة قديمة = 0.00004 دولار)
+ * 
+ * ⚠️ هذا عكس convertExchangeRateForDisplay لأن:
+ * - convertExchangeRateForDisplay: لـ "كم ليرة = 1 دولار" (÷100 للجديد)
+ * - هذه الدالة: لـ "كم دولار = 1 ليرة" (×100 للجديد)
+ * 
+ * المنطق:
+ * - 1 ليرة قديمة = 0.00004 دولار
+ * - 1 ليرة جديدة (أكبر 100 مرة) = 0.00004 × 100 = 0.004 دولار
+ * 
+ * @param storedRate - سعر الصرف المخزن (1 ليرة قديمة = X دولار)
+ * @param displayVersion - إصدار العرض
+ * @returns سعر الصرف بالإصدار المطلوب
+ */
+export function convertInverseExchangeRateForDisplay(
+  storedRate: number,
+  displayVersion: 'NEW' | 'OLD' = 'NEW'
+): number {
+  if (displayVersion === 'NEW') {
+    // الليرة الجديدة أكبر 100 مرة → قيمتها بالدولار أكبر 100 مرة
+    return storedRate * SYP_CONVERSION_FACTOR;
+  }
+  return storedRate;
+}
+
+/**
+ * حساب "كم ليرة سورية = 1 دولار" من سعر الصرف المخزن
+ * 
+ * Currency.exchangeRate يمثل: 1 ليرة = X دولار
+ * هذه الدالة تحسب: Y ليرة = 1 دولار (أي 1/exchangeRate)
+ * 
+ * مع تحويل الإصدار:
+ * - قديم: 1/0.00004 = 25,000 ليرة قديمة = 1 دولار
+ * - جديد: 25,000/100 = 250 ليرة جديدة = 1 دولار
+ * 
+ * @param exchangeRate - سعر الصرف المخزن (1 ليرة = X دولار)
+ * @param displayVersion - إصدار العرض
+ * @returns عدد الليرات التي تساوي 1 دولار
+ */
+export function getSypPerUnitRate(
+  exchangeRate: number,
+  displayVersion: 'NEW' | 'OLD' = 'NEW'
+): number {
+  if (!exchangeRate || exchangeRate === 0) return 0;
+  const sypPerUsd = 1 / exchangeRate; // ليرات قديمة لكل دولار
+  if (displayVersion === 'NEW') {
+    return sypPerUsd / SYP_CONVERSION_FACTOR; // ليرات جديدة لكل دولار
+  }
+  return sypPerUsd; // ليرات قديمة لكل دولار
+}
+
+/**
+ * تحويل سعر الصرف العكسي لليرة السورية عند التخزين
+ * 
+ * يستخدم مع Currency.exchangeRate الذي يمثل "كم دولار يساوي 1 ليرة"
+ * 
+ * ⚠️ هذا عكس convertExchangeRateForStorage لأن:
+ * - convertExchangeRateForStorage: لـ "كم ليرة = 1 دولار" (×100 للتحويل من جديد لقديم)
+ * - هذه الدالة: لـ "كم دولار = 1 ليرة" (÷100 للتحويل من جديد لقديم)
+ * 
+ * المنطق:
+ * - المستخدم يدخل: 1 ليرة جديدة = 0.004 دولار
+ * - المخزن: 1 ليرة قديمة = 0.00004 دولار = 0.004 ÷ 100
+ * 
+ * @param inputRate - سعر الصرف المدخل بالإصدار المحدد
+ * @param inputVersion - إصدار الإدخال
+ * @returns سعر الصرف المخزن (بالإصدار القديم)
+ */
+export function convertInverseExchangeRateForStorage(
+  inputRate: number,
+  inputVersion: 'NEW' | 'OLD'
+): number {
+  if (inputVersion === 'NEW') {
+    // الليرة الجديدة أكبر 100 مرة → قيمتها بالدولار أكبر 100 مرة
+    // لذا: المخزن = المدخل ÷ 100
+    return inputRate / SYP_CONVERSION_FACTOR;
+  }
+  return inputRate;
+}

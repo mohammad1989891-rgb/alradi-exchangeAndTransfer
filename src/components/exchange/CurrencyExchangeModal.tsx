@@ -45,6 +45,7 @@ import {
   isLikelyOldVersion,
   SYP_CURRENCY_ID,
   SYP_CURRENCY_CODE,
+  SYP_CONVERSION_FACTOR,
 } from '@/lib/syp-conversion';
 
 export function CurrencyExchangeModal() {
@@ -98,16 +99,17 @@ export function CurrencyExchangeModal() {
   }, [vaults, outgoingCurrencyId]);
 
   // Calculate the internal rate adjustment for SYP
-  // internal_rate = outgoing_stored / incoming_stored
-  // If only outgoing is SYP: internal_rate = user_rate * 100
-  // If only incoming is SYP: internal_rate = user_rate / 100
-  // If both are SYP: internal_rate = user_rate (no change)
+  // المستخدم يدخل سعر الصرف بالإصدار الجديد دائماً
+  // يجب تحويله للإصدار القديم ( المخزن ) بضرب × 100
+  // هذا ينطبق سواء كانت الليرة السورية واردة أم صادرة
+  // لأن السعر بالإصدار الجديد ÷ 100 = السعر بالإصدار القديم
+  // والعكس: السعر القديم = السعر الجديد × 100
   const getInternalRate = (userRate: number) => {
     if (!isSYPInvolved) return userRate;
-    if (isOutgoingSYP && !isIncomingSYP) return userRate * 100;
-    if (isIncomingSYP && !isOutgoingSYP) return userRate / 100;
-    // Both are SYP
-    return userRate;
+    // Both are SYP → no adjustment needed (SYP/SYP = 1)
+    if (isOutgoingSYP && isIncomingSYP) return userRate;
+    // SYP is involved (either incoming or outgoing) → convert NEW rate to OLD stored rate
+    return userRate * SYP_CONVERSION_FACTOR;
   };
 
   // Calculate outgoing amount automatically based on operation type

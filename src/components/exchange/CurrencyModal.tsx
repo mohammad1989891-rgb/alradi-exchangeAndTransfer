@@ -32,7 +32,7 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
-import { isSYPCurrency, convertExchangeRateForDisplay, convertExchangeRateForStorage, isLikelyOldVersion, convertToOldVersion } from '@/lib/syp-conversion';
+import { isSYPCurrency, convertInverseExchangeRateForDisplay, convertInverseExchangeRateForStorage, isLikelyOldVersion } from '@/lib/syp-conversion';
 import { useSYPSettings } from '@/store/useSYPSettings';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Coins, DollarSign, TrendingUp, Info, Check, Search, RefreshCw, RotateCcw, ArrowUpRight, ArrowDownRight } from 'lucide-react';
@@ -77,7 +77,7 @@ export function CurrencyModal() {
         setEditingCurrency(currency.id);
         setExchangeRateInput(
           isSYPCurrency(currency.id, currency.code)
-            ? String(convertExchangeRateForDisplay(currency.exchangeRate || 1, 'NEW'))
+            ? String(convertInverseExchangeRateForDisplay(currency.exchangeRate || 1, 'NEW'))
             : String(currency.exchangeRate || 1)
         );
         setConversionMethodInput(currency.conversionMethod || 'MULTIPLY');
@@ -93,9 +93,12 @@ export function CurrencyModal() {
     }
     
     // Convert SYP rate from NEW version to stored (OLD) version
+    // ⚠️ نستخدم الدالة العكسية لأن exchangeRate يمثل "1 ليرة = X دولار"
+    // الليرة الجديدة أكبر 100 مرة → قيمتها بالدولار أكبر 100 مرة
+    // لذا: المخزن = المدخل ÷ 100 (عكس معامل التحويل العادي)
     const targetCurrency = allCurrencies.find(c => c.id === currencyId);
     if (targetCurrency && isSYPCurrency(targetCurrency.id, targetCurrency.code)) {
-      rate = convertExchangeRateForStorage(rate, 'NEW');
+      rate = convertInverseExchangeRateForStorage(rate, 'NEW');
     }
     
     await activateCurrency(currencyId, rate);
@@ -238,14 +241,14 @@ export function CurrencyModal() {
                               step="0.0001"
                               value={
                                 isSYPCurrency(currency.id, currency.code)
-                                  ? convertExchangeRateForDisplay(currency.exchangeRate, displayVersion)
+                                  ? convertInverseExchangeRateForDisplay(currency.exchangeRate, displayVersion)
                                   : currency.exchangeRate
                               }
                               onChange={(e) => {
                                 if (isSYPCurrency(currency.id, currency.code)) {
                                   const val = parseFloat(e.target.value);
                                   if (!isNaN(val) && val > 0) {
-                                    const storedRate = convertExchangeRateForStorage(val, displayVersion);
+                                    const storedRate = convertInverseExchangeRateForStorage(val, displayVersion);
                                     handleUpdateExchangeRate(currency.id, String(storedRate));
                                   }
                                 } else {
@@ -278,14 +281,14 @@ export function CurrencyModal() {
                           <TrendingUp className="w-3 h-3" />
                           <span>
                             1 {currency.code} = {isSYPCurrency(currency.id, currency.code)
-                              ? <>{formatNumber(convertExchangeRateForDisplay(currency.exchangeRate, displayVersion), 4)} <span className="text-primary/70">(إصدار جديد)</span></>
+                              ? <>{formatNumber(convertInverseExchangeRateForDisplay(currency.exchangeRate, displayVersion), 4)} <span className="text-primary/70">({displayVersion === 'NEW' ? 'إصدار جديد' : 'إصدار قديم'})</span></>
                               : formatNumber(currency.exchangeRate, 4)
                             } USD
                           </span>
                         </div>
-                        {isSYPCurrency(currency.id, currency.code) && (
+                        {isSYPCurrency(currency.id, currency.code) && displayVersion === 'NEW' && (
                           <div className="text-[10px] text-muted-foreground/70">
-                            بالإصدار القديم: 1 {currency.code} = {formatNumber(currency.exchangeRate, 0)} USD
+                            بالإصدار القديم: 1 {currency.code} = {formatNumber(currency.exchangeRate, 6)} USD
                           </div>
                         )}
                         
@@ -371,7 +374,7 @@ export function CurrencyModal() {
                   <div className="space-y-2 mb-4">
                     {!isNaN(parseFloat(exchangeRateInput)) && parseFloat(exchangeRateInput) > 0 && (
                       <div className="text-xs text-muted-foreground">
-                        ما يعادل بالإصدار القديم: {formatNumber(convertToOldVersion(parseFloat(exchangeRateInput)), 0)}
+                        ما يعادل بالإصدار القديم: {formatNumber(convertInverseExchangeRateForStorage(parseFloat(exchangeRateInput), 'NEW'), 6)}
                       </div>
                     )}
                     {isLikelyOldVersion(parseFloat(exchangeRateInput)) && (

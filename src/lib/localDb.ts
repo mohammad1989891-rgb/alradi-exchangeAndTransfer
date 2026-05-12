@@ -287,7 +287,7 @@ const defaultCurrencies: Omit<Currency, 'createdAt' | 'updatedAt'>[] = [
   { id: 'cur_bhd', code: 'BHD', name: 'دينار بحريني', symbol: 'د.ب', isDefault: false, isActive: false, exchangeRate: 2.65, conversionMethod: 'MULTIPLY' },
   { id: 'cur_qar', code: 'QAR', name: 'ريال قطري', symbol: 'ر.ق', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
   { id: 'cur_omr', code: 'OMR', name: 'ريال عماني', symbol: 'ر.ع', isDefault: false, isActive: false, exchangeRate: 2.60, conversionMethod: 'MULTIPLY' },
-  { id: 'cur_syp', code: 'SYP', name: 'ليرة سورية', symbol: 'ل.س', isDefault: false, isActive: false, exchangeRate: 0.00004, conversionMethod: 'DIVIDE' },
+  { id: 'cur_syp', code: 'SYP', name: 'ليرة سورية', symbol: 'ل.س', isDefault: false, isActive: false, exchangeRate: 0.00004, conversionMethod: 'MULTIPLY' },
   { id: 'cur_lbp', code: 'LBP', name: 'ليرة لبنانية', symbol: 'ل.ل', isDefault: false, isActive: false, exchangeRate: 0.000011, conversionMethod: 'DIVIDE' },
   { id: 'cur_jod', code: 'JOD', name: 'دينار أردني', symbol: 'د.أ', isDefault: false, isActive: false, exchangeRate: 1.41, conversionMethod: 'MULTIPLY' },
   { id: 'cur_iqd', code: 'IQD', name: 'دينار عراقي', symbol: 'د.ع', isDefault: false, isActive: false, exchangeRate: 0.00076, conversionMethod: 'DIVIDE' },
@@ -351,6 +351,26 @@ export async function initializeDatabase(): Promise<void> {
         updatedAt: now,
       });
     }
+  }
+  
+  // ============================================
+  // 🔹 إصلاح سير العملة السورية (SYP)
+  // تصحيح conversionMethod من DIVIDE إلى MULTIPLY
+  // لأن exchangeRate = 0.00004 يمثل "1 ليرة = 0.00004 دولار"
+  // والعملية الصحيحة هي: amount × 0.00004 = usdValue (MULTIPLY)
+  // وليس: amount ÷ 0.00004 = نتيجة خاطئة
+  // ============================================
+  try {
+    const sypCurrency = await db.table<Currency>('currencies').get('cur_syp');
+    if (sypCurrency && sypCurrency.conversionMethod === 'DIVIDE' && sypCurrency.exchangeRate < 1) {
+      await db.table('currencies').update('cur_syp', { 
+        conversionMethod: 'MULTIPLY',
+        updatedAt: new Date()
+      });
+    }
+  } catch (e) {
+    // تجاهل الأخطاء في عملية الإصلاح
+    console.warn('SYP migration fix skipped:', e);
   }
   
   isDbInitialized = true;

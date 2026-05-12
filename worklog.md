@@ -173,3 +173,31 @@ Stage Summary:
 - ✅ خيار تبديل بين الإصدارين
 - ✅ تنبيهات عند إدخال أسعار صرف بالإصدار القديم
 - ✅ تحويل تلقائي للإدخال بالإصدار الجديد
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix reversed Syrian Lira (SYP) currency re-denomination logic
+
+Work Log:
+- Analyzed the entire SYP conversion system across the codebase
+- Identified 5 bugs causing reversed/incorrect conversion logic
+- Bug 1: CurrencyExchangeModal.tsx - `getInternalRate` divided by 100 when incoming=SYP (should multiply)
+- Bug 2: localDb.ts - SYP had `conversionMethod: 'DIVIDE'` with `exchangeRate: 0.00004` (should be MULTIPLY)
+- Bug 3: VaultCard.tsx - Used `convertExchangeRateForDisplay` on `currency.exchangeRate` which is USD-per-SYP direction (inverse)
+- Bug 4: CurrencyModal.tsx - Same inverse rate issue as VaultCard
+- Bug 5: syp-conversion.ts - Missing inverse rate conversion functions for Currency.exchangeRate
+
+Stage Summary:
+- Fixed getInternalRate in CurrencyExchangeModal to always multiply by 100 when SYP is involved
+- Changed SYP default conversionMethod from DIVIDE to MULTIPLY in localDb.ts
+- Added database migration to fix existing SYP conversionMethod on app start
+- Added `getSypPerUnitRate`, `convertInverseExchangeRateForDisplay`, `convertInverseExchangeRateForStorage` functions to syp-conversion.ts
+- Fixed VaultCard.tsx to use `getSypPerUnitRate` instead of `convertExchangeRateForDisplay` for SYP rate display
+- Fixed CurrencyModal.tsx to use inverse functions for SYP exchangeRate display and storage
+- All TypeScript compilation passes with no new errors
+- App runs successfully on localhost:3000
+
+Key insight: There are TWO different "exchange rate" contexts:
+1. Currency.exchangeRate = "1 SYP = X USD" (inverse/tiny) → needs inverse conversion (×100 for NEW display)
+2. Transaction.conversionFactor = "1 USD = X SYP" (normal/large) → needs normal conversion (÷100 for NEW display)
+The old code used the same functions for both, causing reversed logic.

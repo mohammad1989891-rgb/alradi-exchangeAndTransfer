@@ -13,11 +13,11 @@ import {
   CalendarX,
   Calculator,
   DollarSign,
+  X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { CurrencyExchangeCard } from './CurrencyExchangeCard';
-import { DateFilter, DateFilterValue, isDateInRange } from './DateFilter';
 import {
   getCurrencyExchanges,
   getExchangeStats,
@@ -25,6 +25,7 @@ import {
   CurrencyExchange,
 } from '@/lib/localDb';
 import { useToast } from '@/hooks/use-toast';
+import { Input } from '@/components/ui/input';
 
 export function CurrencyExchangePage() {
   const { openExchangeModal } = useAppStore();
@@ -33,7 +34,8 @@ export function CurrencyExchangePage() {
 
   const [exchanges, setExchanges] = useState<CurrencyExchange[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [dateFilter, setDateFilter] = useState<DateFilterValue>({ mode: 'single' });
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [stats, setStats] = useState({
     totalExchanges: 0,
     totalProfit: 0,
@@ -43,7 +45,12 @@ export function CurrencyExchangePage() {
     lossCount: 0,
   });
 
-  const hasDateFilter = dateFilter.startDate || dateFilter.endDate;
+  const hasDateFilter = fromDate || toDate;
+
+  const clearDateFilter = () => {
+    setFromDate('');
+    setToDate('');
+  };
 
   // Load exchanges
   const loadExchanges = async () => {
@@ -80,10 +87,23 @@ export function CurrencyExchangePage() {
   const filteredExchanges = useMemo(() => {
     if (!hasDateFilter) return exchanges;
 
-    return exchanges.filter(exchange => 
-      isDateInRange(exchange.date, dateFilter)
-    );
-  }, [exchanges, dateFilter, hasDateFilter]);
+    return exchanges.filter(exchange => {
+      let matchesDate = true;
+      const exDate = new Date(exchange.date);
+      exDate.setHours(0, 0, 0, 0);
+      if (fromDate) {
+        const from = new Date(fromDate);
+        from.setHours(0, 0, 0, 0);
+        matchesDate = matchesDate && exDate >= from;
+      }
+      if (toDate) {
+        const to = new Date(toDate);
+        to.setHours(23, 59, 59, 999);
+        matchesDate = matchesDate && exDate <= to;
+      }
+      return matchesDate;
+    });
+  }, [exchanges, fromDate, toDate, hasDateFilter]);
 
   // Calculate filtered stats
   const filteredStats = useMemo(() => {
@@ -193,12 +213,37 @@ export function CurrencyExchangePage() {
         </Button>
       </motion.div>
 
-      {/* Date Filter */}
-      <DateFilter
-        value={dateFilter}
-        onChange={setDateFilter}
-        className="w-full"
-      />
+      {/* Date Filter - نفس أسلوب قسم الحركات */}
+      <div className="flex gap-2 items-end">
+        <div className="flex-1">
+          <label className="text-xs text-muted-foreground mb-1 block">من تاريخ</label>
+          <Input
+            type="date"
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-9 text-sm"
+          />
+        </div>
+        <div className="flex-1">
+          <label className="text-xs text-muted-foreground mb-1 block">إلى تاريخ</label>
+          <Input
+            type="date"
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-9 text-sm"
+          />
+        </div>
+        {hasDateFilter && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearDateFilter}
+            className="h-9 px-2 text-muted-foreground hover:text-foreground"
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        )}
+      </div>
 
       {/* Exchange List */}
       {isLoading ? (

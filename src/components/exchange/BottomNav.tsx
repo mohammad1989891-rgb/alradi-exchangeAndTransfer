@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Wallet,
   Users,
-  ArrowLeftRight,
+  RefreshCw,
   ArrowDownUp,
   AlertCircle,
 } from 'lucide-react';
@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 const tabs = [
   { id: 'balances' as const, label: 'الأرصدة', icon: Wallet },
   { id: 'accounts' as const, label: 'الحسابات', icon: Users },
-  { id: 'exchange' as const, label: 'الصرافة', icon: ArrowLeftRight },
+  { id: 'exchange' as const, label: 'الصرافة', icon: RefreshCw },
   { id: 'transactions' as const, label: 'الحركات', icon: ArrowDownUp },
   { id: 'debts' as const, label: 'الديون', icon: AlertCircle },
 ];

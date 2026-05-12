@@ -4,11 +4,10 @@ import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { RefreshCw, Wallet, Plus, DollarSign, TrendingUp, Coins, RefreshCcw, ChevronDown, ChevronUp, HandCoins, Scale } from 'lucide-react';
+import { Wallet, Plus, DollarSign, TrendingUp, Coins, RefreshCcw, ChevronDown, ChevronUp, HandCoins, Scale } from 'lucide-react';
 import { VaultCard, SummaryCard } from './VaultCard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { useSYPSettings } from '@/store/useSYPSettings';
 import { formatNumber } from '@/lib/format';
 import type { Vault } from '@/lib/localDb';
 
@@ -19,10 +18,6 @@ export function BalancesPage() {
   
   // حالة إظهار/إخفاء تفاصيل الديون
   const [showDebtDetails, setShowDebtDetails] = useState(false);
-
-  // SYP display version toggle
-  const { displayVersion, toggleDisplayVersion } = useSYPSettings();
-  const isSYPActive = currencies.some(c => c.code === 'SYP' && c.isActive);
 
   const handleRefresh = async () => {
     setIsLoading(true);
@@ -92,20 +87,6 @@ export function BalancesPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {isSYPActive && (
-            <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={toggleDisplayVersion}
-                className="rounded-xl bg-muted/50 gap-1 text-xs"
-                title="تبديل إصدار الليرة السورية"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>{displayVersion === 'NEW' ? 'ل.س جديد' : 'ل.س قديم'}</span>
-              </Button>
-            </motion.div>
-          )}
           <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
             <Button
               variant="ghost"

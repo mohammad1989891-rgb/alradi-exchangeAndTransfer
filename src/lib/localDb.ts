@@ -1677,7 +1677,12 @@ export async function getCurrencyExchanges(limit = 100): Promise<CurrencyExchang
   const all = await db.table<CurrencyExchange>('currencyExchanges').toArray();
   return all
     .filter(e => !e.isDeleted)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      // ترتيب ثانوي: الأحدث إنشاءً أولاً عند تساوي التاريخ
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    })
     .slice(0, limit);
 }
 

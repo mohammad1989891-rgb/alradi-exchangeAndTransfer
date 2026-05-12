@@ -20,13 +20,9 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
-  FileText,
   Wallet,
-  Calculator,
-  Printer,
   BarChart3,
   BookOpen,
-  HelpCircle,
   Coins,
   PiggyBank,
   LogOut,
@@ -79,13 +75,6 @@ const menuItems = [
     icon: BarChart3,
     color: 'bg-green-500',
   },
-  {
-    id: 'calculators',
-    title: 'الآلات الحاسبة',
-    description: 'حساب التحويلات والأجور',
-    icon: Calculator,
-    color: 'bg-amber-500',
-  },
 ];
 
 export function SideMenu() {
@@ -109,6 +98,9 @@ export function SideMenu() {
         break;
       case 'vehicles':
         setActiveTab('vehicles');
+        break;
+      case 'reports':
+        setActiveTab('reports');
         break;
     }
     closeSideMenu();

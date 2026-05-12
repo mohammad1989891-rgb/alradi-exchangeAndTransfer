@@ -243,3 +243,58 @@ Stage Summary:
 - Exchange rate displays show both versions: "(قديم) 25,000 = 1$ / (جديد) 250 = 1$"
 - No database changes - conversion is display-only
 - UI Freeze maintained - no layout/design changes, only logic and text content updates
+
+---
+Task ID: 2
+Agent: Main
+Task: Fix hydration mismatch error in SplashScreen component
+
+Work Log:
+- Diagnosed root cause: `Math.random()` in render phase produces different values on server vs client
+- Also identified `typeof window !== 'undefined'` check as secondary hydration mismatch source
+- Also identified `new Date().getFullYear()` as potential mismatch source (different server timezone)
+- Added `createSeededRandom()` deterministic pseudo-random number generator function (LCG algorithm with seed 42)
+- Pre-computed all 20 circle properties (`circleProps` array) outside the component using seeded random
+- Replaced `Math.random()` calls with deterministic `circleProps[i]` values
+- Removed `typeof window !== 'undefined'` checks, using fixed viewport dimensions (400×800)
+- Replaced `new Date().getFullYear()` with static `2025`
+- All animations preserved identically - same visual effect with deterministic values
+
+Stage Summary:
+- ✅ Fixed hydration mismatch error in SplashScreen.tsx
+- ✅ No visual changes - splash screen looks and behaves identically
+- ✅ Additive/incremental update only - no rewriting or deletion of existing features
+- ✅ Seeded random ensures server and client produce identical initial HTML
+- ✅ Pre-existing lint errors in VehicleTransactionModal.tsx unchanged (unrelated)
+
+---
+Task ID: 3
+Agent: Main
+Task: تحسينات القائمة الجانبية وقسم التقارير
+
+Work Log:
+- إزالة خيار "الآلات الحاسبة" من القائمة الجانبية (SideMenu.tsx)
+  - حذف عنصر القائمة calculators من مصفوفة menuItems
+  - حذف استيراد Calculator و FileText و Printer و HelpCircle (غير مستخدمة)
+- إضافة نوع 'reports' إلى Tab في useAppStore.ts
+- إضافة حالة 'reports' في renderPage في page.tsx
+- إضافة استيراد ReportsPage في page.tsx
+- إضافة معالج 'reports' في handleMenuClick في SideMenu.tsx
+- إنشاء ملف جديد: src/components/exchange/ReportsPage.tsx يتضمن:
+  - ملخص سريع: عدد الحركات + عدد عمليات الصرافة + عدد الديون غير المسددة
+  - أكثر عملة تداولًا: ترتيب العملات حسب عدد العمليات وحجم التداول (من الحركات + الصرافة)
+  - أكثر الحسابات نشاطًا: ترتيب الحسابات حسب عدد العمليات وإجمالي القيم (من الحركات + الديون)
+  - إحصائيات الديون: عدد غير المسددة + المتأخرة (+30 يوم) + طويلة الأمد (+90 يوم)
+  - قائمة الديون مرتبة بالأقدم (مع تمييز بصري):
+    - ديون متأخرة (أحمر): أكثر من 30 يوم
+    - ديون طويلة الأمد (برتقالي): أكثر من 90 يوم
+  - عرض المدة بأيام/أشهر/سنوات
+  - دعم عرض الليرة السورية بالإصدارين (قديم/جديد) في مبالغ الديون
+
+Stage Summary:
+- ✅ تم إزالة خيار الآلة الحاسبة من القائمة الجانبية
+- ✅ تم إنشاء صفحة التقارير بالإحصائيات المفصلة
+- ✅ تمييز بصري للديون المتأخرة (أحمر) وطويلة الأمد (برتقالي)
+- ✅ لا تغيير في التصميم العام (UI Freeze محفوظ)
+- ✅ تعديل جزئي فقط (Patch / Incremental Update)
+- ✅ ملف جديد: src/components/exchange/ReportsPage.tsx

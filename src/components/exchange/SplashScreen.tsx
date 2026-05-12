@@ -7,6 +7,33 @@ interface SplashScreenProps {
   onComplete: () => void;
 }
 
+// مولد أرقام عشوائية محدد ببذرة - ينتج نفس القيم على الخادم والعميل لمنع خطأ Hydration
+function createSeededRandom(seed: number) {
+  let s = seed;
+  return () => {
+    s = (s * 16807) % 2147483647;
+    return (s - 1) / 2147483646;
+  };
+}
+
+// قيم ثابتة لمنع اختلاف الخادم والعميل
+const VIEWPORT_W = 400;
+const VIEWPORT_H = 800;
+const CIRCLE_COUNT = 20;
+
+// إنشاء خصائص الدوائر بشكل حتمي (deterministic)
+const seededRand = createSeededRandom(42);
+const circleProps = Array.from({ length: CIRCLE_COUNT }, () => ({
+  initialX: seededRand() * VIEWPORT_W,
+  initialY: seededRand() * VIEWPORT_H,
+  animateX: seededRand() * VIEWPORT_W,
+  animateY: seededRand() * VIEWPORT_H,
+  duration: 3 + seededRand() * 2,
+  delay: seededRand() * 2,
+  width: 20 + seededRand() * 80,
+  height: 20 + seededRand() * 80,
+}));
+
 export function SplashScreen({ onComplete }: SplashScreenProps) {
   const [isVisible, setIsVisible] = useState(true);
 
@@ -32,28 +59,28 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
           {/* خلفية متحركة */}
           <div className="absolute inset-0 overflow-hidden">
             {/* دوائر متحركة */}
-            {[...Array(20)].map((_, i) => (
+            {circleProps.map((props, i) => (
               <motion.div
                 key={i}
                 className="absolute rounded-full bg-white/10"
                 initial={{
-                  x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 400),
-                  y: Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 800),
+                  x: props.initialX,
+                  y: props.initialY,
                   scale: 0,
                 }}
                 animate={{
                   scale: [0, 1, 0],
-                  x: Math.random() * (typeof window !== 'undefined' ? window.innerWidth : 400),
-                  y: Math.random() * (typeof window !== 'undefined' ? window.innerHeight : 800),
+                  x: props.animateX,
+                  y: props.animateY,
                 }}
                 transition={{
-                  duration: 3 + Math.random() * 2,
+                  duration: props.duration,
                   repeat: Infinity,
-                  delay: Math.random() * 2,
+                  delay: props.delay,
                 }}
                 style={{
-                  width: 20 + Math.random() * 80,
-                  height: 20 + Math.random() * 80,
+                  width: props.width,
+                  height: props.height,
                 }}
               />
             ))}
@@ -156,7 +183,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             transition={{ delay: 1.2, duration: 0.5 }}
             className="absolute bottom-8 text-white/50 text-xs"
           >
-            © {new Date().getFullYear()} جميع الحقوق محفوظة
+            © 2025 جميع الحقوق محفوظة
           </motion.div>
         </motion.div>
       )}

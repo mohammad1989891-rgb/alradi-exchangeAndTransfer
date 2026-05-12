@@ -146,11 +146,14 @@ export function CurrencyExchangePage() {
     await refreshData();
   };
 
-  // Sort by date (newest first)
+  // Sort by date (newest first), ثم بوقت الإنشاء كعامل ثانوي
   const sortedExchanges = useMemo(() => {
-    return [...filteredExchanges].sort((a, b) => 
-      new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
+    return [...filteredExchanges].sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      // ترتيب ثانوي: الأحدث إنشاءً أولاً عند تساوي التاريخ
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
   }, [filteredExchanges]);
 
   return (

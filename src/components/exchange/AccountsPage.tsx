@@ -54,10 +54,19 @@ export function AccountsPage() {
   return (
     <div className="space-y-6 pb-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">الحسابات</h1>
-          <p className="text-sm text-muted-foreground">{accounts.length} حساب</p>
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-between"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-violet-500 flex items-center justify-center shadow-lg">
+            <Users className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">الحسابات</h1>
+            <p className="text-sm text-muted-foreground">{accounts.length} حساب</p>
+          </div>
         </div>
         <Button
           onClick={() => openAccountModal()}
@@ -66,7 +75,7 @@ export function AccountsPage() {
           <Plus className="w-4 h-4" />
           إضافة
         </Button>
-      </div>
+      </motion.div>
       
       {/* Search */}
       <div className="relative">

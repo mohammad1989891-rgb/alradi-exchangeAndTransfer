@@ -155,6 +155,23 @@ export function CurrencyExchangePage() {
 
   return (
     <div className="space-y-4">
+      {/* Header */}
+      <motion.div
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="flex items-center justify-between"
+      >
+        <div className="flex items-center gap-3">
+          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-lg">
+            <RefreshCw className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">الصرافة</h1>
+            <p className="text-sm text-muted-foreground">عمليات التحويل والتبديل</p>
+          </div>
+        </div>
+      </motion.div>
+
       {/* Stats Cards */}
       <div className="grid grid-cols-2 gap-3">
         <motion.div

@@ -815,14 +815,18 @@ export function VehiclesPage() {
     <>
       <div className="space-y-4">
         {/* Header with Add Button */}
-        <div className="flex items-center justify-between">
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between"
+        >
           <div className="flex items-center gap-3">
-            <div className="p-2.5 rounded-xl bg-primary/10">
-              <Car className="w-6 h-6 text-primary" />
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center shadow-lg">
+              <Car className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-foreground">المركبات</h1>
-              <p className="text-xs text-muted-foreground">إدارة شراكات المركبات</p>
+              <h1 className="text-2xl font-bold text-foreground">المركبات</h1>
+              <p className="text-sm text-muted-foreground">إدارة شراكات المركبات</p>
             </div>
           </div>
           
@@ -833,7 +837,7 @@ export function VehiclesPage() {
             <Plus className="w-4 h-4" />
             <span>إضافة مركبة</span>
           </Button>
-        </div>
+        </motion.div>
 
         {/* 🔹 بطاقتا الشركاء - بديل البطاقة الرئيسية */}
         <div className="grid grid-cols-2 gap-3">

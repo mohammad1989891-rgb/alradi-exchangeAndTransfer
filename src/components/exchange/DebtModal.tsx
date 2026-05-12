@@ -25,6 +25,8 @@ import { formatNumber } from '@/lib/format';
 import type { DebtFormData } from '@/types';
 import { format } from 'date-fns';
 import { AlertCircle, RefreshCcw, ArrowUpRight, ArrowDownRight, Banknote, Clock } from 'lucide-react';
+import { isSYPCurrency, calculateStoredValue, calculateDisplayValue } from '@/lib/syp-conversion';
+import { useSYPSettings } from '@/store/useSYPSettings';
 
 // Helper function to format number with thousand separator for input
 function formatInputNumber(num: number | string): string {
@@ -75,11 +77,17 @@ export function DebtModal() {
   // Formatted display values
   const [amountDisplay, setAmountDisplay] = useState('');
   const [conversionFactorDisplay, setConversionFactorDisplay] = useState('1');
+  const [amountSYPVersion, setAmountSYPVersion] = useState<'NEW' | 'OLD'>('NEW');
+  const { displayVersion } = useSYPSettings();
   
   // Reset form when modal opens/closes
   useEffect(() => {
     if (isDebtModalOpen) {
+      setAmountSYPVersion('NEW');
       if (editingDebt) {
+        const editingCurrency = currencies.find(c => c.id === editingDebt.currencyId);
+        const isEditingSYP = isSYPCurrency(editingDebt.currencyId, editingCurrency?.code);
+        const displayAmount = isEditingSYP ? calculateDisplayValue(editingDebt.amount, 'NEW') : editingDebt.amount;
         setFormData({
           accountId: editingDebt.accountId,
           currencyId: editingDebt.currencyId,
@@ -91,7 +99,7 @@ export function DebtModal() {
           debtType: editingDebt.debtType || 'RECEIVABLE',
           debtMode: editingDebt.debtMode || 'DEFERRED',
         });
-        setAmountDisplay(formatInputNumber(editingDebt.amount));
+        setAmountDisplay(formatInputNumber(displayAmount));
         setConversionFactorDisplay(formatInputNumber(editingDebt.conversionFactor));
       } else {
         // Set default currency
@@ -125,7 +133,8 @@ export function DebtModal() {
     const cleanValue = value.replace(/[^0-9.,]/g, '');
     setAmountDisplay(cleanValue);
     const numValue = parseFormattedNumber(cleanValue);
-    setFormData({ ...formData, amount: numValue });
+    const storedAmount = isDebtSYP ? calculateStoredValue(numValue, amountSYPVersion) : numValue;
+    setFormData({ ...formData, amount: storedAmount });
   };
   
   // Handle conversion factor input with formatting
@@ -164,6 +173,7 @@ export function DebtModal() {
   };
   
   const selectedCurrency = currencies.find(c => c.id === formData.currencyId);
+  const isDebtSYP = isSYPCurrency(formData.currencyId, selectedCurrency?.code);
   
   // Calculate conversion preview
   const getConversionPreview = () => {
@@ -314,13 +324,63 @@ export function DebtModal() {
                 className="text-left font-mono"
                 dir="ltr"
               />
+              {isDebtSYP && (
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAmountSYPVersion('NEW');
+                      if (formData.amount) {
+                        setAmountDisplay(formatInputNumber(calculateDisplayValue(formData.amount, 'NEW')));
+                      }
+                    }}
+                    className={cn(
+                      'flex-1 py-1.5 rounded-md text-xs font-medium transition-all',
+                      amountSYPVersion === 'NEW'
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    )}
+                  >
+                    إصدار جديد
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAmountSYPVersion('OLD');
+                      if (formData.amount) {
+                        setAmountDisplay(formatInputNumber(calculateDisplayValue(formData.amount, 'OLD')));
+                      }
+                    }}
+                    className={cn(
+                      'flex-1 py-1.5 rounded-md text-xs font-medium transition-all',
+                      amountSYPVersion === 'OLD'
+                        ? 'bg-amber-500 text-white'
+                        : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                    )}
+                  >
+                    إصدار قديم
+                  </button>
+                </div>
+              )}
             </div>
             
             <div className="space-y-2">
               <Label>العملة</Label>
               <Select
                 value={formData.currencyId}
-                onValueChange={(value) => setFormData({ ...formData, currencyId: value })}
+                onValueChange={(value) => {
+                  setFormData({ ...formData, currencyId: value });
+                  setAmountSYPVersion('NEW');
+                  if (formData.amount) {
+                    const newCurrency = currencies.find(c => c.id === value);
+                    const isNewSYP = isSYPCurrency(value, newCurrency?.code);
+                    if (isNewSYP) {
+                      setAmountDisplay(formatInputNumber(calculateDisplayValue(formData.amount, 'NEW')));
+                    } else {
+                      setAmountDisplay(formatInputNumber(formData.amount));
+                    }
+                  }
+                }}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="اختر" />
@@ -414,7 +474,7 @@ export function DebtModal() {
           <div className="rounded-xl p-4 bg-amber-50 dark:bg-amber-950/20">
             <p className="text-xs text-muted-foreground mb-1">الرصيد النهائي</p>
             <p className="text-2xl font-bold text-amber-600 font-mono" dir="ltr">
-              {formatNumber(calculatedBalance)} {selectedCurrency?.symbol}
+              {formatNumber(isDebtSYP ? calculateDisplayValue(calculatedBalance, 'NEW') : calculatedBalance)} {selectedCurrency?.symbol}
             </p>
           </div>
           

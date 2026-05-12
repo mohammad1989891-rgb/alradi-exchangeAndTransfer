@@ -6,6 +6,8 @@ import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
 import type { Vault, Currency } from '@/lib/localDb';
 import { useAppStore } from '@/store/useAppStore';
+import { useSYPSettings } from '@/store/useSYPSettings';
+import { isSYPCurrency, formatAmountWithBothVersions, convertExchangeRateForDisplay } from '@/lib/syp-conversion';
 
 interface VaultCardProps {
   vault: Vault;
@@ -20,6 +22,19 @@ export function VaultCard({ vault, index }: VaultCardProps) {
   
   // Find currency for this vault
   const currency = currencies.find((c: Currency) => c.id === vault.currencyId);
+  const { displayVersion } = useSYPSettings();
+  const isSYP = isSYPCurrency(currency?.id, currency?.code);
+  
+  // SYP display formatting
+  const balanceFormatted = isSYP
+    ? formatAmountWithBothVersions(Math.abs(balance), currency?.id, currency?.code, displayVersion)
+    : { main: formatNumber(Math.abs(balance)) };
+  const openingBalanceFormatted = isSYP
+    ? formatAmountWithBothVersions(Math.abs(openingBalance), currency?.id, currency?.code, displayVersion)
+    : { main: formatNumber(Math.abs(openingBalance)) };
+  const displayRate = isSYP
+    ? convertExchangeRateForDisplay(currency?.exchangeRate || 1, displayVersion)
+    : currency?.exchangeRate || 1;
   
   // Calculate balance in USD using the correct conversion method
   const balanceInUSD = currency 
@@ -126,7 +141,10 @@ export function VaultCard({ vault, index }: VaultCardProps) {
                 'text-sm font-medium',
                 openingBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
               )}>
-                {openingBalance >= 0 ? '' : '-'}{formatNumber(Math.abs(openingBalance))} {currency?.symbol}
+                {openingBalance >= 0 ? '' : '-'}{openingBalanceFormatted.main} {currency?.symbol}
+                {openingBalanceFormatted.sub && (
+                  <span className="text-[10px] text-muted-foreground block mt-0.5">{openingBalanceFormatted.sub}</span>
+                )}
               </span>
             </div>
           </div>
@@ -140,12 +158,15 @@ export function VaultCard({ vault, index }: VaultCardProps) {
               'text-2xl font-bold tracking-tight',
               isPositive ? 'text-foreground' : 'text-red-500'
             )}>
-              {isPositive ? '' : '-'}{formatNumber(Math.abs(balance))}
+              {isPositive ? '' : '-'}{balanceFormatted.main}
             </span>
             <span className="text-sm text-muted-foreground">
               {currency?.symbol}
             </span>
           </div>
+          {balanceFormatted.sub && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">{balanceFormatted.sub}</p>
+          )}
           
           {/* USD Conversion */}
           {showUSDConversion && (
@@ -156,9 +177,9 @@ export function VaultCard({ vault, index }: VaultCardProps) {
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 {currency?.conversionMethod === 'DIVIDE' ? (
-                  <>{formatNumber(currency.exchangeRate, 4)} {currency?.code} = 1 $</>
+                  <>{formatNumber(displayRate, 4)} {currency?.code} = 1 ${isSYP && displayVersion === 'NEW' ? ' (إصدار جديد)' : ''}</>
                 ) : (
-                  <>1 {currency?.code} = {formatNumber(currency.exchangeRate, 4)} $</>
+                  <>1 {currency?.code} = {formatNumber(displayRate, 4)} ${isSYP && displayVersion === 'NEW' ? ' (إصدار جديد)' : ''}</>
                 )}
               </p>
             </div>

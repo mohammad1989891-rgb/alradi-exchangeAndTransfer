@@ -112,3 +112,64 @@ Stage Summary:
 - ✅ لا تغيير في شكل البطاقات أو الألوان أو الخطوط
 - ✅ البيانات تتحدث مباشرة (reactive عبر useMemo)
 - ✅ تعديل جزئي فقط (Patch / Incremental Update)
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: إخفاء خيار نوع الدفع عند اختيار الشريك الثاني في قسم المركبات
+
+Work Log:
+- تعديل VehicleTransactionModal.tsx:
+  - إضافة handlePartnerChange بدلاً من useEffect (لتجنب lint error)
+  - عند اختيار الشريك الثاني → paymentType = 'deferred' تلقائياً
+  - إخفاء حقل نوع الدفع عند الشريك الثاني: {partner === 'first' && (...)}
+  - ضمان في handleSave: paymentType = partner === 'second' ? 'deferred' : paymentType
+  - ضمان في useEffect التهيئة: تعيين آجل للشريك الثاني عند التعديل
+- تعديل SharedTransactionsModal.tsx:
+  - إضافة handlePartnerChange للتحويل التلقائي
+  - إخفاء حقل نوع الدفع عند الشريك الثاني (إضافة + تعديل)
+  - في وضع التعديل: عرض "آجل (تلقائي)" بدلاً من قائمة الدفع
+  - ضمان في handleAddTransaction و handleSaveEdit
+
+Stage Summary:
+- ✅ خيار الدفع يظهر فقط للشريك الأول
+- ✅ يختفي عند اختيار الشريك الثاني
+- ✅ الشريك الثاني = آجل دائماً (لا تأثير على الصندوق)
+- ✅ UI Freeze محفوظ بالكامل
+
+---
+Task ID: 5
+Agent: Main Agent + Sub-agents
+Task: إضافة نظام إصدارات الليرة السورية (القديم والجديد) - Currency Re-denomination
+
+Work Log:
+1. استكشاف بنية المشروع:
+   - تحليل قسم الصرافة والأموال بالكامل
+   - اكتشاف وجود syp-conversion.ts و useSYPConversion.ts لكنهما غير مدمجين
+   - فهم آلية الصناديق والمعاملات وأسعار الصرف
+
+2. إنشاء البنية التحتية:
+   - إنشاء src/store/useSYPSettings.ts (Zustand + persist)
+   - تحسين src/lib/syp-conversion.ts بدوال عرض مركزية جديدة:
+     - formatAmountWithSYP()
+     - getDisplayAmount()
+     - formatAmountWithBothVersions()
+     - convertExchangeRateForInternal()
+
+3. تعديل المكونات (عبر وكلاء فرعيين):
+   - VaultCard.tsx: عرض أرصدة SYP بالإصدار الجديد + القديم بجانبه
+   - CurrencyExchangeModal.tsx: إضافة خيار إصدار الإدخال + تحويل سعر الصرف + تنبيهات
+   - TransactionModal.tsx: إضافة خيار إصدار الإدخال + تحويل معامل التحويل
+   - CurrencyModal.tsx: تنبيه سعر الصرف بالإصدار الجديد + تحذير القيم الكبيرة
+   - DebtModal.tsx: إضافة خيار إصدار الإدخال لليرة السورية
+   - BalancesPage.tsx: إضافة زر تبديل الإصدار (ل.س جديد / ل.س قديم)
+
+Stage Summary:
+- ✅ ملف جديد: src/store/useSYPSettings.ts
+- ✅ ملف محسّن: src/lib/syp-conversion.ts
+- ✅ 6 مكونات معدّلة بدعم كامل لليرة السورية
+- ✅ البيانات المخزنة لم تتأثر (كل القيم بالإصدار القديم)
+- ✅ العرض بالإصدار الجديد افتراضياً
+- ✅ خيار تبديل بين الإصدارين
+- ✅ تنبيهات عند إدخال أسعار صرف بالإصدار القديم
+- ✅ تحويل تلقائي للإدخال بالإصدار الجديد

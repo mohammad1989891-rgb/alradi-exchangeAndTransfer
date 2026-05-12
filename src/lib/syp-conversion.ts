@@ -214,3 +214,114 @@ export function getStoredValueFromInput(
   }
   return inputValue;
 }
+
+// ============================================
+// 🔹 دوال عرض مركزية لليرة السورية
+// تستخدم في جميع مكونات العرض
+// ============================================
+
+/**
+ * تنسيق مبلغ للعرض حسب العملة مع دعم الإصدار الجديد
+ * Format any amount for display with automatic SYP conversion
+ * 
+ * هذه الدالة المركزية التي يجب استخدامها في جميع أماكن عرض المبالغ
+ * 
+ * @param storedValue - القيمة المخزنة (الإصدار القديم دائماً)
+ * @param currencyId - معرف العملة
+ * @param currencyCode - رمز العملة
+ * @param displayVersion - إصدار العرض المطلوب
+ * @param decimals - عدد الخانات العشرية
+ * @returns القيمة المنسقة للعرض
+ */
+export function formatAmountWithSYP(
+  storedValue: number,
+  currencyId?: string,
+  currencyCode?: string,
+  displayVersion: 'NEW' | 'OLD' = 'NEW',
+  decimals: number = 2
+): string {
+  if (isSYPCurrency(currencyId, currencyCode)) {
+    const displayValue = calculateDisplayValue(storedValue, displayVersion);
+    const formatted = displayValue.toLocaleString('en-US', {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    return formatted;
+  }
+  // للعملات الأخرى
+  return storedValue.toLocaleString('en-US', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
+}
+
+/**
+ * الحصول على القيمة المعروضة رقمياً (بدون تنسيق)
+ * Get raw display value (unformatted) for calculations in UI
+ */
+export function getDisplayAmount(
+  storedValue: number,
+  currencyId?: string,
+  currencyCode?: string,
+  displayVersion: 'NEW' | 'OLD' = 'NEW'
+): number {
+  if (isSYPCurrency(currencyId, currencyCode)) {
+    return calculateDisplayValue(storedValue, displayVersion);
+  }
+  return storedValue;
+}
+
+/**
+ * تنسيق مبلغ مع عرض الإصدار القديم بجانب الجديد
+ * Format amount with both versions shown (compact inline)
+ * 
+ * مثال: "100 (10,000 قديم)"
+ */
+export function formatAmountWithBothVersions(
+  storedValue: number,
+  currencyId?: string,
+  currencyCode?: string,
+  displayVersion: 'NEW' | 'OLD' = 'NEW'
+): { main: string; sub?: string } {
+  if (isSYPCurrency(currencyId, currencyCode)) {
+    const newValue = convertToNewVersion(storedValue);
+    if (displayVersion === 'NEW') {
+      return {
+        main: newValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        sub: `(${storedValue.toLocaleString('en-US', { maximumFractionDigits: 0 })} قديم)`,
+      };
+    }
+    return {
+      main: storedValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+      sub: `(${newValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} جديد)`,
+    };
+  }
+  return {
+    main: storedValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+  };
+}
+
+/**
+ * تحويل سعر الصرف لليرة السورية عند الإدخال
+ * 
+ * المستخدم يدخل السعر بالإصدار الجديد
+ * ويتم تحويله داخلياً للإصدار القديم
+ * 
+ * مثال:
+ * - 1$ = 100 ليرة جديدة → المخزن: 10000 (قديم)
+ * - الدالة الداخلية تستخدم: rate / 100 = 1 (لتوافق القيم القديمة)
+ */
+export function convertExchangeRateForInternal(
+  userInputRate: number,
+  isSYPInvolved: boolean,
+  inputVersion: 'NEW' | 'OLD' = 'NEW'
+): number {
+  if (!isSYPInvolved) return userInputRate;
+  
+  if (inputVersion === 'NEW') {
+    // المستخدم أدخل السعر بالإصدار الجديد
+    // نحتاج لتحويله للقيمة المخزنة (القديمة)
+    return userInputRate * SYP_CONVERSION_FACTOR;
+  }
+  return userInputRate;
+}

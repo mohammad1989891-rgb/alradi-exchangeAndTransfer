@@ -32,6 +32,8 @@ import {
 } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
+import { isSYPCurrency, convertExchangeRateForDisplay, convertExchangeRateForStorage, isLikelyOldVersion, convertToOldVersion } from '@/lib/syp-conversion';
+import { useSYPSettings } from '@/store/useSYPSettings';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Coins, DollarSign, TrendingUp, Info, Check, Search, RefreshCw, RotateCcw, ArrowUpRight, ArrowDownRight } from 'lucide-react';
 import type { Currency } from '@/lib/localDb';
@@ -42,6 +44,7 @@ export function CurrencyModal() {
   const { isCurrencyModalOpen, closeCurrencyModal } = useAppStore();
   const { allCurrencies, activateCurrency, deactivateCurrency, updateCurrencyExchangeRate, refreshData, isLoading } = useLocalData();
   const { toast } = useToast();
+  const { displayVersion } = useSYPSettings();
   
   const [editingCurrency, setEditingCurrency] = useState<string | null>(null);
   const [exchangeRateInput, setExchangeRateInput] = useState<string>('');
@@ -72,17 +75,27 @@ export function CurrencyModal() {
         await activateCurrency(currency.id, 1);
       } else {
         setEditingCurrency(currency.id);
-        setExchangeRateInput(String(currency.exchangeRate || 1));
+        setExchangeRateInput(
+          isSYPCurrency(currency.id, currency.code)
+            ? String(convertExchangeRateForDisplay(currency.exchangeRate || 1, 'NEW'))
+            : String(currency.exchangeRate || 1)
+        );
         setConversionMethodInput(currency.conversionMethod || 'MULTIPLY');
       }
     }
   };
   
   const handleSaveExchangeRate = async (currencyId: string) => {
-    const rate = parseFloat(exchangeRateInput);
+    let rate = parseFloat(exchangeRateInput);
     if (isNaN(rate) || rate <= 0) {
       alert('يرجى إدخال قيمة صحيحة');
       return;
+    }
+    
+    // Convert SYP rate from NEW version to stored (OLD) version
+    const targetCurrency = allCurrencies.find(c => c.id === currencyId);
+    if (targetCurrency && isSYPCurrency(targetCurrency.id, targetCurrency.code)) {
+      rate = convertExchangeRateForStorage(rate, 'NEW');
     }
     
     await activateCurrency(currencyId, rate);
@@ -223,8 +236,22 @@ export function CurrencyModal() {
                             <Input
                               type="number"
                               step="0.0001"
-                              value={currency.exchangeRate}
-                              onChange={(e) => handleUpdateExchangeRate(currency.id, e.target.value)}
+                              value={
+                                isSYPCurrency(currency.id, currency.code)
+                                  ? convertExchangeRateForDisplay(currency.exchangeRate, displayVersion)
+                                  : currency.exchangeRate
+                              }
+                              onChange={(e) => {
+                                if (isSYPCurrency(currency.id, currency.code)) {
+                                  const val = parseFloat(e.target.value);
+                                  if (!isNaN(val) && val > 0) {
+                                    const storedRate = convertExchangeRateForStorage(val, displayVersion);
+                                    handleUpdateExchangeRate(currency.id, String(storedRate));
+                                  }
+                                } else {
+                                  handleUpdateExchangeRate(currency.id, e.target.value);
+                                }
+                              }}
                               className="w-20 h-8 text-sm text-left"
                               dir="ltr"
                             />
@@ -249,8 +276,18 @@ export function CurrencyModal() {
                       <div className="mt-2 pt-2 border-t border-border/30 space-y-2">
                         <div className="flex items-center gap-1 text-xs text-muted-foreground">
                           <TrendingUp className="w-3 h-3" />
-                          <span>1 {currency.code} = {formatNumber(currency.exchangeRate, 4)} USD</span>
+                          <span>
+                            1 {currency.code} = {isSYPCurrency(currency.id, currency.code)
+                              ? <>{formatNumber(convertExchangeRateForDisplay(currency.exchangeRate, displayVersion), 4)} <span className="text-primary/70">(إصدار جديد)</span></>
+                              : formatNumber(currency.exchangeRate, 4)
+                            } USD
+                          </span>
                         </div>
+                        {isSYPCurrency(currency.id, currency.code) && (
+                          <div className="text-[10px] text-muted-foreground/70">
+                            بالإصدار القديم: 1 {currency.code} = {formatNumber(currency.exchangeRate, 0)} USD
+                          </div>
+                        )}
                         
                         {/* Conversion Method Selector */}
                         <div className="flex items-center gap-2">
@@ -304,6 +341,13 @@ export function CurrencyModal() {
                 <p className="text-sm text-muted-foreground mb-4">
                   كم يساوي 1 وحدة من هذه العملة بالدولار الأمريكي؟
                 </p>
+                {editingCurrency && isSYPCurrency(editingCurrency, allCurrencies.find(c => c.id === editingCurrency)?.code) && (
+                  <div className="rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 p-2 mb-3">
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">
+                      سعر الصرف بالإصدار الجديد (ل.س جديد)
+                    </p>
+                  </div>
+                )}
                 
                 <div className="flex items-center gap-2 mb-4">
                   <span className="text-lg font-bold">
@@ -321,6 +365,23 @@ export function CurrencyModal() {
                   />
                   <span className="text-lg font-bold">$</span>
                 </div>
+                
+                {/* SYP equivalent old version and warning */}
+                {editingCurrency && isSYPCurrency(editingCurrency, allCurrencies.find(c => c.id === editingCurrency)?.code) && (
+                  <div className="space-y-2 mb-4">
+                    {!isNaN(parseFloat(exchangeRateInput)) && parseFloat(exchangeRateInput) > 0 && (
+                      <div className="text-xs text-muted-foreground">
+                        ما يعادل بالإصدار القديم: {formatNumber(convertToOldVersion(parseFloat(exchangeRateInput)), 0)}
+                      </div>
+                    )}
+                    {isLikelyOldVersion(parseFloat(exchangeRateInput)) && (
+                      <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                        <span>⚠️</span>
+                        <span>يبدو أنك أدخلت السعر بالإصدار القديم. يرجى استخدام الإصدار الجديد</span>
+                      </div>
+                    )}
+                  </div>
+                )}
                 
                 {/* Conversion Method Selector */}
                 <div className="mb-4">

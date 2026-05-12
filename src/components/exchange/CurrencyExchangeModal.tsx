@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
+import { useSYPSettings } from '@/store/useSYPSettings';
 import { useLocalData } from '@/hooks/useLocalData';
 import {
   Dialog,
@@ -36,6 +37,15 @@ import { format } from 'date-fns';
 import { addCurrencyExchange, Currency, Vault } from '@/lib/localDb';
 import { useToast } from '@/hooks/use-toast';
 import { motion } from 'framer-motion';
+import {
+  isSYPCurrency,
+  calculateStoredValue,
+  calculateDisplayValue,
+  formatAmountWithSYP,
+  isLikelyOldVersion,
+  SYP_CURRENCY_ID,
+  SYP_CURRENCY_CODE,
+} from '@/lib/syp-conversion';
 
 export function CurrencyExchangeModal() {
   const { isExchangeModalOpen, closeExchangeModal } = useAppStore();
@@ -52,6 +62,11 @@ export function CurrencyExchangeModal() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // SYP input version state
+  const [incomingSYPVersion, setIncomingSYPVersion] = useState<'NEW' | 'OLD'>('NEW');
+  const [outgoingSYPVersion, setOutgoingSYPVersion] = useState<'NEW' | 'OLD'>('NEW');
+  const { displayVersion: globalSYPDisplayVersion } = useSYPSettings();
+
   // Get active currencies
   const activeCurrencies = useMemo(() => {
     return currencies.filter(c => c.isActive);
@@ -66,30 +81,67 @@ export function CurrencyExchangeModal() {
     return activeCurrencies.find(c => c.id === incomingCurrencyId);
   }, [activeCurrencies, incomingCurrencyId]);
 
+  // SYP checks
+  const isIncomingSYP = isSYPCurrency(incomingCurrencyId, incomingCurrency?.code);
+  const isOutgoingSYP = isSYPCurrency(outgoingCurrencyId, outgoingCurrency?.code);
+  const isSYPInvolved = isIncomingSYP || isOutgoingSYP;
+
+  // Helper: convert input amount to stored value based on SYP version
+  const getStoredAmount = (inputAmt: number, isSYP: boolean, version: 'NEW' | 'OLD') => {
+    if (isSYP) return calculateStoredValue(inputAmt, version);
+    return inputAmt;
+  };
+
   // Get vault balances
   const outgoingVault = useMemo(() => {
     return vaults.find(v => v.currencyId === outgoingCurrencyId);
   }, [vaults, outgoingCurrencyId]);
 
+  // Calculate the internal rate adjustment for SYP
+  // internal_rate = outgoing_stored / incoming_stored
+  // If only outgoing is SYP: internal_rate = user_rate * 100
+  // If only incoming is SYP: internal_rate = user_rate / 100
+  // If both are SYP: internal_rate = user_rate (no change)
+  const getInternalRate = (userRate: number) => {
+    if (!isSYPInvolved) return userRate;
+    if (isOutgoingSYP && !isIncomingSYP) return userRate * 100;
+    if (isIncomingSYP && !isOutgoingSYP) return userRate / 100;
+    // Both are SYP
+    return userRate;
+  };
+
   // Calculate outgoing amount automatically based on operation type
-  const outgoingAmount = useMemo(() => {
-    const incoming = parseFloat(incomingAmount) || 0;
-    const rate = parseFloat(exchangeRate) || 0;
-    if (incoming > 0 && rate > 0) {
+  // All calculations use stored (old) values internally
+  const outgoingAmountStored = useMemo(() => {
+    const incomingInput = parseFloat(incomingAmount) || 0;
+    const rateInput = parseFloat(exchangeRate) || 0;
+    if (incomingInput > 0 && rateInput > 0) {
+      // Convert incoming amount to stored value
+      const incomingStored = getStoredAmount(incomingInput, isIncomingSYP, incomingSYPVersion);
+      // Convert rate for internal calculation
+      const internalRate = getInternalRate(rateInput);
       if (rateOperation === 'DIVIDE') {
-        return incoming / rate;
+        return incomingStored / internalRate;
       } else {
-        return incoming * rate;
+        return incomingStored * internalRate;
       }
     }
     return 0;
-  }, [incomingAmount, exchangeRate, rateOperation]);
+  }, [incomingAmount, exchangeRate, rateOperation, isIncomingSYP, isOutgoingSYP, incomingSYPVersion]);
 
-  // Check if has sufficient balance
+  // Display version of outgoing amount
+  const outgoingAmount = useMemo(() => {
+    if (isOutgoingSYP) {
+      return calculateDisplayValue(outgoingAmountStored, globalSYPDisplayVersion);
+    }
+    return outgoingAmountStored;
+  }, [outgoingAmountStored, isOutgoingSYP, globalSYPDisplayVersion]);
+
+  // Check if has sufficient balance (compare stored values)
   const hasSufficientBalance = useMemo(() => {
     if (!outgoingVault) return false;
-    return outgoingVault.balance >= outgoingAmount;
-  }, [outgoingVault, outgoingAmount]);
+    return outgoingVault.balance >= outgoingAmountStored;
+  }, [outgoingVault, outgoingAmountStored]);
 
   // Reset form when modal opens
   useEffect(() => {
@@ -101,6 +153,9 @@ export function CurrencyExchangeModal() {
       setRateOperation('MULTIPLY');
       setDescription('');
       setDate(format(new Date(), 'yyyy-MM-dd'));
+      // Reset SYP version selectors
+      setIncomingSYPVersion('NEW');
+      setOutgoingSYPVersion('NEW');
     }
   }, [isExchangeModalOpen]);
 
@@ -165,11 +220,14 @@ export function CurrencyExchangeModal() {
     setIsSubmitting(true);
 
     try {
+      // Convert to stored values before saving
+      const incomingAmtStored = getStoredAmount(incomingAmt, isIncomingSYP, incomingSYPVersion);
+
       await addCurrencyExchange({
         outgoingCurrencyId,
         incomingCurrencyId,
-        outgoingAmount: outgoingAmount,
-        incomingAmount: incomingAmt,
+        outgoingAmount: outgoingAmountStored,
+        incomingAmount: incomingAmtStored,
         description: description || undefined,
         date,
       });
@@ -244,7 +302,21 @@ export function CurrencyExchangeModal() {
               </div>
 
               <div className="space-y-1">
-                <Label className="text-xs">المبلغ</Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs">المبلغ</Label>
+                  {isIncomingSYP && (
+                    <div className="flex gap-1">
+                      <Button size="sm" variant={incomingSYPVersion === 'NEW' ? 'default' : 'outline'}
+                        className="h-6 text-[10px] px-2" onClick={() => setIncomingSYPVersion('NEW')}>
+                        إصدار جديد
+                      </Button>
+                      <Button size="sm" variant={incomingSYPVersion === 'OLD' ? 'default' : 'outline'}
+                        className="h-6 text-[10px] px-2" onClick={() => setIncomingSYPVersion('OLD')}>
+                        إصدار قديم
+                      </Button>
+                    </div>
+                  )}
+                </div>
                 <Input
                   type="number"
                   placeholder="0.00"
@@ -283,6 +355,18 @@ export function CurrencyExchangeModal() {
                 onChange={(e) => setExchangeRate(e.target.value)}
                 className="text-left text-lg font-bold"
               />
+              {isSYPInvolved && (
+                <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  سعر الصرف يجب إدخاله بالإصدار الجديد
+                </div>
+              )}
+              {isSYPInvolved && parseFloat(exchangeRate) >= 1000 && (
+                <div className="text-xs text-red-500 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  القيمة تبدو كإصدار قديم، يرجى إدخال السعر بالإصدار الجديد
+                </div>
+              )}
               {incomingCurrency && outgoingCurrency && (
                 <div className="text-xs text-muted-foreground">
                   {rateOperation === 'MULTIPLY' 
@@ -387,13 +471,15 @@ export function CurrencyExchangeModal() {
                 {outgoingVault && (
                   <span className="text-muted-foreground flex items-center gap-1">
                     <Wallet className="w-3 h-3" />
-                    الرصيد: {outgoingVault.balance.toFixed(2)} {outgoingCurrency.symbol}
+                    الرصيد: {isOutgoingSYP
+                      ? formatAmountWithSYP(outgoingVault.balance, outgoingCurrencyId, outgoingCurrency?.code, globalSYPDisplayVersion)
+                      : outgoingVault.balance.toFixed(2)} {outgoingCurrency.symbol}
                   </span>
                 )}
               </div>
             )}
 
-            {!hasSufficientBalance && outgoingAmount > 0 && (
+            {!hasSufficientBalance && outgoingAmountStored > 0 && (
               <div className="flex items-center gap-1 text-xs text-red-500">
                 <AlertCircle className="w-3 h-3" />
                 رصيد غير كافٍ
@@ -402,7 +488,7 @@ export function CurrencyExchangeModal() {
           </div>
 
           {/* Calculation Preview */}
-          {outgoingAmount > 0 && incomingCurrency && outgoingCurrency && (
+          {outgoingAmountStored > 0 && incomingCurrency && outgoingCurrency && (
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
@@ -417,7 +503,14 @@ export function CurrencyExchangeModal() {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">تستلم:</span>
                   <span className="font-medium">
-                    {parseFloat(incomingAmount).toFixed(2)} {incomingCurrency.symbol}
+                    {isIncomingSYP
+                      ? formatAmountWithSYP(
+                          getStoredAmount(parseFloat(incomingAmount) || 0, true, incomingSYPVersion),
+                          incomingCurrencyId,
+                          incomingCurrency?.code,
+                          globalSYPDisplayVersion
+                        )
+                      : parseFloat(incomingAmount).toFixed(2)} {incomingCurrency.symbol}
                   </span>
                 </div>
                 <div className="flex justify-between items-center">
@@ -427,7 +520,9 @@ export function CurrencyExchangeModal() {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">تدفع:</span>
                   <span className="font-bold text-red-600">
-                    {outgoingAmount.toFixed(2)} {outgoingCurrency.symbol}
+                    {isOutgoingSYP
+                      ? formatAmountWithSYP(outgoingAmountStored, outgoingCurrencyId, outgoingCurrency?.code, globalSYPDisplayVersion)
+                      : outgoingAmountStored.toFixed(2)} {outgoingCurrency.symbol}
                   </span>
                 </div>
               </div>
@@ -459,7 +554,7 @@ export function CurrencyExchangeModal() {
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !hasSufficientBalance || outgoingAmount <= 0}
+            disabled={isSubmitting || !hasSufficientBalance || outgoingAmountStored <= 0}
             className="bg-primary"
           >
             {isSubmitting ? 'جاري الحفظ...' : 'حفظ العملية'}

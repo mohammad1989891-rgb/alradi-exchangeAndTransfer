@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useSYPSettings } from '@/store/useSYPSettings';
 import { useLocalData } from '@/hooks/useLocalData';
 import {
   Dialog,
@@ -40,8 +39,7 @@ import { motion } from 'framer-motion';
 import {
   isSYPCurrency,
   calculateStoredValue,
-  calculateDisplayValue,
-  formatAmountWithSYP,
+  formatSYPDualDisplay,
 } from '@/lib/syp-conversion';
 
 export function CurrencyExchangeModal() {
@@ -62,7 +60,6 @@ export function CurrencyExchangeModal() {
   // SYP input always uses OLD version (إصدار قديم)
   const incomingSYPVersion = 'OLD' as const;
   const outgoingSYPVersion = 'OLD' as const;
-  const { displayVersion: globalSYPDisplayVersion } = useSYPSettings();
 
   // Get active currencies
   const activeCurrencies = useMemo(() => {
@@ -124,13 +121,8 @@ export function CurrencyExchangeModal() {
     return 0;
   }, [incomingAmount, exchangeRate, rateOperation, isIncomingSYP, isOutgoingSYP, incomingSYPVersion]);
 
-  // Display version of outgoing amount
-  const outgoingAmount = useMemo(() => {
-    if (isOutgoingSYP) {
-      return calculateDisplayValue(outgoingAmountStored, globalSYPDisplayVersion);
-    }
-    return outgoingAmountStored;
-  }, [outgoingAmountStored, isOutgoingSYP, globalSYPDisplayVersion]);
+  // Display version of outgoing amount - always show stored (OLD) value
+  const outgoingAmount = outgoingAmountStored;
 
   // Check if has sufficient balance (compare stored values)
   const hasSufficientBalance = useMemo(() => {
@@ -447,8 +439,8 @@ export function CurrencyExchangeModal() {
                   <span className="text-muted-foreground flex items-center gap-1">
                     <Wallet className="w-3 h-3" />
                     الرصيد: {isOutgoingSYP
-                      ? formatAmountWithSYP(outgoingVault.balance, outgoingCurrencyId, outgoingCurrency?.code, globalSYPDisplayVersion)
-                      : outgoingVault.balance.toFixed(2)} {outgoingCurrency.symbol}
+                      ? <>{outgoingVault.balance.toFixed(2)} {outgoingCurrency.symbol} <span className="text-[9px] text-muted-foreground">({formatSYPDualDisplay(outgoingVault.balance)})</span></>
+                      : <>{outgoingVault.balance.toFixed(2)} {outgoingCurrency.symbol}</>}
                   </span>
                 )}
               </div>
@@ -477,16 +469,16 @@ export function CurrencyExchangeModal() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">تستلم:</span>
-                  <span className="font-medium">
-                    {isIncomingSYP
-                      ? formatAmountWithSYP(
-                          getStoredAmount(parseFloat(incomingAmount) || 0, true, incomingSYPVersion),
-                          incomingCurrencyId,
-                          incomingCurrency?.code,
-                          globalSYPDisplayVersion
-                        )
-                      : parseFloat(incomingAmount).toFixed(2)} {incomingCurrency.symbol}
-                  </span>
+                  <div className="text-left">
+                    <span className="font-medium">
+                      {isIncomingSYP
+                        ? getStoredAmount(parseFloat(incomingAmount) || 0, true, incomingSYPVersion).toFixed(2)
+                        : parseFloat(incomingAmount).toFixed(2)} {incomingCurrency.symbol}
+                    </span>
+                    {isIncomingSYP && (
+                      <p className="text-[9px] text-muted-foreground">{formatSYPDualDisplay(getStoredAmount(parseFloat(incomingAmount) || 0, true, incomingSYPVersion))}</p>
+                    )}
+                  </div>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">سعر الصرف:</span>
@@ -494,11 +486,16 @@ export function CurrencyExchangeModal() {
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">تدفع:</span>
-                  <span className="font-bold text-red-600">
-                    {isOutgoingSYP
-                      ? formatAmountWithSYP(outgoingAmountStored, outgoingCurrencyId, outgoingCurrency?.code, globalSYPDisplayVersion)
-                      : outgoingAmountStored.toFixed(2)} {outgoingCurrency.symbol}
-                  </span>
+                  <div className="text-left">
+                    <span className="font-bold text-red-600">
+                      {isOutgoingSYP
+                        ? outgoingAmountStored.toFixed(2)
+                        : outgoingAmountStored.toFixed(2)} {outgoingCurrency.symbol}
+                    </span>
+                    {isOutgoingSYP && (
+                      <p className="text-[9px] text-muted-foreground">{formatSYPDualDisplay(outgoingAmountStored)}</p>
+                    )}
+                  </div>
                 </div>
               </div>
 

@@ -7,7 +7,7 @@ import { formatNumber } from '@/lib/format';
 import type { Vault, Currency } from '@/lib/localDb';
 import { useAppStore } from '@/store/useAppStore';
 import { useSYPSettings } from '@/store/useSYPSettings';
-import { isSYPCurrency, formatAmountWithBothVersions, getSypPerUnitRate } from '@/lib/syp-conversion';
+import { isSYPCurrency, formatSYPDualDisplay, getSypPerUnitRate } from '@/lib/syp-conversion';
 
 interface VaultCardProps {
   vault: Vault;
@@ -25,13 +25,13 @@ export function VaultCard({ vault, index }: VaultCardProps) {
   const { displayVersion } = useSYPSettings();
   const isSYP = isSYPCurrency(currency?.id, currency?.code);
   
-  // SYP display formatting
-  const balanceFormatted = isSYP
-    ? formatAmountWithBothVersions(Math.abs(balance), currency?.id, currency?.code, displayVersion)
-    : { main: formatNumber(Math.abs(balance)) };
-  const openingBalanceFormatted = isSYP
-    ? formatAmountWithBothVersions(Math.abs(openingBalance), currency?.id, currency?.code, displayVersion)
-    : { main: formatNumber(Math.abs(openingBalance)) };
+  // SYP display formatting - show BOTH versions
+  const balanceDualDisplay = isSYP
+    ? formatSYPDualDisplay(Math.abs(balance))
+    : null;
+  const openingBalanceDualDisplay = isSYP
+    ? formatSYPDualDisplay(Math.abs(openingBalance))
+    : null;
   // لعرض "كم ليرة = 1 دولار" نستخدم الدالة المخصصة التي تحسب 1/exchangeRate مع التحويل
   const displayRate = isSYP
     ? getSypPerUnitRate(currency?.exchangeRate || 0, displayVersion)
@@ -142,11 +142,11 @@ export function VaultCard({ vault, index }: VaultCardProps) {
                 'text-sm font-medium',
                 openingBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
               )}>
-                {openingBalance >= 0 ? '' : '-'}{openingBalanceFormatted.main} {currency?.symbol}
-                {openingBalanceFormatted.sub && (
-                  <span className="text-[10px] text-muted-foreground block mt-0.5">{openingBalanceFormatted.sub}</span>
-                )}
+                {openingBalance >= 0 ? '' : '-'}{formatNumber(Math.abs(openingBalance))} {currency?.symbol}
               </span>
+              {openingBalanceDualDisplay && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">{openingBalanceDualDisplay}</p>
+              )}
             </div>
           </div>
         )}
@@ -159,14 +159,14 @@ export function VaultCard({ vault, index }: VaultCardProps) {
               'text-2xl font-bold tracking-tight',
               isPositive ? 'text-foreground' : 'text-red-500'
             )}>
-              {isPositive ? '' : '-'}{balanceFormatted.main}
+              {isPositive ? '' : '-'}{formatNumber(Math.abs(balance))}
             </span>
             <span className="text-sm text-muted-foreground">
               {currency?.symbol}
             </span>
           </div>
-          {balanceFormatted.sub && (
-            <p className="text-[10px] text-muted-foreground mt-0.5">{balanceFormatted.sub}</p>
+          {balanceDualDisplay && (
+            <p className="text-[10px] text-muted-foreground mt-0.5">{balanceDualDisplay}</p>
           )}
           
           {/* USD Conversion */}
@@ -178,8 +178,8 @@ export function VaultCard({ vault, index }: VaultCardProps) {
               </div>
               <p className="text-[10px] text-muted-foreground mt-0.5">
                 {isSYP ? (
-                  // لليرة السورية: نعرض دائماً "X ليرة = 1 دولار" لأنه الأكثر فائدة
-                  <>{formatNumber(displayRate, 2)} {currency?.code}{displayVersion === 'NEW' ? ' جديد' : ' قديم'} = 1 $</>
+                  // لليرة السورية: عرض الإصدارين معاً
+                  <>{formatNumber(getSypPerUnitRate(currency?.exchangeRate || 0, 'OLD'), 0)} (قديم) / {formatNumber(getSypPerUnitRate(currency?.exchangeRate || 0, 'NEW'), 2)} (جديد) = 1 $</>
                 ) : currency?.conversionMethod === 'DIVIDE' ? (
                   <>{formatNumber(displayRate, 4)} {currency?.code} = 1 $</>
                 ) : (

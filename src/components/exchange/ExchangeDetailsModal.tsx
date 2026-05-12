@@ -3,7 +3,7 @@
 import type { Currency, Exchange } from '@/lib/localDb';
 import { formatNumber, formatDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { isSYPCurrency, convertToNewVersion } from '@/lib/syp-conversion';
+import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import {
   Dialog,
   DialogContent,
@@ -90,7 +90,7 @@ export function ExchangeDetailsModal({
               </p>
               <div className="bg-background rounded-lg p-2 font-mono text-sm">
                 <p>{formatNumber(exchange.outgoingAmount)} {outgoingCurrency?.code}
-                  {isOutgoingSYP && <span className="text-xs text-muted-foreground"> ({convertToNewVersion(exchange.outgoingAmount).toFixed(2)} جديد)</span>}
+                  {isOutgoingSYP && <span className="text-xs text-muted-foreground block mt-0.5">{formatSYPDualDisplay(exchange.outgoingAmount)}</span>}
                 </p>
                 <p className="text-muted-foreground">
                   {exchange.outgoingConversionMethod === 'MULTIPLY' ? '×' : '÷'} {formatNumber(exchange.outgoingRateAtTime, 4)}
@@ -112,7 +112,7 @@ export function ExchangeDetailsModal({
               </p>
               <div className="bg-background rounded-lg p-2 font-mono text-sm">
                 <p>{formatNumber(exchange.incomingAmount)} {incomingCurrency?.code}
-                  {isIncomingSYP && <span className="text-xs text-muted-foreground"> ({convertToNewVersion(exchange.incomingAmount).toFixed(2)} جديد)</span>}
+                  {isIncomingSYP && <span className="text-xs text-muted-foreground block mt-0.5">{formatSYPDualDisplay(exchange.incomingAmount)}</span>}
                 </p>
                 <p className="text-muted-foreground">
                   {exchange.incomingConversionMethod === 'MULTIPLY' ? '×' : '÷'} {formatNumber(exchange.incomingRateAtTime, 4)}

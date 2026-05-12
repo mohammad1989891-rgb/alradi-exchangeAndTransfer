@@ -416,3 +416,60 @@ export function convertInverseExchangeRateForStorage(
   }
   return inputRate;
 }
+
+// ============================================
+// 🔹 دوال العرض المزدوج لليرة السورية
+// تعرض الإصدارين معاً (قديم + جديد) بتنسيق مضغوط
+// ============================================
+
+/**
+ * تنسيق مبلغ الليرة السورية بالإصدارين (مضغوط - سطر واحد)
+ * Format SYP amount with BOTH versions (compact inline)
+ * 
+ * مثال: "10,000 (قديم) / 100 (جديد)"
+ * 
+ * ⚠️ جميع العمليات الحسابية تعتمد الإصدار القديم
+ * ⚠️ التحويل فقط عند العرض
+ * 
+ * @param storedValue - القيمة المخزنة (الإصدار القديم)
+ * @param decimals - عدد الخانات العشرية للإصدار الجديد
+ * @returns نص منسق بالإصدارين
+ */
+export function formatSYPDualDisplay(
+  storedValue: number,
+  decimals: number = 2
+): string {
+  const oldValue = storedValue;
+  const newValue = convertToNewVersion(storedValue);
+  const oldFormatted = Math.abs(oldValue).toLocaleString('en-US', { maximumFractionDigits: 0 });
+  const newFormatted = Math.abs(newValue).toLocaleString('en-US', { 
+    minimumFractionDigits: decimals, 
+    maximumFractionDigits: decimals 
+  });
+  const sign = oldValue < 0 ? '-' : '';
+  return `${sign}${oldFormatted} (قديم) / ${sign}${newFormatted} (جديد)`;
+}
+
+/**
+ * تنسيق مبلغ الليرة السورية بالإصدارين (مفصل - سطرين)
+ * Format SYP amount with BOTH versions (detailed, two parts)
+ * 
+ * مثال: 
+ *   main: "10,000"
+ *   sub: "100 (جديد)"
+ * 
+ * @param storedValue - القيمة المخزنة (الإصدار القديم)
+ * @param decimals - عدد الخانات العشرية
+ * @returns كائن يحتوي على القيمة الرئيسية والفرعية
+ */
+export function formatSYPDualParts(
+  storedValue: number,
+  decimals: number = 2
+): { main: string; sub: string } {
+  const oldValue = storedValue;
+  const newValue = convertToNewVersion(storedValue);
+  return {
+    main: oldValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+    sub: `${newValue.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })} (جديد)`,
+  };
+}

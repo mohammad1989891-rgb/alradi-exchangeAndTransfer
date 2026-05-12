@@ -27,7 +27,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { CurrencyExchange, Currency } from '@/lib/localDb';
-import { isSYPCurrency, convertToNewVersion } from '@/lib/syp-conversion';
+import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 
@@ -114,7 +114,7 @@ export function CurrencyExchangeCard({ exchange, currencies, onDelete }: Currenc
                   </div>
                   {isOutgoingSYP && (
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {convertToNewVersion(exchange.outgoingAmount).toFixed(2)} (جديد)
+                      {formatSYPDualDisplay(exchange.outgoingAmount)}
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground mt-1">
@@ -149,7 +149,7 @@ export function CurrencyExchangeCard({ exchange, currencies, onDelete }: Currenc
                   </div>
                   {isIncomingSYP && (
                     <p className="text-[10px] text-muted-foreground mt-0.5">
-                      {convertToNewVersion(exchange.incomingAmount).toFixed(2)} (جديد)
+                      {formatSYPDualDisplay(exchange.incomingAmount)}
                     </p>
                   )}
                   <p className="text-xs text-muted-foreground mt-1">

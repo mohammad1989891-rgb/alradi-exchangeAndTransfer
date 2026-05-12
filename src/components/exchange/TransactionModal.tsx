@@ -22,8 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { formatNumber, calculateFinalBalance } from '@/lib/format';
-import { isSYPCurrency, calculateStoredValue, calculateDisplayValue, convertExchangeRateForInternal } from '@/lib/syp-conversion';
-import { useSYPSettings } from '@/store/useSYPSettings';
+import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import type { TransactionFormData } from '@/types';
 import { format } from 'date-fns';
 import { 
@@ -88,15 +87,13 @@ export function TransactionModal() {
   const [conversionFactorDisplay, setConversionFactorDisplay] = useState('1');
   const [feesAmountDisplay, setFeesAmountDisplay] = useState('');
   
-  // SYP version support
-  const [amountSYPVersion, setAmountSYPVersion] = useState<'NEW' | 'OLD'>('NEW');
-  const { displayVersion } = useSYPSettings();
+  // SYP version support - دائماً الإصدار القديم للمدخلات
+  // (no conversion needed since OLD = stored value)
   
   // Reset form when modal opens/closes
   useEffect(() => {
     if (isTransactionModalOpen) {
       setErrorMessage(null); // Clear error message
-      setAmountSYPVersion(displayVersion); // Reset SYP version to global setting
       if (editingTransaction) {
         // Determine SYP involvement for editing transaction
         const editBaseCurrency = currencies.find(c => c.id === editingTransaction.baseCurrencyId);
@@ -121,17 +118,16 @@ export function TransactionModal() {
           date: format(new Date(editingTransaction.date), 'yyyy-MM-dd'),
         });
         
-        // Display amount in selected version if base is SYP
+        // Display amount in OLD version if base is SYP (all inputs use OLD)
         if (editIsBaseSYP) {
-          setAmountDisplay(formatInputNumber(calculateDisplayValue(editingTransaction.amount, displayVersion)));
-          setAmountSYPVersion(displayVersion);
+          setAmountDisplay(formatInputNumber(editingTransaction.amount));
         } else {
           setAmountDisplay(formatInputNumber(editingTransaction.amount));
         }
         
-        // Display conversion factor in NEW version if SYP is involved
+        // Display conversion factor in OLD version if SYP is involved (all inputs use OLD)
         if (editIsSYPInvolved) {
-          setConversionFactorDisplay(formatInputNumber(calculateDisplayValue(editingTransaction.conversionFactor, 'NEW')));
+          setConversionFactorDisplay(formatInputNumber(editingTransaction.conversionFactor));
         } else {
           setConversionFactorDisplay(formatInputNumber(editingTransaction.conversionFactor));
         }
@@ -150,7 +146,7 @@ export function TransactionModal() {
         setFeesAmountDisplay('');
       }
     }
-  }, [isTransactionModalOpen, editingTransaction, currencies, displayVersion]);
+  }, [isTransactionModalOpen, editingTransaction, currencies]);
   
   // Get selected currencies
   const baseCurrency = currencies.find(c => c.id === formData.baseCurrencyId);
@@ -192,8 +188,8 @@ export function TransactionModal() {
     const cleanValue = value.replace(/[^0-9.,]/g, '');
     setAmountDisplay(cleanValue);
     const numValue = parseFormattedNumber(cleanValue);
-    // Convert to stored value if base currency is SYP
-    const storedValue = isBaseSYP ? calculateStoredValue(numValue, amountSYPVersion) : numValue;
+    // All SYP inputs use OLD version = stored value directly (no conversion needed)
+    const storedValue = numValue;
     setFormData({ ...formData, amount: storedValue });
   };
   
@@ -202,8 +198,8 @@ export function TransactionModal() {
     const cleanValue = value.replace(/[^0-9.,]/g, '');
     setConversionFactorDisplay(cleanValue);
     const numValue = parseFormattedNumber(cleanValue) || 1;
-    // If SYP is involved, user enters rate in NEW version, convert to stored (OLD)
-    const storedValue = isSYPInvolved ? convertExchangeRateForInternal(numValue, true, 'NEW') : numValue;
+    // If SYP is involved, user enters rate in OLD version = stored value (no conversion needed)
+    const storedValue = numValue;
     setFormData({ ...formData, conversionFactor: storedValue });
   };
   
@@ -215,14 +211,8 @@ export function TransactionModal() {
     setFormData({ ...formData, feesAmount: numValue });
   };
   
-  // Handle SYP version change for amount input
-  const handleAmountSYPVersionChange = (version: 'NEW' | 'OLD') => {
-    setAmountSYPVersion(version);
-    // Re-display the current stored amount in the new version
-    if (isBaseSYP && formData.amount > 0) {
-      setAmountDisplay(formatInputNumber(calculateDisplayValue(formData.amount, version)));
-    }
-  };
+  // SYP version is always OLD - no toggle needed
+  // const handleAmountSYPVersionChange = (version: 'NEW' | 'OLD') => { ... }
   
   const handleSubmit = async () => {
     if (!formData.accountId || !formData.currencyId || !formData.amount || !formData.date) {
@@ -469,30 +459,9 @@ export function TransactionModal() {
                 />
                 {isBaseSYP && (
                   <div className="flex gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleAmountSYPVersionChange('NEW')}
-                      className={cn(
-                        'px-2 py-1 rounded-md text-xs font-medium transition-all',
-                        amountSYPVersion === 'NEW'
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                      )}
-                    >
-                      إصدار جديد
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleAmountSYPVersionChange('OLD')}
-                      className={cn(
-                        'px-2 py-1 rounded-md text-xs font-medium transition-all',
-                        amountSYPVersion === 'OLD'
-                          ? 'bg-primary text-primary-foreground'
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                      )}
-                    >
-                      إصدار قديم
-                    </button>
+                    <span className="px-2 py-1 rounded-md text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                      ل.س قديم
+                    </span>
                   </div>
                 )}
               </div>
@@ -569,7 +538,7 @@ export function TransactionModal() {
                 {isSYPInvolved && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                     <Coins className="w-3 h-3" />
-                    معامل التحويل بالإصدار الجديد
+                    معامل التحويل بالإصدار القديم
                   </p>
                 )}
                 
@@ -578,7 +547,7 @@ export function TransactionModal() {
                   <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30">
                     <RefreshCcw className="w-3 h-3 text-blue-500" />
                     <span className="text-xs text-blue-700 dark:text-blue-300">
-                      1 {baseCurrency?.code} = {formatNumber(isTargetSYP ? calculateDisplayValue(conversionPreview.converted, 'NEW') : conversionPreview.converted, 4)} {targetCurrency?.symbol}
+                      1 {baseCurrency?.code} = {formatNumber(isTargetSYP ? conversionPreview.converted : conversionPreview.converted, 4)} {targetCurrency?.symbol}
                     </span>
                   </div>
                 )}
@@ -586,11 +555,11 @@ export function TransactionModal() {
                 {/* Converted Amount Preview */}
                 <div className="flex items-center justify-center gap-2 py-2">
                   <span className="text-sm text-muted-foreground">
-                    {formatNumber(isBaseSYP ? calculateDisplayValue(formData.amount, 'NEW') : formData.amount)} {baseCurrency?.symbol}
+                    {formatNumber(formData.amount)} {baseCurrency?.symbol}
                   </span>
                   <ArrowRight className="w-4 h-4 text-muted-foreground" />
                   <span className="text-sm font-medium">
-                    {formatNumber(isTargetSYP ? calculateDisplayValue(convertedAmount, 'NEW') : convertedAmount)} {targetCurrency?.symbol}
+                    {formatNumber(convertedAmount)} {targetCurrency?.symbol}
                   </span>
                 </div>
               </motion.div>
@@ -705,7 +674,7 @@ export function TransactionModal() {
                   'font-medium',
                   formData.feesDirection === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
                 )}>
-                  {formData.feesDirection === 'INCOME' ? '+' : '-'}{formatNumber(isTargetSYP ? calculateDisplayValue(feesValue, 'NEW') : feesValue)} {targetCurrency?.symbol}
+                  {formData.feesDirection === 'INCOME' ? '+' : '-'}{formatNumber(feesValue)} {targetCurrency?.symbol}
                 </span>
               </div>
             )}
@@ -760,12 +729,18 @@ export function TransactionModal() {
               'text-3xl font-bold font-mono',
               formData.type === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
             )} dir="ltr">
-              {formatNumber(isTargetSYP ? calculateDisplayValue(calculatedBalance, 'NEW') : calculatedBalance)} {targetCurrency?.symbol}
+              {formatNumber(calculatedBalance)} {targetCurrency?.symbol}
             </p>
+            {isTargetSYP && (
+              <p className="text-[10px] text-muted-foreground mt-1">{formatSYPDualDisplay(calculatedBalance)}</p>
+            )}
             {!isSameCurrency && formData.amount > 0 && (
               <p className="text-xs text-muted-foreground mt-2">
-                = {formatNumber(isBaseSYP ? calculateDisplayValue(formData.amount, 'NEW') : formData.amount)} {baseCurrency?.symbol}
+                = {formatNumber(formData.amount)} {baseCurrency?.symbol}
               </p>
+            )}
+            {isBaseSYP && !isSameCurrency && formData.amount > 0 && (
+              <p className="text-[10px] text-muted-foreground mt-0.5">{formatSYPDualDisplay(formData.amount)}</p>
             )}
           </div>
           

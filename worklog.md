@@ -220,3 +220,26 @@ Stage Summary:
 - DebtsPage.tsx: Added date range filter for main view + all movements modal
 - CurrencyExchangePage.tsx: Already complete, no changes needed
 - Dev server running successfully on port 3000
+---
+Task ID: 1
+Agent: main
+Task: Modify Syrian Lira (SYP) handling in Exchange Section and Currency Management - use OLD version for all calculations, display BOTH versions for balances
+
+Work Log:
+- Added `formatSYPDualDisplay()` and `formatSYPDualParts()` helper functions to `src/lib/syp-conversion.ts`
+- Patched `CurrencyExchangeCard.tsx`: replaced single `(جديد)` display with dual display `formatSYPDualDisplay()` showing "X (قديم) / Y (جديد)"
+- Patched `ExchangeDetailsModal.tsx`: replaced inline `(جديد)` with `formatSYPDualDisplay()` showing both versions
+- Patched `CurrencyTransactionsModal.tsx`: added SYP dual display for balance, income/expense totals, net balance, and individual transactions
+- Patched `CurrencyExchangeModal.tsx`: added dual display for vault balance, summary (تستلم/تدفع), removed formatAmountWithSYP in favor of direct stored value display
+- Patched `CurrencyModal.tsx`: changed SYP input from NEW to OLD version, added dual rate display "(قديم) X = 1$ / (جديد) Y = 1$", updated activation sub-modal labels
+- Patched `VaultCard.tsx`: replaced `formatAmountWithBothVersions` with `formatSYPDualDisplay` for balance/opening balance, added dual rate display
+- Patched `TransactionModal.tsx`: removed SYP version toggle (always OLD), added "ل.س قديم" badge, changed conversion factor to OLD version, added dual display for final balance
+- Patched `DebtModal.tsx`: removed SYP version toggle (always OLD), added "ل.س قديم" badge, added dual display for final balance
+- Cleaned up all unused imports (calculateDisplayValue, formatAmountWithSYP, useSYPSettings, etc.)
+
+Stage Summary:
+- All SYP calculations now use OLD version (stored values) exclusively
+- All SYP balance displays show BOTH versions: "X (قديم) / Y (جديد)" where Y = X ÷ 100
+- Exchange rate displays show both versions: "(قديم) 25,000 = 1$ / (جديد) 250 = 1$"
+- No database changes - conversion is display-only
+- UI Freeze maintained - no layout/design changes, only logic and text content updates

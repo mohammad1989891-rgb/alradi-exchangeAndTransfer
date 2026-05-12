@@ -3,6 +3,7 @@
 import { useAppStore } from '@/store/useAppStore';
 import { cn } from '@/lib/utils';
 import { formatNumber, formatDate } from '@/lib/format';
+import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import {
   Dialog,
   DialogContent,
@@ -89,6 +90,11 @@ export function CurrencyTransactionsModal() {
                       {selectedCurrency.symbol}
                     </span>
                   </div>
+                  {isSYPCurrency(selectedCurrency.id, selectedCurrency.code) && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {formatSYPDualDisplay(selectedVault.balance)}
+                    </p>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -104,6 +110,11 @@ export function CurrencyTransactionsModal() {
               <p className="text-xl font-bold text-emerald-600">
                 {formatNumber(stats.totalIncome)}
               </p>
+              {isSYPCurrency(selectedCurrency?.id, selectedCurrency?.code) && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {formatSYPDualDisplay(stats.totalIncome)}
+                </p>
+              )}
               <p className="text-[10px] text-muted-foreground mt-1">
                 {stats.incomeCount} حركة
               </p>
@@ -117,6 +128,11 @@ export function CurrencyTransactionsModal() {
               <p className="text-xl font-bold text-red-600">
                 {formatNumber(stats.totalExpense)}
               </p>
+              {isSYPCurrency(selectedCurrency?.id, selectedCurrency?.code) && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {formatSYPDualDisplay(stats.totalExpense)}
+                </p>
+              )}
               <p className="text-[10px] text-muted-foreground mt-1">
                 {stats.expenseCount} حركة
               </p>
@@ -129,12 +145,19 @@ export function CurrencyTransactionsModal() {
             netBalance >= 0 ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'
           )}>
             <span className="text-sm text-muted-foreground">صافي الرصيد</span>
-            <span className={cn(
-              'text-lg font-bold',
-              netBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
-            )}>
-              {formatNumber(netBalance)} {selectedCurrency?.symbol}
-            </span>
+            <div className="text-left">
+              <span className={cn(
+                'text-lg font-bold',
+                netBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
+              )}>
+                {formatNumber(netBalance)} {selectedCurrency?.symbol}
+              </span>
+              {isSYPCurrency(selectedCurrency?.id, selectedCurrency?.code) && (
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  {formatSYPDualDisplay(netBalance)}
+                </p>
+              )}
+            </div>
           </div>
           
           {/* Transactions List */}
@@ -193,6 +216,11 @@ export function CurrencyTransactionsModal() {
                         )}>
                           {t.type === 'INCOME' ? '+' : '-'}{formatNumber(t.finalBalance)}
                         </p>
+                        {isSYPCurrency(selectedCurrency?.id, selectedCurrency?.code) && (
+                          <p className="text-[9px] text-muted-foreground">
+                            {formatSYPDualDisplay(t.finalBalance)}
+                          </p>
+                        )}
                         {t.description && (
                           <p className="text-[10px] text-muted-foreground truncate max-w-[100px]">
                             {t.description}

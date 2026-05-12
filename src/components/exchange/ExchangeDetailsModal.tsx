@@ -3,6 +3,7 @@
 import type { Currency, Exchange } from '@/lib/localDb';
 import { formatNumber, formatDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { isSYPCurrency, convertToNewVersion } from '@/lib/syp-conversion';
 import {
   Dialog,
   DialogContent,
@@ -26,6 +27,9 @@ export function ExchangeDetailsModal({
 }: ExchangeDetailsModalProps) {
   const outgoingCurrency = currencies.find(c => c.id === exchange.outgoingCurrencyId);
   const incomingCurrency = currencies.find(c => c.id === exchange.incomingCurrencyId);
+  
+  const isOutgoingSYP = isSYPCurrency(exchange.outgoingCurrencyId, outgoingCurrency?.code);
+  const isIncomingSYP = isSYPCurrency(exchange.incomingCurrencyId, incomingCurrency?.code);
   
   const isProfit = exchange.profit >= 0;
   
@@ -85,7 +89,9 @@ export function ExchangeDetailsModal({
                 1. تحويل المبلغ الصادر إلى دولار
               </p>
               <div className="bg-background rounded-lg p-2 font-mono text-sm">
-                <p>{formatNumber(exchange.outgoingAmount)} {outgoingCurrency?.code}</p>
+                <p>{formatNumber(exchange.outgoingAmount)} {outgoingCurrency?.code}
+                  {isOutgoingSYP && <span className="text-xs text-muted-foreground"> ({convertToNewVersion(exchange.outgoingAmount).toFixed(2)} جديد)</span>}
+                </p>
                 <p className="text-muted-foreground">
                   {exchange.outgoingConversionMethod === 'MULTIPLY' ? '×' : '÷'} {formatNumber(exchange.outgoingRateAtTime, 4)}
                 </p>
@@ -105,7 +111,9 @@ export function ExchangeDetailsModal({
                 2. تحويل المبلغ الوارد إلى دولار
               </p>
               <div className="bg-background rounded-lg p-2 font-mono text-sm">
-                <p>{formatNumber(exchange.incomingAmount)} {incomingCurrency?.code}</p>
+                <p>{formatNumber(exchange.incomingAmount)} {incomingCurrency?.code}
+                  {isIncomingSYP && <span className="text-xs text-muted-foreground"> ({convertToNewVersion(exchange.incomingAmount).toFixed(2)} جديد)</span>}
+                </p>
                 <p className="text-muted-foreground">
                   {exchange.incomingConversionMethod === 'MULTIPLY' ? '×' : '÷'} {formatNumber(exchange.incomingRateAtTime, 4)}
                 </p>

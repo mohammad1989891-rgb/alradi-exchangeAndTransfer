@@ -42,10 +42,6 @@ import {
   calculateStoredValue,
   calculateDisplayValue,
   formatAmountWithSYP,
-  isLikelyOldVersion,
-  SYP_CURRENCY_ID,
-  SYP_CURRENCY_CODE,
-  SYP_CONVERSION_FACTOR,
 } from '@/lib/syp-conversion';
 
 export function CurrencyExchangeModal() {
@@ -63,9 +59,9 @@ export function CurrencyExchangeModal() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // SYP input version state
-  const [incomingSYPVersion, setIncomingSYPVersion] = useState<'NEW' | 'OLD'>('NEW');
-  const [outgoingSYPVersion, setOutgoingSYPVersion] = useState<'NEW' | 'OLD'>('NEW');
+  // SYP input always uses OLD version (إصدار قديم)
+  const incomingSYPVersion = 'OLD' as const;
+  const outgoingSYPVersion = 'OLD' as const;
   const { displayVersion: globalSYPDisplayVersion } = useSYPSettings();
 
   // Get active currencies
@@ -99,17 +95,14 @@ export function CurrencyExchangeModal() {
   }, [vaults, outgoingCurrencyId]);
 
   // Calculate the internal rate adjustment for SYP
-  // المستخدم يدخل سعر الصرف بالإصدار الجديد دائماً
-  // يجب تحويله للإصدار القديم ( المخزن ) بضرب × 100
-  // هذا ينطبق سواء كانت الليرة السورية واردة أم صادرة
-  // لأن السعر بالإصدار الجديد ÷ 100 = السعر بالإصدار القديم
-  // والعكس: السعر القديم = السعر الجديد × 100
+  // المستخدم يدخل سعر الصرف بالإصدار القديم دائماً
+  // المخزن بالإصدار القديم أيضاً → لا حاجة للتحويل
   const getInternalRate = (userRate: number) => {
     if (!isSYPInvolved) return userRate;
     // Both are SYP → no adjustment needed (SYP/SYP = 1)
     if (isOutgoingSYP && isIncomingSYP) return userRate;
-    // SYP is involved (either incoming or outgoing) → convert NEW rate to OLD stored rate
-    return userRate * SYP_CONVERSION_FACTOR;
+    // SYP rate entered in OLD version = already in stored format → no conversion needed
+    return userRate;
   };
 
   // Calculate outgoing amount automatically based on operation type
@@ -155,9 +148,7 @@ export function CurrencyExchangeModal() {
       setRateOperation('MULTIPLY');
       setDescription('');
       setDate(format(new Date(), 'yyyy-MM-dd'));
-      // Reset SYP version selectors
-      setIncomingSYPVersion('NEW');
-      setOutgoingSYPVersion('NEW');
+      // SYP version is always OLD (no state to reset)
     }
   }, [isExchangeModalOpen]);
 
@@ -305,19 +296,7 @@ export function CurrencyExchangeModal() {
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <Label className="text-xs">المبلغ</Label>
-                  {isIncomingSYP && (
-                    <div className="flex gap-1">
-                      <Button size="sm" variant={incomingSYPVersion === 'NEW' ? 'default' : 'outline'}
-                        className="h-6 text-[10px] px-2" onClick={() => setIncomingSYPVersion('NEW')}>
-                        إصدار جديد
-                      </Button>
-                      <Button size="sm" variant={incomingSYPVersion === 'OLD' ? 'default' : 'outline'}
-                        className="h-6 text-[10px] px-2" onClick={() => setIncomingSYPVersion('OLD')}>
-                        إصدار قديم
-                      </Button>
-                    </div>
-                  )}
+                  <Label className="text-xs">المبلغ {isIncomingSYP && <span className="text-amber-600">(ل.س قديم)</span>}</Label>
                 </div>
                 <Input
                   type="number"
@@ -360,13 +339,7 @@ export function CurrencyExchangeModal() {
               {isSYPInvolved && (
                 <div className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                   <AlertCircle className="w-3 h-3" />
-                  سعر الصرف يجب إدخاله بالإصدار الجديد
-                </div>
-              )}
-              {isSYPInvolved && parseFloat(exchangeRate) >= 1000 && (
-                <div className="text-xs text-red-500 flex items-center gap-1">
-                  <AlertCircle className="w-3 h-3" />
-                  القيمة تبدو كإصدار قديم، يرجى إدخال السعر بالإصدار الجديد
+                  سعر الصرف بالإصدار القديم
                 </div>
               )}
               {incomingCurrency && outgoingCurrency && (

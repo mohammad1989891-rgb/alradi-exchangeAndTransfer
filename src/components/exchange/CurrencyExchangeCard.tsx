@@ -27,6 +27,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { CurrencyExchange, Currency } from '@/lib/localDb';
+import { isSYPCurrency, convertToNewVersion } from '@/lib/syp-conversion';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';
 
@@ -43,6 +44,10 @@ export function CurrencyExchangeCard({ exchange, currencies, onDelete }: Currenc
   // Find currencies
   const outgoingCurrency = currencies.find(c => c.id === exchange.outgoingCurrencyId);
   const incomingCurrency = currencies.find(c => c.id === exchange.incomingCurrencyId);
+
+  // SYP checks
+  const isOutgoingSYP = isSYPCurrency(exchange.outgoingCurrencyId, outgoingCurrency?.code);
+  const isIncomingSYP = isSYPCurrency(exchange.incomingCurrencyId, incomingCurrency?.code);
 
   // Determine profit/loss
   const isProfit = exchange.profit >= 0;
@@ -107,6 +112,11 @@ export function CurrencyExchangeCard({ exchange, currencies, onDelete }: Currenc
                       {outgoingCurrency?.symbol || '?'}
                     </span>
                   </div>
+                  {isOutgoingSYP && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {convertToNewVersion(exchange.outgoingAmount).toFixed(2)} (جديد)
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
                     {outgoingCurrency?.name || 'غير معروف'}
                   </p>
@@ -137,6 +147,11 @@ export function CurrencyExchangeCard({ exchange, currencies, onDelete }: Currenc
                       {incomingCurrency?.symbol || '?'}
                     </span>
                   </div>
+                  {isIncomingSYP && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      {convertToNewVersion(exchange.incomingAmount).toFixed(2)} (جديد)
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground mt-1">
                     {incomingCurrency?.name || 'غير معروف'}
                   </p>

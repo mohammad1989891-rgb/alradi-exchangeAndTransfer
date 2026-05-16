@@ -579,8 +579,24 @@ export function DebtsPage() {
 
   // ============================================
   // 🔹 حذف دين مع تأكيد
+  // 🔸 حماية: منع الحذف إذا كان الدين مرتبطاً بدفعات أو فائض
   // ============================================
   const handleDeleteDebtClick = (debt: Debt) => {
+    // التحقق من وجود دفعات مرتبطة بهذا الدين
+    const payments = getPaymentsForDebt(debt.id);
+    const hasPayments = payments.length > 0;
+    // التحقق من وجود فائض مرتبط بأي دفعة
+    const hasOverflow = payments.some(p => p.overflowTransactionId);
+
+    if (hasPayments || hasOverflow) {
+      toast({
+        title: 'لا يمكن الحذف',
+        description: 'لا يمكن حذف هذه الحركة لأنها مرتبطة بدفعات أو فائض',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     const paid = getPaidAmountForDebt(debt.id);
     setDeleteConfirm({
       type: 'DEBT',

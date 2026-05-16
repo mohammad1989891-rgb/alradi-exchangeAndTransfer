@@ -30,7 +30,7 @@ import { formatNumber, formatDate } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import type { Debt, DebtPayment } from '@/lib/localDb';
-import { getAccountDebtSummary, type AccountDebtSummary } from '@/lib/localDb';
+import { getAccountDebtSummary, deleteTransaction, type AccountDebtSummary } from '@/lib/localDb';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
 interface UnifiedMovement {
@@ -580,6 +580,7 @@ export function DebtsPage() {
   // ============================================
   // 🔹 حذف دين مع تأكيد
   // 🔸 حماية: منع الحذف إذا كان الدين مرتبطاً بدفعات أو فائض
+  // 🔸 المسار الصحيح: حذف الدفعات أولاً → حذف الفائض تلقائياً → ثم حذف الدين
   // ============================================
   const handleDeleteDebtClick = (debt: Debt) => {
     // التحقق من وجود دفعات مرتبطة بهذا الدين
@@ -591,17 +592,15 @@ export function DebtsPage() {
     if (hasPayments || hasOverflow) {
       toast({
         title: 'لا يمكن الحذف',
-        description: 'لا يمكن حذف هذه الحركة لأنها مرتبطة بدفعات أو فائض',
+        description: 'يجب حذف جميع الدفعات والفائض المرتبط قبل حذف الدين',
         variant: 'destructive',
       });
       return;
     }
 
-    const paid = getPaidAmountForDebt(debt.id);
     setDeleteConfirm({
       type: 'DEBT',
       data: debt,
-      overflowAmount: paid > 0 ? paid : undefined,
     });
   };
 
@@ -617,10 +616,21 @@ export function DebtsPage() {
           description: 'تم حذف الدين بنجاح',
         });
       } else {
-        await deleteDebtPayment(deleteConfirm.data.id);
+        const payment = deleteConfirm.data as DebtPayment;
+        // 🔸 حذف الفائض المرتبط بالدفعة تلقائياً قبل حذف الدفعة
+        if (payment.overflowTransactionId) {
+          try {
+            await deleteTransaction(payment.overflowTransactionId);
+          } catch (e) {
+            console.error('Error deleting overflow transaction:', e);
+          }
+        }
+        await deleteDebtPayment(payment.id);
         toast({
           title: 'تم الحذف',
-          description: 'تم حذف الدفعة بنجاح',
+          description: payment.overflowTransactionId
+            ? 'تم حذف الدفعة والفائض المرتبط بها'
+            : 'تم حذف الدفعة بنجاح',
         });
       }
       

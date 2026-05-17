@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion } from 'framer-motion';
 import {
@@ -15,6 +15,8 @@ import {
   DollarSign,
   FileText,
   HandCoins,
+  Banknote,
+  Scale,
 } from 'lucide-react';
 import { formatNumber } from '@/lib/format';
 import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
@@ -103,19 +105,58 @@ export function ReportsPage() {
   const mostActiveAccount = accountStats[0] || null;
 
   // ============================================
-  // الأرصدة الآجلة
+  // الأرصدة (كاش + آجل) حسب العملة
   // ============================================
-  const totalDeferredIncome = useMemo(() => {
-    return transactions
-      .filter(t => t.type === 'INCOME' && t.paymentType === 'DEFERRED')
-      .reduce((sum, t) => sum + t.finalBalance, 0);
+  const [selectedCurrencyId, setSelectedCurrencyId] = useState<string>('cur_usd');
+
+  // أرصدة الكاش حسب العملة
+  const cashByCurrency = useMemo(() => {
+    const map = new Map<string, { income: number; expense: number }>();
+    transactions.forEach(t => {
+      if (t.paymentType !== 'CASH') return;
+      const curId = t.baseCurrencyId || t.currencyId;
+      if (!curId) return;
+      const existing = map.get(curId) || { income: 0, expense: 0 };
+      if (t.type === 'INCOME') {
+        existing.income += t.finalBalance;
+      } else {
+        existing.expense += t.finalBalance;
+      }
+      map.set(curId, existing);
+    });
+    return map;
   }, [transactions]);
 
-  const totalDeferredExpense = useMemo(() => {
-    return transactions
-      .filter(t => t.type === 'EXPENSE' && t.paymentType === 'DEFERRED')
-      .reduce((sum, t) => sum + t.finalBalance, 0);
+  // أرصدة الآجل حسب العملة
+  const deferredByCurrency = useMemo(() => {
+    const map = new Map<string, { income: number; expense: number }>();
+    transactions.forEach(t => {
+      if (t.paymentType !== 'DEFERRED') return;
+      const curId = t.baseCurrencyId || t.currencyId;
+      if (!curId) return;
+      const existing = map.get(curId) || { income: 0, expense: 0 };
+      if (t.type === 'INCOME') {
+        existing.income += t.finalBalance;
+      } else {
+        existing.expense += t.finalBalance;
+      }
+      map.set(curId, existing);
+    });
+    return map;
   }, [transactions]);
+
+  // البيانات حسب العملة المختارة
+  const selectedCurrency = useMemo(() => {
+    return currencies.find(c => c.id === selectedCurrencyId) || { id: 'cur_usd', name: 'دولار', code: 'USD', symbol: '$' };
+  }, [currencies, selectedCurrencyId]);
+
+  const selectedCash = useMemo(() => {
+    return cashByCurrency.get(selectedCurrencyId) || { income: 0, expense: 0 };
+  }, [cashByCurrency, selectedCurrencyId]);
+
+  const selectedDeferred = useMemo(() => {
+    return deferredByCurrency.get(selectedCurrencyId) || { income: 0, expense: 0 };
+  }, [deferredByCurrency, selectedCurrencyId]);
 
   // ============================================
   // 3. إحصائيات الديون
@@ -242,57 +283,116 @@ export function ReportsPage() {
         </motion.div>
       </div>
 
-      {/* الأرصدة الآجلة */}
+      {/* ============================================ */}
+      {/* 🔹 ملخص الأرصدة (كاش + آجل) حسب العملة */}
+      {/* ============================================ */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.12 }}
         className="rounded-2xl bg-card border border-border p-4 space-y-3"
       >
-        <div className="flex items-center gap-2">
-          <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center">
-            <HandCoins className="w-5 h-5 text-amber-500" />
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div className="flex items-center gap-2">
+            <div className="w-9 h-9 rounded-xl bg-teal-500/10 flex items-center justify-center">
+              <Scale className="w-5 h-5 text-teal-500" />
+            </div>
+            <div>
+              <h2 className="font-semibold text-foreground">ملخص الأرصدة</h2>
+              <p className="text-xs text-muted-foreground">كاش وآجل حسب العملة</p>
+            </div>
           </div>
-          <div>
-            <h2 className="font-semibold text-foreground">الأرصدة الآجلة</h2>
-            <p className="text-xs text-muted-foreground">الحركات المؤجلة الدفع</p>
-          </div>
+          {/* Dropdown اختيار العملة */}
+          <select
+            value={selectedCurrencyId}
+            onChange={(e) => setSelectedCurrencyId(e.target.value)}
+            className="text-sm rounded-lg border border-border bg-background px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/50 max-w-[140px]"
+          >
+            {currencies.filter(c => c.isActive).map(cur => (
+              <option key={cur.id} value={cur.id}>
+                {cur.name} ({cur.code})
+              </option>
+            ))}
+          </select>
         </div>
 
-        {/* إجمالي الرصيد لنا (آجل) - Full Width Row */}
+        {/* 🔸 قسم الكاش */}
+        <div className="flex items-center gap-2 pt-1">
+          <Banknote className="w-4 h-4 text-teal-500" />
+          <span className="text-xs font-semibold text-teal-600 dark:text-teal-400">أرصدة الكاش</span>
+        </div>
+
+        {/* الرصيد الكاش لنا */}
         <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/10">
-              <TrendingUp className="w-4 h-4 text-emerald-500" />
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 flex-shrink-0">
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
             </div>
-            <div>
-              <p className="font-medium text-sm text-emerald-700 dark:text-emerald-400">إجمالي الرصيد لنا (آجل)</p>
-              <p className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">إجمالي الحركات الآجلة الواردة</p>
+            <div className="min-w-0">
+              <p className="font-medium text-sm text-emerald-700 dark:text-emerald-400 truncate">الكاش لنا</p>
+              <p className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">الحركات النقدية الواردة</p>
             </div>
           </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400" dir="ltr">
-              {formatNumber(totalDeferredIncome)} $
-            </p>
-          </div>
+          <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap flex-shrink-0 mr-2" dir="ltr">
+            {formatNumber(selectedCash.income)} {selectedCurrency.symbol}
+          </p>
         </div>
 
-        {/* إجمالي الرصيد علينا (آجل) - Full Width Row */}
+        {/* الرصيد الكاش علينا */}
         <div className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-red-500/10">
-              <TrendingDown className="w-4 h-4 text-red-500" />
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10 flex-shrink-0">
+              <TrendingDown className="w-3.5 h-3.5 text-red-500" />
             </div>
-            <div>
-              <p className="font-medium text-sm text-red-700 dark:text-red-400">إجمالي الرصيد علينا (آجل)</p>
-              <p className="text-[10px] text-red-600/70 dark:text-red-400/70">إجمالي الحركات الآجلة الصادرة</p>
+            <div className="min-w-0">
+              <p className="font-medium text-sm text-red-700 dark:text-red-400 truncate">الكاش علينا</p>
+              <p className="text-[10px] text-red-600/70 dark:text-red-400/70">الحركات النقدية الصادرة</p>
             </div>
           </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold text-red-700 dark:text-red-400" dir="ltr">
-              {formatNumber(totalDeferredExpense)} $
-            </p>
+          <p className="text-sm font-semibold text-red-700 dark:text-red-400 whitespace-nowrap flex-shrink-0 mr-2" dir="ltr">
+            {formatNumber(selectedCash.expense)} {selectedCurrency.symbol}
+          </p>
+        </div>
+
+        {/* فاصل */}
+        <div className="border-t border-border" />
+
+        {/* 🔸 قسم الآجل */}
+        <div className="flex items-center gap-2">
+          <HandCoins className="w-4 h-4 text-amber-500" />
+          <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">أرصدة الآجل</span>
+        </div>
+
+        {/* الرصيد الآجل لنا */}
+        <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 flex-shrink-0">
+              <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-medium text-sm text-emerald-700 dark:text-emerald-400 truncate">الآجل لنا</p>
+              <p className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">الحركات الآجلة الواردة</p>
+            </div>
           </div>
+          <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400 whitespace-nowrap flex-shrink-0 mr-2" dir="ltr">
+            {formatNumber(selectedDeferred.income)} {selectedCurrency.symbol}
+          </p>
+        </div>
+
+        {/* الرصيد الآجل علينا */}
+        <div className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10 flex-shrink-0">
+              <TrendingDown className="w-3.5 h-3.5 text-red-500" />
+            </div>
+            <div className="min-w-0">
+              <p className="font-medium text-sm text-red-700 dark:text-red-400 truncate">الآجل علينا</p>
+              <p className="text-[10px] text-red-600/70 dark:text-red-400/70">الحركات الآجلة الصادرة</p>
+            </div>
+          </div>
+          <p className="text-sm font-semibold text-red-700 dark:text-red-400 whitespace-nowrap flex-shrink-0 mr-2" dir="ltr">
+            {formatNumber(selectedDeferred.expense)} {selectedCurrency.symbol}
+          </p>
         </div>
       </motion.div>
 

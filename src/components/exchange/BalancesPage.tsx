@@ -1,10 +1,10 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Wallet, Plus, DollarSign, TrendingUp, TrendingDown, Coins, RefreshCcw, ChevronDown, ChevronUp, HandCoins, Scale, Banknote } from 'lucide-react';
+import { Wallet, Plus, DollarSign, TrendingUp, Coins, RefreshCcw, ChevronDown, ChevronUp, HandCoins, Scale } from 'lucide-react';
 import { VaultCard } from './VaultCard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -24,58 +24,6 @@ export function BalancesPage() {
     await refreshData();
     setIsLoading(false);
   };
-
-  // حالة اختيار العملة للكاش
-  const [selectedCurrencyId, setSelectedCurrencyId] = useState<string>('cur_usd');
-
-  // ============================================
-  // 🔹 حساب أرصدة الكاش حسب العملة المختارة
-  // ============================================
-  const cashBalancesByCurrency = useMemo(() => {
-    // حساب من الحركات النقدية
-    const cashIncomeByCurrency = new Map<string, number>();
-    const cashExpenseByCurrency = new Map<string, number>();
-
-    transactions.forEach(t => {
-      if (t.paymentType !== 'CASH') return;
-      const curId = t.baseCurrencyId || t.currencyId;
-      if (!curId) return;
-      if (t.type === 'INCOME') {
-        cashIncomeByCurrency.set(curId, (cashIncomeByCurrency.get(curId) || 0) + t.finalBalance);
-      } else {
-        cashExpenseByCurrency.set(curId, (cashExpenseByCurrency.get(curId) || 0) + t.finalBalance);
-      }
-    });
-
-    return currencies.map(cur => {
-      const income = cashIncomeByCurrency.get(cur.id) || 0;
-      const expense = cashExpenseByCurrency.get(cur.id) || 0;
-      const vault = vaults.find((v: Vault) => v.currencyId === cur.id);
-      const balance = vault?.balance || 0;
-      return {
-        currencyId: cur.id,
-        currencyName: cur.name,
-        currencyCode: cur.code,
-        currencySymbol: cur.symbol,
-        cashForUs: income,       // الكاش لنا
-        cashAgainstUs: expense,  // الكاش علينا
-        vaultBalance: balance,
-      };
-    });
-  }, [transactions, currencies, vaults]);
-
-  // القيم حسب العملة المختارة
-  const selectedCashData = useMemo(() => {
-    return cashBalancesByCurrency.find(c => c.currencyId === selectedCurrencyId) || {
-      currencyId: selectedCurrencyId,
-      currencyName: 'دولار',
-      currencyCode: 'USD',
-      currencySymbol: '$',
-      cashForUs: 0,
-      cashAgainstUs: 0,
-      vaultBalance: 0,
-    };
-  }, [cashBalancesByCurrency, selectedCurrencyId]);
 
   // ============================================
   // حساب إجمالي الأرصدة الصحيح
@@ -191,75 +139,6 @@ export function BalancesPage() {
           <span>عدد الصناديق المفعلة: {activeVaults.length}</span>
           <span>•</span>
           <span>صافي الديون الآجلة: {netDeferredDebts >= 0 ? '+' : ''}{formatNumber(netDeferredDebts)}$ (غير شامل)</span>
-        </div>
-      </motion.div>
-
-      {/* ============================================ */}
-      {/* 🔹 أرصدة الكاش حسب العملة المختارة */}
-      {/* ============================================ */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl bg-card border border-border p-4 space-y-3"
-      >
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-teal-500/10 flex items-center justify-center">
-              <Banknote className="w-5 h-5 text-teal-500" />
-            </div>
-            <div>
-              <h2 className="font-semibold text-foreground">أرصدة الكاش</h2>
-              <p className="text-xs text-muted-foreground">حسب العملة المختارة</p>
-            </div>
-          </div>
-          {/* Dropdown اختيار العملة */}
-          <select
-            value={selectedCurrencyId}
-            onChange={(e) => setSelectedCurrencyId(e.target.value)}
-            className="text-sm rounded-lg border border-border bg-background px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary/50"
-          >
-            {currencies.filter(c => c.isActive).map(cur => (
-              <option key={cur.id} value={cur.id}>
-                {cur.name} ({cur.code})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* الرصيد الكاش لنا - Full Width Row */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/10">
-              <TrendingUp className="w-4 h-4 text-emerald-500" />
-            </div>
-            <div>
-              <p className="font-medium text-sm text-emerald-700 dark:text-emerald-400">الرصيد الكاش لنا</p>
-              <p className="text-[10px] text-emerald-600/70 dark:text-emerald-400/70">إجمالي الحركات النقدية الواردة</p>
-            </div>
-          </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400" dir="ltr">
-              {formatNumber(selectedCashData.cashForUs)} {selectedCashData.currencySymbol}
-            </p>
-          </div>
-        </div>
-
-        {/* الرصيد الكاش علينا - Full Width Row */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-red-500/10">
-              <TrendingDown className="w-4 h-4 text-red-500" />
-            </div>
-            <div>
-              <p className="font-medium text-sm text-red-700 dark:text-red-400">الرصيد الكاش علينا</p>
-              <p className="text-[10px] text-red-600/70 dark:text-red-400/70">إجمالي الحركات النقدية الصادرة</p>
-            </div>
-          </div>
-          <div className="text-left">
-            <p className="text-sm font-semibold text-red-700 dark:text-red-400" dir="ltr">
-              {formatNumber(selectedCashData.cashAgainstUs)} {selectedCashData.currencySymbol}
-            </p>
-          </div>
         </div>
       </motion.div>
 

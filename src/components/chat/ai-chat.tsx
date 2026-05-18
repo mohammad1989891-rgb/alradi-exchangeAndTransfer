@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bot, Send, Loader2, Sparkles, Trash2 } from 'lucide-react';
+import { Bot, Send, Loader2, Sparkles, Trash2, WifiOff, Wifi } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -40,11 +40,25 @@ export function AiChat() {
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [sessionId] = useState(
     () => `session-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // 🔸 مراقبة حالة الاتصال
+  useEffect(() => {
+    setIsOnline(navigator.onLine);
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -73,6 +87,19 @@ export function AiChat() {
       setMessages((prev) => [...prev, userMessage]);
       setInputValue('');
       setIsLoading(true);
+
+      // 🔸 التحقق من الاتصال بالإنترنت قبل الإرسال
+      if (!navigator.onLine) {
+        const offlineMessage: Message = {
+          id: `offline-${Date.now()}`,
+          role: 'assistant',
+          content: '📡 أنت غير متصل بالإنترنت حالياً. المساعد الذكي يتطلب اتصالاً بالإنترنت للعمل. يرجى المحاولة لاحقاً عند استعادة الاتصال.',
+          timestamp: new Date(),
+        };
+        setMessages((prev) => [...prev, offlineMessage]);
+        setIsLoading(false);
+        return;
+      }
 
       try {
         const res = await fetch('/api/chat', {
@@ -144,10 +171,17 @@ export function AiChat() {
                 المساعد الذكي
               </h3>
               <div className="flex items-center gap-1.5 mt-0.5">
-                <div className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
-                <span className="text-emerald-200/80 text-xs">
-                  متصل الآن
-                </span>
+                {isOnline ? (
+                  <>
+                    <div className="h-1.5 w-1.5 rounded-full bg-emerald-300 animate-pulse" />
+                    <span className="text-emerald-200/80 text-xs">متصل الآن</span>
+                  </>
+                ) : (
+                  <>
+                    <WifiOff className="h-3 w-3 text-amber-300" />
+                    <span className="text-amber-200/80 text-xs">غير متصل</span>
+                  </>
+                )}
               </div>
             </div>
           </div>

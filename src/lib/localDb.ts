@@ -472,6 +472,85 @@ export async function updateCurrencyConversionMethod(currencyId: string, method:
   return (await db.table<Currency>('currencies').get(currencyId))!;
 }
 
+// ============================================
+// 🔹 إضافة عملة مخصصة جديدة (بدون حاجة لـ API)
+// 🔸 تعمل بالكامل بدون إنترنت
+// ============================================
+export async function addCustomCurrency(data: { code: string; name: string; symbol: string; exchangeRate?: number; conversionMethod?: 'MULTIPLY' | 'DIVIDE' }): Promise<Currency> {
+  await initializeDatabase();
+  
+  // 🔸 التحقق من عدم وجود عملة بنفس الرمز
+  const existing = await db.table<Currency>('currencies').where('code').equals(data.code.toUpperCase()).first();
+  if (existing) {
+    throw new Error('العملة موجودة بالفعل');
+  }
+  
+  const now = new Date();
+  const id = 'cur_custom_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
+  
+  const currency: Currency = {
+    id,
+    code: data.code.toUpperCase(),
+    name: data.name,
+    symbol: data.symbol,
+    isDefault: false,
+    isActive: true,
+    exchangeRate: data.exchangeRate || 1,
+    conversionMethod: data.conversionMethod || 'MULTIPLY',
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  await db.table('currencies').add(currency);
+  
+  // 🔸 إنشاء صندوق للعملة الجديدة
+  const existingVault = await db.table<Vault>('vaults').where('currencyId').equals(id).first();
+  if (!existingVault) {
+    await db.table('vaults').add({
+      id: 'vault_' + id,
+      currencyId: id,
+      balance: 0,
+      openingBalance: 0,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+  
+  return currency;
+}
+
+// ============================================
+// 🔹 حذف عملة من قاعدة البيانات المحلية (بدون حاجة لـ API)
+// 🔸 تعمل بالكامل بدون إنترنت
+// ============================================
+export async function deleteCurrencyFromDb(currencyId: string): Promise<void> {
+  await initializeDatabase();
+  
+  const currency = await db.table<Currency>('currencies').get(currencyId);
+  if (!currency) throw new Error('العملة غير موجودة');
+  if (currency.isDefault) throw new Error('لا يمكن حذف العملة الافتراضية');
+  
+  // 🔸 التحقق من عدم وجود حركات مرتبطة بالعملة
+  const relatedTransactions = await db.table('transactions').where('currencyId').equals(currencyId).count();
+  const relatedDebts = await db.table('debts').where('currencyId').equals(currencyId).count();
+  const relatedExchanges = await db.table('currencyExchanges')
+    .filter(e => (e.outgoingCurrencyId === currencyId || e.incomingCurrencyId === currencyId) && !e.isDeleted)
+    .count();
+  
+  if (relatedTransactions > 0 || relatedDebts > 0 || relatedExchanges > 0) {
+    throw new Error('لا يمكن حذف عملة مرتبطة بحركات أو ديون أو عمليات صرف');
+  }
+  
+  // 🔸 حذف الصندوق المرتبط
+  const vault = await db.table<Vault>('vaults').where('currencyId').equals(currencyId).first();
+  if (vault) {
+    await db.table('vaults').delete(vault.id);
+  }
+  
+  // 🔸 حذف العملة
+  await db.table('currencies').delete(currencyId);
+}
+
 // Vault functions
 export async function getVaults(): Promise<Vault[]> {
   await initializeDatabase();

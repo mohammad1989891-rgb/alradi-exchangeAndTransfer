@@ -4,6 +4,7 @@ import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "next-themes";
 import { GlobalErrorBoundary } from "@/components/GlobalErrorBoundary";
+import { OfflineDetector } from "@/components/OfflineDetector";
 
 const cairo = Cairo({
   variable: "--font-cairo",
@@ -71,6 +72,7 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
+          <OfflineDetector />
           <GlobalErrorBoundary>
             {children}
           </GlobalErrorBoundary>
@@ -79,17 +81,67 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              // 🔸 تسجيل Service Worker مع معالجة الأخطاء
+              // 🔸 تسجيل Service Worker مع دعم كامل للعمل بدون إنترنت
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').catch(function(err) {
-                    console.warn('Service Worker registration failed:', err);
+                  navigator.serviceWorker.register('/sw.js', { scope: '/' })
+                    .then(function(registration) {
+                      console.log('SW registered:', registration.scope);
+                      
+                      // 🔸 فحص تحديثات عند عودة الاتصال
+                      window.addEventListener('online', function() {
+                        registration.update();
+                      });
+                      
+                      // 🔸 الاستماع لتحديثات SW
+                      registration.addEventListener('updatefound', function() {
+                        var newWorker = registration.installing;
+                        if (newWorker) {
+                          newWorker.addEventListener('statechange', function() {
+                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                              // 🔸 يوجد تحديث جديد - نرسل رسالة للتطبيق
+                              window.dispatchEvent(new CustomEvent('sw-update-available'));
+                            }
+                          });
+                        }
+                      });
+                    })
+                    .catch(function(err) {
+                      console.warn('SW registration failed:', err);
+                    });
+                  
+                  // 🔸 عند تغيير المتحكم (بعد تحديث SW)
+                  var refreshing = false;
+                  navigator.serviceWorker.addEventListener('controllerchange', function() {
+                    if (!refreshing) {
+                      refreshing = true;
+                      console.log('SW controller changed - page will reload');
+                    }
                   });
                 });
                 
-                // 🔸 تحديث Service Worker تلقائيًا عند توفر نسخة جديدة
-                navigator.serviceWorker.addEventListener('controllerchange', function() {
-                  console.log('Service Worker updated');
+                // 🔸 تخزين الملفات الثابتة بعد تحميل الصفحة
+                window.addEventListener('load', function() {
+                  // 🔸 انتظار 3 ثواني بعد التحميل ثم طلب تخزين الموارد
+                  setTimeout(function() {
+                    if (navigator.serviceWorker.controller) {
+                      // 🔸 جمع كل الروابط الموجودة في الصفحة لتخزينها
+                      var urls = [];
+                      var links = document.querySelectorAll('link[rel="stylesheet"], script[src]');
+                      links.forEach(function(link) {
+                        var href = link.getAttribute('href') || link.getAttribute('src');
+                        if (href && href.startsWith('/') && !href.startsWith('/api')) {
+                          urls.push(href);
+                        }
+                      });
+                      if (urls.length > 0) {
+                        navigator.serviceWorker.controller.postMessage({
+                          type: 'CACHE_URLS',
+                          urls: urls
+                        });
+                      }
+                    }
+                  }, 3000);
                 });
               }
               
@@ -103,6 +155,10 @@ export default function RootLayout({
                 console.error('Unhandled promise rejection:', event.reason);
                 event.preventDefault();
               });
+              
+              // 🔸 منع التحديث التلقائي المزعج
+              // لا نعيد تحميل الصفحة تلقائياً عند تحديث SW
+              // بل نترك المستخدم يقرر متى يحدّث
             `,
           }}
         />

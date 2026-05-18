@@ -57,7 +57,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers } from '@/lib/localDb';
+import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb } from '@/lib/localDb';
 import type { Currency as CurrencyType } from '@/types';
 
 export function SettingsPage() {
@@ -108,39 +108,62 @@ export function SettingsPage() {
     debts: debts.length,
   };
 
-  // Add Currency
+  // Add Currency (بدون إنترنت - يستخدم قاعدة البيانات المحلية)
   const handleAddCurrency = async () => {
     if (!newCurrency.code || !newCurrency.name || !newCurrency.symbol) return;
 
     try {
-      const response = await fetch('/api/currencies', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newCurrency),
+      const result = await addCustomCurrency({
+        code: newCurrency.code,
+        name: newCurrency.name,
+        symbol: newCurrency.symbol,
       });
 
-      const result = await response.json();
-
-      if (result.success) {
-        setCurrencies([...currencies, result.data]);
-        setNewCurrency({ code: '', name: '', symbol: '' });
-        setIsAddCurrencyOpen(false);
-      }
+      // 🔸 تحديث الحالة محلياً
+      setCurrencies([...currencies, result]);
+      setNewCurrency({ code: '', name: '', symbol: '' });
+      setIsAddCurrencyOpen(false);
+      
+      // 🔸 إعادة تحميل البيانات من قاعدة البيانات المحلية
+      await refreshLocalData();
+      
+      toast({
+        title: 'تمت الإضافة',
+        description: `تمت إضافة عملة ${result.name} بنجاح`,
+      });
     } catch (error) {
       console.error('Error adding currency:', error);
+      toast({
+        title: 'خطأ',
+        description: error instanceof Error ? error.message : 'حدث خطأ أثناء إضافة العملة',
+        variant: 'destructive',
+      });
     }
   };
 
-  // Delete Currency
+  // Delete Currency (بدون إنترنت - يستخدم قاعدة البيانات المحلية)
   const handleDeleteCurrency = async () => {
     if (!deleteCurrency) return;
 
     try {
-      await fetch(`/api/currencies?id=${deleteCurrency.id}`, { method: 'DELETE' });
+      await deleteCurrencyFromDb(deleteCurrency.id);
       setCurrencies(currencies.filter(c => c.id !== deleteCurrency.id));
       setDeleteCurrency(null);
+      
+      // 🔸 إعادة تحميل البيانات من قاعدة البيانات المحلية
+      await refreshLocalData();
+      
+      toast({
+        title: 'تم الحذف',
+        description: 'تم حذف العملة بنجاح',
+      });
     } catch (error) {
       console.error('Error deleting currency:', error);
+      toast({
+        title: 'خطأ',
+        description: error instanceof Error ? error.message : 'حدث خطأ أثناء حذف العملة',
+        variant: 'destructive',
+      });
     }
   };
 

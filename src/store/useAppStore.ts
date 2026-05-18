@@ -199,8 +199,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         debtRemaining: debtRemainingData,
       });
       
-      // إطلاق حدث تحديث البيانات
-      window.dispatchEvent(new CustomEvent('app-data-refreshed'));
+      // 🔸 لا نطلق حدث app-data-refreshed هنا لمنع الحلقة
+      // المكونات الأخرى ستستمع لـ local-data-refreshed من useLocalData
     } catch (error) {
       console.error('Error refreshing data:', error);
     }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { BottomNav } from '@/components/exchange/BottomNav';
@@ -60,16 +60,20 @@ export default function Home() {
   const EXIT_TIMEOUT = 2000;
   
   // Check if user is already logged in
+  const savedUserIdRef = useRef<string | null>(null);
   useEffect(() => {
     const savedUserId = localStorage.getItem('currentUserId');
     if (savedUserId) {
-      setCurrentUserId(savedUserId);
+      savedUserIdRef.current = savedUserId;
     }
   }, []);
   
   // Handle splash screen completion
   const handleSplashComplete = () => {
-    if (currentUserId) {
+    if (currentUserId || savedUserIdRef.current) {
+      if (savedUserIdRef.current && !currentUserId) {
+        setCurrentUserId(savedUserIdRef.current);
+      }
       setAppState('app');
     } else {
       setAppState('login');
@@ -96,9 +100,33 @@ export default function Home() {
     });
   };
   
-  // Load data when initialized
+  // 🔸 تحميل البيانات عند التهيئة — مع حماية من حلقة إعادة التصيير
+  // يستخدم JSON serialization للمقارنة بدل المقارنة بالمرجع
+  const lastDataHashRef = useRef('');
+  
+  const localDataHash = useMemo(() => {
+    if (!localData.isInitialized) return '';
+    return JSON.stringify({
+      c: localData.currencies.length,
+      v: localData.vaults.length,
+      a: localData.accounts.length,
+      t: localData.transactions.length,
+      d: localData.debts.length,
+      e: localData.currencyExchanges.length,
+    });
+  }, [
+    localData.isInitialized,
+    localData.currencies.length,
+    localData.vaults.length,
+    localData.accounts.length,
+    localData.transactions.length,
+    localData.debts.length,
+    localData.currencyExchanges.length,
+  ]);
+
   useEffect(() => {
-    if (localData.isInitialized && appState === 'app') {
+    if (localData.isInitialized && appState === 'app' && localDataHash !== lastDataHashRef.current) {
+      lastDataHashRef.current = localDataHash;
       setCurrencies(localData.currencies);
       setVaults(localData.vaults);
       setAccounts(localData.accounts);
@@ -121,6 +149,7 @@ export default function Home() {
     }
   }, [
     localData.isInitialized,
+    localDataHash,
     localData.currencies,
     localData.vaults,
     localData.accounts,
@@ -138,24 +167,34 @@ export default function Home() {
     appState,
   ]);
   
-  // Listen for currency update event
-  useEffect(() => {
-    const handleCurrencyUpdate = async () => {
-      await refreshAllData();
-    };
-    
-    window.addEventListener('currency-updated', handleCurrencyUpdate);
-    return () => window.removeEventListener('currency-updated', handleCurrencyUpdate);
-  }, [refreshAllData]);
+  // 🔸 الاستماع لأحداث تحديث البيانات — مع debounce لمنع التحديثات المتكررة
+  const lastEventRefreshRef = useRef(0);
   
-  // Listen for local data refresh event
   useEffect(() => {
-    const handleLocalDataRefreshed = async () => {
-      await refreshAllData();
+    let cancelled = false;
+    
+    const handleDataEvent = async () => {
+      if (cancelled) return;
+      const now = Date.now();
+      if (now - lastEventRefreshRef.current < 500) return; // debounce
+      lastEventRefreshRef.current = now;
+      try {
+        await refreshAllData();
+      } catch (error) {
+        console.error('Error handling data event:', error);
+      }
     };
     
-    window.addEventListener('local-data-refreshed', handleLocalDataRefreshed);
-    return () => window.removeEventListener('local-data-refreshed', handleLocalDataRefreshed);
+    window.addEventListener('currency-updated', handleDataEvent);
+    window.addEventListener('local-data-refreshed', handleDataEvent);
+    window.addEventListener('app-data-refreshed', handleDataEvent);
+    
+    return () => {
+      cancelled = true;
+      window.removeEventListener('currency-updated', handleDataEvent);
+      window.removeEventListener('local-data-refreshed', handleDataEvent);
+      window.removeEventListener('app-data-refreshed', handleDataEvent);
+    };
   }, [refreshAllData]);
   
   // Handle back button
@@ -258,6 +297,20 @@ export default function Home() {
         >
           <Loader2 className="w-12 h-12 text-primary animate-spin" />
           <p className="text-muted-foreground">جاري تحميل البيانات...</p>
+          {localData.initError && (
+            <div className="text-center space-y-2 mt-2">
+              <p className="text-sm text-red-500">{localData.initError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={localData.retryInit}
+                className="gap-2"
+              >
+                <Loader2 className="w-4 h-4" />
+                إعادة المحاولة
+              </Button>
+            </div>
+          )}
         </motion.div>
       </main>
     );

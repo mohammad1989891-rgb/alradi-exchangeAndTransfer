@@ -298,3 +298,33 @@ Stage Summary:
 - ✅ لا تغيير في التصميم العام (UI Freeze محفوظ)
 - ✅ تعديل جزئي فقط (Patch / Incremental Update)
 - ✅ ملف جديد: src/components/exchange/ReportsPage.tsx
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Diagnose and fix intermittent app stability issues
+
+Work Log:
+- Diagnosed 6 root causes of instability
+- Root Cause 1: Event loop - useLocalData dispatched 'local-data-refreshed' → page.tsx listened → called refreshAllData() → dispatched 'app-data-refreshed' → useLocalData listened again → infinite cycle
+- Root Cause 2: No Error Boundary - any render error = white screen
+- Root Cause 3: No retry mechanism for DB init failures
+- Root Cause 4: No concurrent refresh protection - multiple simultaneous data loads
+- Root Cause 5: Service Worker had no error handling or cache fallback
+- Root Cause 6: Unhandled errors in action handlers (addDebt, updateDebt, etc.)
+- Fixed useLocalData.ts: Added retry mechanism (withRetry), debounce protection, concurrent refresh guard, error state, timeout protection, try/catch on all actions
+- Fixed page.tsx: Added localDataHash memoization to prevent re-render loops, combined event listeners with debounce, added error display with retry button
+- Created GlobalErrorBoundary.tsx: Class-based error boundary with retry/reload options
+- Fixed layout.tsx: Wrapped children in GlobalErrorBoundary, added unhandled error/rejection handlers, improved SW registration with error handling
+- Fixed sw.js: Version 3.0 with Network First + Cache Fallback strategy, individual cache failover, message handling for cache cleanup
+- Fixed useAppStore.ts: Removed 'app-data-refreshed' dispatch from refreshAllData to break event loop
+- Verified: lint check passes (only pre-existing VehicleTransactionModal.tsx error), app returns 200
+
+Stage Summary:
+- Event loop fixed by removing circular dispatch and adding debounce
+- Error Boundary prevents white screen of death
+- Retry mechanism (3 retries with exponential backoff) for DB initialization
+- Concurrent refresh protection prevents duplicate data loads
+- Service Worker v3 with proper Network First + Cache Fallback strategy
+- All action handlers now have try/catch error handling
+- UI Freeze maintained - only stability improvements, no design changes

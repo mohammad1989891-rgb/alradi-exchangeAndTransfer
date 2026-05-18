@@ -3,6 +3,7 @@ import { Cairo } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 import { ThemeProvider } from "next-themes";
+import { GlobalErrorBoundary } from "@/components/GlobalErrorBoundary";
 
 const cairo = Cairo({
   variable: "--font-cairo",
@@ -70,17 +71,38 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
+          <GlobalErrorBoundary>
+            {children}
+          </GlobalErrorBoundary>
           <Toaster />
         </ThemeProvider>
         <script
           dangerouslySetInnerHTML={{
             __html: `
+              // 🔸 تسجيل Service Worker مع معالجة الأخطاء
               if ('serviceWorker' in navigator) {
                 window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js');
+                  navigator.serviceWorker.register('/sw.js').catch(function(err) {
+                    console.warn('Service Worker registration failed:', err);
+                  });
+                });
+                
+                // 🔸 تحديث Service Worker تلقائيًا عند توفر نسخة جديدة
+                navigator.serviceWorker.addEventListener('controllerchange', function() {
+                  console.log('Service Worker updated');
                 });
               }
+              
+              // 🔸 معالجة الأخطاء غير الملتقطة لمنع تعطل التطبيق
+              window.addEventListener('error', function(event) {
+                console.error('Uncaught error:', event.error);
+                event.preventDefault();
+              });
+              
+              window.addEventListener('unhandledrejection', function(event) {
+                console.error('Unhandled promise rejection:', event.reason);
+                event.preventDefault();
+              });
             `,
           }}
         />

@@ -364,3 +364,25 @@ Stage Summary:
 - ✅ إصلاح getFinalCurrencyId: تعيد currencyId (العملة النهائية) بدلاً من baseCurrencyId (العملة الأصلية)
 - ✅ توحيد منطق الفلترة والعرض على العملة النهائية فقط
 - ✅ لا تغيير في التصميم (UI Freeze)
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: تصحيح شامل لمنطق العملة النهائية في ملخص الأرصدة - دعم البيانات القديمة والجديدة
+
+Work Log:
+- تحليل جذري أعمق: الإصلاح السابق (إرجاع currencyId دائمًا) لم يأخذ بالاعتبار البيانات القديمة
+- اكتشاف أن البيانات القديمة (قبل ميزة العملة المزدوجة) لها baseCurrencyId = null
+- في البيانات القديمة: currencyId = العملة الأساسية (وليست النهائية)، finalBalance بعملة مختلفة
+- إعادة كتابة getFinalCurrencyId بثلاث حالات:
+  1. baseCurrencyId ≠ currencyId → currencyId هي النهائية (بيانات جديدة)
+  2. conversionFactor = 1 → currencyId هي الوحيدة (بدون تحويل)
+  3. baseCurrencyId فارغ + تحويل → بيانات قديمة → heuristic: SYP→USD
+- تحديث نسخة كاش Service Worker من v4 إلى v5 لفرض تحديث على هواتف المستخدمين
+- Push إلى GitHub بنجاح
+
+Stage Summary:
+- ✅ دعم كامل للبيانات الجديدة (baseCurrencyId ≠ currencyId)
+- ✅ دعم البيانات القديمة (baseCurrencyId = null + conversionFactor ≠ 1)
+- ✅ تحديث كاش SW لفرض التحديث
+- ✅ UI Freeze محفوظ

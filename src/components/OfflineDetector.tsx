@@ -8,16 +8,20 @@ import { Button } from '@/components/ui/button';
 /**
  * 🔸 مكون كشف حالة الاتصال + إشعار تحديث التطبيق
  * يعرض شريطاً عند فقدان الاتصال أو توفر تحديث
+ * 
+ * ⚠️ لا يُصيَّر على الخادم لمنع Hydration Mismatch
  */
 export function OfflineDetector() {
-  const [isOnline, setIsOnline] = useState(() => {
-    if (typeof navigator !== 'undefined') return navigator.onLine;
-    return true;
-  });
+  // 🔸 لا نعرض شيء حتى يتم التحميل على العميل (لمنع Hydration Mismatch)
+  const [mounted, setMounted] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
 
   useEffect(() => {
+    setMounted(true);
+    setIsOnline(navigator.onLine);
+
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
 
@@ -32,7 +36,7 @@ export function OfflineDetector() {
 
   // 🔸 مراقبة تحديثات Service Worker
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) return;
+    if (!mounted || !('serviceWorker' in navigator)) return;
 
     // 🔸 التحقق من وجود تحديث كل 30 دقيقة
     const checkForUpdates = () => {
@@ -55,7 +59,6 @@ export function OfflineDetector() {
 
         newWorker.addEventListener('statechange', () => {
           if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-            // 🔸 يوجد تحديث جديد
             setShowUpdateBanner(true);
           }
         });
@@ -78,18 +81,20 @@ export function OfflineDetector() {
       clearInterval(interval);
       navigator.serviceWorker.removeEventListener('message', handleSWMessage);
     };
-  }, []);
+  }, [mounted]);
 
   // 🔸 تطبيق التحديث
   const handleUpdate = useCallback(() => {
     if (swRegistration?.waiting) {
       swRegistration.waiting.postMessage({ type: 'SKIP_WAITING' });
     }
-    // 🔸 إعادة التحميل بعد تطبيق التحديث
     setTimeout(() => {
       window.location.reload();
     }, 500);
   }, [swRegistration]);
+
+  // 🔸 لا نعرض شيء على الخادم - فقط على العميل بعد التحميل
+  if (!mounted) return null;
 
   return (
     <>
@@ -153,7 +158,7 @@ export function OfflineDetector() {
 /**
  * 🔸 نبضة قصيرة عند عودة الاتصال
  */
-function OnlinePing({ }: { key?: string }) {
+function OnlinePing() {
   const [showPing, setShowPing] = useState(false);
   const [wasOffline, setWasOffline] = useState(false);
 

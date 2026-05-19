@@ -33,6 +33,19 @@ export function ReportsPage() {
   } = useLocalData();
 
   // ============================================
+  // 🔸 دالة مساعدة: تحديد عملة المبلغ النهائي
+  // حسب مخطط قاعدة البيانات:
+  //   currencyId = العملة النهائية (التي يسجل بها الرصيد)
+  //   baseCurrencyId = عملة المبلغ الأساسي (اختياري)
+  // إذن finalBalance دائمًا بعملة currencyId
+  // ============================================
+  const getFinalCurrencyId = (t: { currencyId: string }): string => {
+    // العملة النهائية هي دائمًا currencyId
+    // finalBalance محسوب ومخزن بعملة currencyId
+    return t.currencyId;
+  };
+
+  // ============================================
   // 1. أكثر عملة تداولًا
   // ============================================
   const currencyStats = useMemo(() => {
@@ -40,7 +53,8 @@ export function ReportsPage() {
 
     // من الحركات
     transactions.forEach((t) => {
-      const cur = currencies.find((c) => c.id === t.currencyId);
+      const finalCurId = getFinalCurrencyId(t);
+      const cur = currencies.find((c) => c.id === finalCurId);
       if (!cur) return;
       const existing = map.get(cur.id) || { count: 0, volume: 0, name: cur.name, code: cur.code, symbol: cur.symbol };
       existing.count += 1;
@@ -109,12 +123,12 @@ export function ReportsPage() {
   // ============================================
   const [selectedCurrencyId, setSelectedCurrencyId] = useState<string>('cur_usd');
 
-  // أرصدة الكاش حسب العملة
+  // أرصدة الكاش حسب العملة النهائية
   const cashByCurrency = useMemo(() => {
     const map = new Map<string, { income: number; expense: number }>();
     transactions.forEach(t => {
       if (t.paymentType !== 'CASH') return;
-      const curId = t.baseCurrencyId || t.currencyId;
+      const curId = getFinalCurrencyId(t);
       if (!curId) return;
       const existing = map.get(curId) || { income: 0, expense: 0 };
       if (t.type === 'INCOME') {
@@ -127,12 +141,12 @@ export function ReportsPage() {
     return map;
   }, [transactions]);
 
-  // أرصدة الآجل حسب العملة
+  // أرصدة الآجل حسب العملة النهائية
   const deferredByCurrency = useMemo(() => {
     const map = new Map<string, { income: number; expense: number }>();
     transactions.forEach(t => {
       if (t.paymentType !== 'DEFERRED') return;
-      const curId = t.baseCurrencyId || t.currencyId;
+      const curId = getFinalCurrencyId(t);
       if (!curId) return;
       const existing = map.get(curId) || { income: 0, expense: 0 };
       if (t.type === 'INCOME') {

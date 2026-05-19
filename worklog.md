@@ -328,3 +328,39 @@ Stage Summary:
 - Service Worker v3 with proper Network First + Cache Fallback strategy
 - All action handlers now have try/catch error handling
 - UI Freeze maintained - only stability improvements, no design changes
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Push filtering fix to GitHub with new Personal Access Token
+
+Work Log:
+- Verified filtering fix commit (ffb19aa) was committed locally but not pushed
+- Old token had expired - updated remote URL with new token
+- Successfully pushed commit ffb19aa to origin/main
+- Cleaned token from remote URL for security
+
+Stage Summary:
+- ✅ Filtering fix pushed to GitHub (ffb19aa)
+- ✅ New GitHub token configured and working
+- ✅ Token cleaned from remote URL
+- ✅ Dev server running on port 3000
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: تصحيح منطق العملة النهائية في قسم التقارير - currencyId هي العملة النهائية
+
+Work Log:
+- تحليل جذري للخلل: دالة getFinalCurrencyId كانت تعيد baseCurrencyId (العملة الأصلية) بدلاً من currencyId (العملة النهائية)
+- حسب مخطط قاعدة البيانات: currencyId = العملة النهائية، baseCurrencyId = عملة المبلغ الأساسي
+- مثال: حركة بمبلغ أساسي 5,000,000 ل.س ومبلغ نهائي 373$ كانت تُصنف تحت الليرة بدلاً من الدولار
+- إصلاح getFinalCurrencyId: ببساطة تعيد t.currencyId دائمًا لأنه هو العملة النهائية
+- إزالة المنطق المعقد والخاطئ (فحص baseCurrencyId وتخمين الدولار)
+- الفلترة والعرض الآن يعتمدان على العملة النهائية فقط
+- UI Freeze محفوظ بالكامل
+
+Stage Summary:
+- ✅ إصلاح getFinalCurrencyId: تعيد currencyId (العملة النهائية) بدلاً من baseCurrencyId (العملة الأصلية)
+- ✅ توحيد منطق الفلترة والعرض على العملة النهائية فقط
+- ✅ لا تغيير في التصميم (UI Freeze)

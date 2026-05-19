@@ -1,7 +1,7 @@
 // Service Worker for Al-Radhi Exchange App
-// Version: 4.0 - Full Offline Support with App Shell Caching
+// Version: 5.0 - Balance filtering fix + cache refresh
 
-const CACHE_NAME = 'alradhi-v4';
+const CACHE_NAME = 'alradhi-v5';
 
 // 🔸 الملفات الأساسية للتخزين المسبق (App Shell)
 const PRECACHE_URLS = [

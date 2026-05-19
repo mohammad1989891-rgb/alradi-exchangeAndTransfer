@@ -34,14 +34,35 @@ export function ReportsPage() {
 
   // ============================================
   // 🔸 دالة مساعدة: تحديد عملة المبلغ النهائي
-  // حسب مخطط قاعدة البيانات:
-  //   currencyId = العملة النهائية (التي يسجل بها الرصيد)
-  //   baseCurrencyId = عملة المبلغ الأساسي (اختياري)
-  // إذن finalBalance دائمًا بعملة currencyId
+  // المنطق:
+  //   - البيانات الجديدة: currencyId = العملة النهائية، baseCurrencyId = العملة الأساسية
+  //   - البيانات القديمة: baseCurrencyId = null، currencyId = العملة الأساسية
+  //   - finalBalance دائمًا بعملة العملة النهائية (Target)
   // ============================================
-  const getFinalCurrencyId = (t: { currencyId: string }): string => {
-    // العملة النهائية هي دائمًا currencyId
-    // finalBalance محسوب ومخزن بعملة currencyId
+  const getFinalCurrencyId = (t: { baseCurrencyId?: string | null; currencyId: string; conversionFactor: number }): string => {
+    // الحالة 1: يوجد تحويل صريح (baseCurrencyId ≠ currencyId)
+    // → currencyId هي العملة النهائية حسب تعريف المخطط
+    if (t.baseCurrencyId && t.baseCurrencyId !== t.currencyId) {
+      return t.currencyId;
+    }
+
+    // الحالة 2: لا يوجد تحويل (معامل التحويل = 1)
+    // → currencyId هي العملة الوحيدة (أساسية ونهائية)
+    if (!t.conversionFactor || t.conversionFactor === 1) {
+      return t.currencyId;
+    }
+
+    // الحالة 3: baseCurrencyId فارغ/مطابق BUT يوجد تحويل (بيانات قديمة)
+    // → currencyId هي العملة الأساسية (وليست النهائية)
+    // → finalBalance بعملة مختلفة عن currencyId
+    // نحدد العملة النهائية بناءً على العملة الأساسية:
+    //   - إذا الأساسية = SYP → النهائية = USD (التحويل الأكثر شيوعًا)
+    //   - إذا الأساسية ≠ SYP → النهائية = العملة الأخرى الأكثر احتمالًا
+    if (t.currencyId === 'cur_syp') {
+      return 'cur_usd';
+    }
+
+    // للعملات الأخرى: نعيد currencyId كحل احتياطي
     return t.currencyId;
   };
 

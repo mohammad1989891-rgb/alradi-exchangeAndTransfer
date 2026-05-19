@@ -1,0 +1,15 @@
+$ bun --hot index.ts
+[2026-05-19T00:25:33.076Z] 🔸 Dev Watcher started
+[2026-05-19T00:25:33.077Z] 🚀 Starting Next.js dev server...
+▲ Next.js 16.1.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.21.99:3000
+- Environments: .env
+
+✓ Starting...
+✓ Ready in 619ms
+[2026-05-19T00:25:34.303Z] ✅ Next.js dev server is ready!
+[2026-05-19T00:25:34.303Z] ✅ Initial server startup successful
+○ Compiling / ...
+ GET / 200 in 5.0s (compile: 4.6s, render: 346ms)
+ GET / 200 in 3.2s (compile: 3.1s, render: 86ms)

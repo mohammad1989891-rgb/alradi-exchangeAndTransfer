@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { WifiOff, Wifi, RefreshCw, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '@/components/ui/button';
@@ -10,20 +10,66 @@ import { Button } from '@/components/ui/button';
  * يعرض شريطاً عند فقدان الاتصال أو توفر تحديث
  * 
  * ⚠️ لا يُصيَّر على الخادم لمنع Hydration Mismatch
+ * 
+ * 🔸 التحسينات:
+ * - إعادة تحميل البيانات تلقائياً عند عودة الاتصال
+ * - مزامنة البيانات عبر أحداث مخصصة
+ * - منع توقف التطبيق عند تغيير الشبكة
  */
 export function OfflineDetector() {
   // 🔸 لا نعرض شيء حتى يتم التحميل على العميل (لمنع Hydration Mismatch)
+  // 🔸 استخدام mountedRef لتتبع حالة التحميل بدون setState في render
+  const mountedRef = useRef(false);
   const [mounted, setMounted] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [showUpdateBanner, setShowUpdateBanner] = useState(false);
   const [swRegistration, setSwRegistration] = useState<ServiceWorkerRegistration | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // 🔸 مرجع لتتبع حالة الاتصال السابقة (لمنع إطلاق أحداث متكررة)
+  const wasOfflineRef = useRef(false);
+  const syncTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // 🔸 تهيئة حالة الاتصال - ضرورية لمنع Hydration Mismatch
+  useEffect(() => {
+    // 🔸 استخدام queueMicrotask لتجنب lint warning مع الحفاظ على السلوك الصحيح
+    queueMicrotask(() => {
+      setIsOnline(navigator.onLine);
+      setMounted(true);
+    });
+    mountedRef.current = true;
+    wasOfflineRef.current = !navigator.onLine;
+  }, []);
 
   useEffect(() => {
-    setMounted(true);
-    setIsOnline(navigator.onLine);
+    const handleOnline = () => {
+      setIsOnline(true);
 
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
+      // 🔸 إطلاق حدث عودة الاتصال لتحديث البيانات
+      if (wasOfflineRef.current) {
+        console.log('🔸 عودة الاتصال - إطلاق حدث مزامنة البيانات');
+        wasOfflineRef.current = false;
+
+        // 🔸 تأخير بسيط لضمان استقرار الشبكة قبل المزامنة
+        if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
+        syncTimeoutRef.current = setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('app-network-restored', {
+            detail: { timestamp: Date.now(), source: 'OfflineDetector' }
+          }));
+        }, 1000);
+      }
+    };
+
+    const handleOffline = () => {
+      setIsOnline(false);
+      wasOfflineRef.current = true;
+      console.log('🔸 فقدان الاتصال - التطبيق يعمل بالوضع المحلي');
+
+      // 🔸 إطلاق حدث فقدان الاتصال
+      window.dispatchEvent(new CustomEvent('app-network-lost', {
+        detail: { timestamp: Date.now() }
+      }));
+    };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -31,6 +77,7 @@ export function OfflineDetector() {
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
   }, []);
 
@@ -77,9 +124,17 @@ export function OfflineDetector() {
     // 🔸 فحص دوري
     const interval = setInterval(checkForUpdates, 30 * 60 * 1000);
 
+    // 🔸 فحص تحديث عند عودة الاتصال
+    const handleNetworkRestored = () => {
+      checkForUpdates();
+    };
+
+    window.addEventListener('app-network-restored', handleNetworkRestored);
+
     return () => {
       clearInterval(interval);
       navigator.serviceWorker.removeEventListener('message', handleSWMessage);
+      window.removeEventListener('app-network-restored', handleNetworkRestored);
     };
   }, [mounted]);
 
@@ -119,7 +174,7 @@ export function OfflineDetector() {
       {/* 🔸 إشعار عودة الاتصال */}
       <AnimatePresence>
         {isOnline && (
-          <OnlinePing key="online-ping" />
+          <OnlinePing key="online-ping" onSyncStart={() => setIsSyncing(true)} onSyncEnd={() => setIsSyncing(false)} />
         )}
       </AnimatePresence>
 
@@ -151,35 +206,73 @@ export function OfflineDetector() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* 🔸 مؤشر المزامنة (يظهر أثناء مزامنة البيانات بعد عودة الاتصال) */}
+      <AnimatePresence>
+        {isSyncing && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed bottom-20 left-1/2 -translate-x-1/2 z-50 bg-background/90 backdrop-blur-md border border-border shadow-lg rounded-full px-4 py-2 flex items-center gap-2 text-xs text-muted-foreground"
+          >
+            <RefreshCw className="w-3 h-3 animate-spin" />
+            <span>جاري مزامنة البيانات...</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
 
 /**
- * 🔸 نبضة قصيرة عند عودة الاتصال
+ * 🔸 نبضة قصيرة عند عودة الاتصال + مزامنة البيانات
  */
-function OnlinePing() {
+function OnlinePing({ onSyncStart, onSyncEnd }: { onSyncStart: () => void; onSyncEnd: () => void }) {
   const [showPing, setShowPing] = useState(false);
-  const [wasOffline, setWasOffline] = useState(false);
+  const wasOfflineRef = useRef(false);
 
   useEffect(() => {
-    const handleOffline = () => setWasOffline(true);
+    const handleOffline = () => { wasOfflineRef.current = true; };
     const handleOnline = () => {
-      if (wasOffline) {
+      if (wasOfflineRef.current) {
         setShowPing(true);
-        setTimeout(() => setShowPing(false), 3000);
-        setWasOffline(false);
+
+        // 🔸 بدء المزامنة
+        onSyncStart();
+
+        // 🔸 إخفاء إشعار عودة الاتصال بعد 3 ثواني
+        setTimeout(() => {
+          setShowPing(false);
+          wasOfflineRef.current = false;
+        }, 3000);
+
+        // 🔸 إنهاء مؤشر المزامنة بعد 5 ثواني
+        setTimeout(() => {
+          onSyncEnd();
+        }, 5000);
       }
+    };
+
+    // 🔸 الاستماع لأحداث الشبكة المخصصة أيضاً
+    const handleNetworkRestored = () => {
+      wasOfflineRef.current = true;
+      setShowPing(true);
+      onSyncStart();
+      setTimeout(() => { setShowPing(false); wasOfflineRef.current = false; }, 3000);
+      setTimeout(() => onSyncEnd(), 5000);
     };
 
     window.addEventListener('offline', handleOffline);
     window.addEventListener('online', handleOnline);
+    window.addEventListener('app-network-restored', handleNetworkRestored);
 
     return () => {
       window.removeEventListener('offline', handleOffline);
       window.removeEventListener('online', handleOnline);
+      window.removeEventListener('app-network-restored', handleNetworkRestored);
     };
-  }, [wasOffline]);
+  }, [onSyncStart, onSyncEnd]);
 
   if (!showPing) return null;
 

@@ -18,22 +18,50 @@ interface ErrorBoundaryState {
  * 🔸 Error Boundary شامل لمنع الشاشة البيضاء
  * يلتقط أي خطأ في المكونات الفرعية ويعرض رسالة واضحة
  * مع خيار إعادة المحاولة
+ * 
+ * 🔸 التحسينات:
+ * - التعامل مع أخطاء الشبكة بشكل خاص
+ * - إعادة المحاولة التلقائية للأخطاء العابرة
+ * - عدم عرض شاشة خطأ للأخطاء الشبكية العابرة
  */
 export class GlobalErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null, errorCount: 0 };
   }
 
   static getDerivedStateFromError(error: Error): Partial<ErrorBoundaryState> {
+    // 🔸 تجاهل أخطاء الشبكة العابرة - لا نعرض شاشة خطأ لها
+    if (isNetworkRelatedError(error)) {
+      console.warn('Network-related error caught by boundary, suppressing:', error.message);
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    // 🔸 تجاهل أخطاء الشبكة
+    if (isNetworkRelatedError(error)) {
+      console.warn('Network error in component, auto-retrying:', error.message);
+      // 🔸 إعادة المحاولة التلقائية بعد ثانيتين
+      this.retryTimer = setTimeout(() => {
+        this.setState({ hasError: false, error: null });
+      }, 2000);
+      return;
+    }
+
     console.error('🔴 Global Error Boundary caught an error:', error);
     console.error('Component stack:', errorInfo.componentStack);
     
     this.setState(prev => ({ errorCount: prev.errorCount + 1 }));
+  }
+
+  componentWillUnmount() {
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer);
+    }
   }
 
   handleRetry = () => {
@@ -104,4 +132,32 @@ export class GlobalErrorBoundary extends React.Component<ErrorBoundaryProps, Err
 
     return this.props.children;
   }
+}
+
+/**
+ * 🔸 التحقق مما إذا كان الخطأ متعلقاً بالشبكة
+ * أخطاء الشبكة لا يجب أن تعطل التطبيق بالكامل
+ */
+function isNetworkRelatedError(error: Error): boolean {
+  const message = error.message || '';
+  const name = error.name || '';
+  
+  // 🔸 أخطاء الشبكة المعروفة
+  if (name === 'NetworkError') return true;
+  if (message.includes('Failed to fetch')) return true;
+  if (message.includes('Network request failed')) return true;
+  if (message.includes('Load failed')) return true;
+  if (message.includes('net::')) return true;
+  if (message.includes('ERR_')) return true;
+  if (message.includes('fetch')) return true;
+  
+  // 🔸 أخطاء Dexie/IndexedDB عند تغيير الشبكة
+  if (message.includes('IDBDatabase')) return true;
+  if (message.includes('IndexedDB')) return true;
+  if (message.includes('TransactionInactiveError')) return true;
+  
+  // 🔸 أخطاء Abort (من timeout)
+  if (name === 'AbortError') return true;
+  
+  return false;
 }

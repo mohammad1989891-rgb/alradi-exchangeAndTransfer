@@ -197,6 +197,33 @@ export default function Home() {
       window.removeEventListener('app-data-refreshed', handleDataEvent);
     };
   }, [refreshAllData]);
+
+  // ============================================
+  // 🔸 إعادة تحميل البيانات عند عودة الاتصال
+  // 🔸 يضمن تحديث الواجهة تلقائياً بعد انقطاع الشبكة
+  // 🔸 لا يحتاج لإعادة تشغيل التطبيق
+  // ============================================
+  useEffect(() => {
+    let cancelled = false;
+
+    const handleNetworkRestored = async () => {
+      if (cancelled) return;
+      console.log('🔸 عودة الاتصال - تحديث بيانات الواجهة');
+      try {
+        await refreshAllData();
+      } catch (error) {
+        console.error('Error refreshing data on network restore:', error);
+      }
+    };
+
+    // 🔸 الاستماع لحدث عودة الاتصال المخصص
+    window.addEventListener('app-network-restored', handleNetworkRestored);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('app-network-restored', handleNetworkRestored);
+    };
+  }, [refreshAllData]);
   
   // Handle back button
   const handleBackButton = useCallback((e: PopStateEvent) => {

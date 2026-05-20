@@ -91,6 +91,10 @@ export default function RootLayout({
                       // 🔸 فحص تحديثات عند عودة الاتصال
                       window.addEventListener('online', function() {
                         registration.update();
+                        // 🔸 إطلاق حدث عودة الاتصال للتطبيق
+                        window.dispatchEvent(new CustomEvent('app-network-restored', {
+                          detail: { timestamp: Date.now(), source: 'layout-sw' }
+                        }));
                       });
                       
                       // 🔸 الاستماع لتحديثات SW
@@ -153,12 +157,30 @@ export default function RootLayout({
               
               window.addEventListener('unhandledrejection', function(event) {
                 console.error('Unhandled promise rejection:', event.reason);
-                event.preventDefault();
+                // 🔸 منع تعطل التطبيق بسبب أخطاء الشبكة
+                var reason = event.reason;
+                if (reason && (
+                  reason.name === 'NetworkError' ||
+                  reason.message === 'Failed to fetch' ||
+                  reason.message === 'Network request failed' ||
+                  reason.message === 'Load failed' ||
+                  reason.code === 'ERR_NETWORK' ||
+                  reason.message.includes('net::') ||
+                  reason.message.includes('ERR_')
+                )) {
+                  console.warn('Network error suppressed:', reason.message || reason);
+                  event.preventDefault();
+                } else {
+                  event.preventDefault();
+                }
               });
               
               // 🔸 منع التحديث التلقائي المزعج
               // لا نعيد تحميل الصفحة تلقائياً عند تحديث SW
               // بل نترك المستخدم يقرر متى يحدّث
+
+              // 🔸 حفظ حالة البيانات محلياً لاستخدامها بدون إنترنت
+              // يتم التعامل معها عبر Dexie (IndexedDB) تلقائياً
             `,
           }}
         />

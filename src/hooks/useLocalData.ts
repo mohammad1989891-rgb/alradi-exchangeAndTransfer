@@ -291,6 +291,47 @@ export function useLocalData() {
   }, []);
 
   // ============================================
+  // 🔸 إعادة تحميل البيانات عند عودة الاتصال
+  // 🔸 يضمن تحديث الواجهة بعد انقطاع الشبكة
+  // 🔸 البيانات محلية (Dexie) لكن نحتاج لتحديث الـ React state
+  // ============================================
+  useEffect(() => {
+    let cancelled = false;
+
+    const handleNetworkRestored = async () => {
+      if (cancelled) return;
+      console.log('🔸 عودة الاتصال - إعادة تحميل البيانات المحلية');
+
+      // 🔸 تأخير بسيط لضمان استقرار الشبكة
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      try {
+        // 🔸 إعادة تحميل البيانات من Dexie (لا تحتاج إنترنت)
+        await refreshData(true); // skipEvent=true لمنع إطلاق أحداث إضافية
+      } catch (error) {
+        console.error('Error refreshing data after network restore:', error);
+      }
+    };
+
+    // 🔸 الاستماع لحدث عودة الاتصال من OfflineDetector
+    window.addEventListener('app-network-restored', handleNetworkRestored);
+
+    // 🔸 الاستماع لحدث online الأصلي أيضاً (كضمان إضافي)
+    const handleOnline = () => {
+      if (!cancelled) {
+        handleNetworkRestored();
+      }
+    };
+    window.addEventListener('online', handleOnline);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('app-network-restored', handleNetworkRestored);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, [refreshData]);
+
+  // ============================================
   // حساب إجمالي الأرصدة بشكل ديناميكي
   // ============================================
   const calculateTotalBalanceFromVaults = useCallback(() => {

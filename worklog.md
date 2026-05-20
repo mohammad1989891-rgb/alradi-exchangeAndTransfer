@@ -386,3 +386,58 @@ Stage Summary:
 - ✅ دعم البيانات القديمة (baseCurrencyId = null + conversionFactor ≠ 1)
 - ✅ تحديث كاش SW لفرض التحديث
 - ✅ UI Freeze محفوظ
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: تحسين شامل لدعم العمل بدون إنترنت والتعامل مع تغييرات الشبكة
+
+Work Log:
+- استكشاف شامل للكود الحالي: OfflineDetector, SW, useLocalData, page.tsx, layout.tsx, GlobalErrorBoundary
+- اكتشاف أن التطبيق يعمل بالفعل offline-first (Dexie/IndexedDB) لكن يفتقر لعدة ميزات:
+  1. لا مزامنة تلقائية عند عودة الاتصال
+  2. لا timeout لطلبات SW أثناء تغيير الشبكة
+  3. أخطاء الشبكة تسبب شاشة بيضاء
+  4. لا إعادة محاولة لطلبات API الفاشلة
+- إنشاء src/lib/network.ts: وحدة أدوات شبكة جديدة تتضمن:
+  - fetchWithRetry: fetch مع إعادة المحاولة + timeout + exponential backoff
+  - onNetworkChange: اشتراك في أحداث الشبكة
+  - NetworkError: فئة أخطاء شبكة مخصصة
+  - safeApiCall: طلب API مع بديل محلي عند عدم الاتصال
+- تحسين OfflineDetector.tsx:
+  - إطلاق حدث app-network-restored عند عودة الاتصال
+  - إطلاق حدث app-network-lost عند فقدان الاتصال
+  - فحص تحديثات SW عند عودة الاتصال
+  - إضافة مؤشر مزامنة (جاري مزامنة البيانات...)
+  - تحسين OnlinePing للاستماع للأحداث المخصصة أيضاً
+- تحسين public/sw.js (v6):
+  - إضافة timeout للطلبات الشبكية (3 ثواني للتنقل، 5 للموارد)
+  - استراتيجية Network First مع Timeout + Cache Fallback
+  - معالجة أفضل لتغيير الشبكة أثناء الطلبات
+  - تنظيف الكاش القديم تلقائياً
+- تحسين useLocalData.ts:
+  - إضافة useEffect للاستماع لحدث app-network-restored
+  - إعادة تحميل البيانات تلقائياً عند عودة الاتصال
+  - الاستماع لحدث online الأصلي أيضاً كضمان
+- تحسين page.tsx:
+  - إضافة useEffect للاستماع لحدث app-network-restored
+  - تحديث بيانات الواجهة تلقائياً عند عودة الاتصال
+- تحسين layout.tsx:
+  - إطلاق حدث app-network-restored عند حدث online
+  - معالجة أفضل لأخطاء الشبكة في unhandledrejection
+  - كشف أخطاء الشبكة الشائعة (Failed to fetch, ERR_NETWORK, etc.)
+- تحسين GlobalErrorBoundary.tsx:
+  - كشف أخطاء الشبكة (isNetworkRelatedError)
+  - عدم عرض شاشة خطأ للأخطاء الشبكية العابرة
+  - إعادة محاولة تلقائية بعد ثانيتين لأخطاء الشبكة
+  - كشف أخطاء IndexedDB/AbortError كأخطاء شبكية
+
+Stage Summary:
+- ✅ ملف جديد: src/lib/network.ts (وحدة أدوات شبكة كاملة)
+- ✅ OfflineDetector محسّن: مزامنة تلقائية + مؤشر + أحداث مخصصة
+- ✅ Service Worker v6: timeout + أفضل معالجة لتغيير الشبكة
+- ✅ useLocalData: إعادة تحميل تلقائية عند عودة الاتصال
+- ✅ page.tsx: تحديث تلقائي للواجهة عند عودة الاتصال
+- ✅ layout.tsx: معالجة أفضل لأخطاء الشبكة
+- ✅ GlobalErrorBoundary: كشف وتجاهل أخطاء الشبكة
+- ✅ UI Freeze محفوظ بالكامل - فقط تحسينات منطقية

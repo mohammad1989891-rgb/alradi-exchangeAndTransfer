@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { cn } from '@/lib/utils';
 import {
@@ -10,27 +9,15 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import {
   Wallet,
   BarChart3,
   BookOpen,
   Coins,
   PiggyBank,
-  LogOut,
   ShieldCheck,
   Car,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
-import { useToast } from '@/hooks/use-toast';
 
 const menuItems = [
   {
@@ -79,9 +66,7 @@ const menuItems = [
 
 export function SideMenu() {
   const { isSideMenuOpen, closeSideMenu, openVaultQuery, openAccountStatement, openCurrencyModal, openOpeningBalanceModal, setActiveTab } = useAppStore();
-  const { toast } = useToast();
-  const [showExitDialog, setShowExitDialog] = useState(false);
-  
+
   const handleMenuClick = (id: string) => {
     switch (id) {
       case 'vault-query':
@@ -105,23 +90,7 @@ export function SideMenu() {
     }
     closeSideMenu();
   };
-  
-  const handleExit = () => {
-    setShowExitDialog(true);
-  };
-  
-  const handleConfirmExit = () => {
-    // Close the app - in PWA this will minimize/close
-    window.close();
-    // Fallback for browsers that don't allow window.close
-    setShowExitDialog(false);
-    closeSideMenu();
-    toast({
-      title: 'يمكنك إغلاق التطبيق الآن',
-      description: 'بياناتك محفوظة بأمان',
-    });
-  };
-  
+
   return (
     <>
       <Sheet open={isSideMenuOpen} onOpenChange={closeSideMenu}>
@@ -162,33 +131,6 @@ export function SideMenu() {
             })}
           </div>
           
-          {/* Exit Button */}
-          <div className="absolute bottom-20 left-4 right-4">
-            <motion.button
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              onClick={handleExit}
-              className={cn(
-                'w-full flex items-center gap-4 p-4 rounded-xl',
-                'bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800',
-                'hover:border-red-400 dark:hover:border-red-600',
-                'transition-all duration-200 text-right',
-                'hover:shadow-md active:scale-[0.98]'
-              )}
-            >
-              <div className="p-2.5 rounded-lg bg-red-500 text-white">
-                <LogOut className="w-5 h-5" />
-              </div>
-              <div className="flex-1">
-                <h3 className="font-semibold text-red-600 dark:text-red-400">الخروج</h3>
-                <p className="text-xs text-muted-foreground">
-                  إغلاق التطبيق
-                </p>
-              </div>
-            </motion.button>
-          </div>
-          
           {/* Help Section */}
           <div className="absolute bottom-4 left-4 right-4">
             <div className="rounded-xl bg-muted/50 p-3">
@@ -205,30 +147,6 @@ export function SideMenu() {
           </div>
         </SheetContent>
       </Sheet>
-      
-      {/* Exit Confirmation Dialog */}
-      <AlertDialog open={showExitDialog} onOpenChange={setShowExitDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <LogOut className="w-5 h-5 text-red-500" />
-              الخروج من التطبيق
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="block">هل تريد الخروج من التطبيق؟</span>
-              <span className="block text-xs text-emerald-600 dark:text-emerald-400 mt-2">
-                لا تقلق، جميع بياناتك محفوظة تلقائياً ولن تُفقد.
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmExit} className="bg-red-500 hover:bg-red-600">
-              خروج
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

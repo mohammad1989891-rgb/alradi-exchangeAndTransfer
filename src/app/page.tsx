@@ -55,6 +55,7 @@ export default function Home() {
   
   // Exit confirmation state
   const [showExitDialog, setShowExitDialog] = useState(false);
+  const [showLogoutDialog, setShowLogoutDialog] = useState(false);
   const [exitToastShown, setExitToastShown] = useState(false);
   const lastBackPressTime = useRef(0);
   const EXIT_TIMEOUT = 2000;
@@ -369,7 +370,7 @@ export default function Home() {
             <Button
               variant="ghost"
               size="icon"
-              onClick={handleLogout}
+              onClick={() => setShowLogoutDialog(true)}
               className="rounded-full text-red-500 hover:text-red-600"
               title="تسجيل الخروج"
             >
@@ -438,6 +439,30 @@ export default function Home() {
             <AlertDialogCancel>إلغاء</AlertDialogCancel>
             <AlertDialogAction onClick={handleConfirmExit} className="bg-primary">
               خروج
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      
+      {/* Logout Confirmation Dialog */}
+      <AlertDialog open={showLogoutDialog} onOpenChange={setShowLogoutDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <LogOut className="w-5 h-5 text-red-500" />
+              تسجيل الخروج
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="block">هل أنت متأكد أنك تريد تسجيل الخروج؟</span>
+              <span className="block text-xs text-emerald-600 dark:text-emerald-400 mt-2">
+                لا تقلق، جميع بياناتك محفوظة تلقائياً ولن تُفقد.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { setShowLogoutDialog(false); handleLogout(); }} className="bg-red-500 hover:bg-red-600">
+              تسجيل الخروج
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

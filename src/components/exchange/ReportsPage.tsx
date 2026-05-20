@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useRef, useCallback } from 'react';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion } from 'framer-motion';
 import {
@@ -17,10 +17,18 @@ import {
   HandCoins,
   Banknote,
   Scale,
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
-import { formatNumber } from '@/lib/format';
+import { formatNumber, formatDate } from '@/lib/format';
 import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import { cn } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 export function ReportsPage() {
   const {
@@ -194,6 +202,40 @@ export function ReportsPage() {
   }, [deferredByCurrency, selectedCurrencyId]);
 
   // ============================================
+  // 🔸 الضغط المطوّل على خانات الأرصدة
+  // ============================================
+  const [longPressFilter, setLongPressFilter] = useState<{ paymentType: 'CASH' | 'DEFERRED'; type: 'INCOME' | 'EXPENSE' } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleLongPress = useCallback((paymentType: 'CASH' | 'DEFERRED', type: 'INCOME' | 'EXPENSE') => {
+    setLongPressFilter({ paymentType, type });
+  }, []);
+
+  const startLongPress = useCallback((paymentType: 'CASH' | 'DEFERRED', type: 'INCOME' | 'EXPENSE') => {
+    longPressTimer.current = setTimeout(() => handleLongPress(paymentType, type), 500);
+  }, [handleLongPress]);
+
+  const cancelLongPress = useCallback(() => {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }, []);
+
+  // الحركات المفلترة حسب الضغط المطوّل
+  const filteredTransactions = useMemo(() => {
+    if (!longPressFilter) return [];
+    return transactions
+      .filter(t => {
+        if (t.paymentType !== longPressFilter.paymentType) return false;
+        if (t.type !== longPressFilter.type) return false;
+        const curId = getFinalCurrencyId(t);
+        return curId === selectedCurrencyId;
+      })
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions, longPressFilter, selectedCurrencyId]);
+
+  // ============================================
   // 3. إحصائيات الديون
   // ============================================
   const unpaidDebts = useMemo(() => {
@@ -358,7 +400,15 @@ export function ReportsPage() {
         </div>
 
         {/* الرصيد الكاش لنا */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+        <div
+          className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 cursor-pointer select-none active:scale-[0.98] transition-transform"
+          onMouseDown={() => startLongPress('CASH', 'INCOME')}
+          onMouseUp={cancelLongPress}
+          onMouseLeave={cancelLongPress}
+          onTouchStart={() => startLongPress('CASH', 'INCOME')}
+          onTouchEnd={cancelLongPress}
+          onTouchCancel={cancelLongPress}
+        >
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 flex-shrink-0">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
@@ -374,7 +424,15 @@ export function ReportsPage() {
         </div>
 
         {/* الرصيد الكاش علينا */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+        <div
+          className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 cursor-pointer select-none active:scale-[0.98] transition-transform"
+          onMouseDown={() => startLongPress('CASH', 'EXPENSE')}
+          onMouseUp={cancelLongPress}
+          onMouseLeave={cancelLongPress}
+          onTouchStart={() => startLongPress('CASH', 'EXPENSE')}
+          onTouchEnd={cancelLongPress}
+          onTouchCancel={cancelLongPress}
+        >
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10 flex-shrink-0">
               <TrendingDown className="w-3.5 h-3.5 text-red-500" />
@@ -399,7 +457,15 @@ export function ReportsPage() {
         </div>
 
         {/* الرصيد الآجل لنا */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800">
+        <div
+          className="flex items-center justify-between p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 cursor-pointer select-none active:scale-[0.98] transition-transform"
+          onMouseDown={() => startLongPress('DEFERRED', 'INCOME')}
+          onMouseUp={cancelLongPress}
+          onMouseLeave={cancelLongPress}
+          onTouchStart={() => startLongPress('DEFERRED', 'INCOME')}
+          onTouchEnd={cancelLongPress}
+          onTouchCancel={cancelLongPress}
+        >
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-emerald-500/10 flex-shrink-0">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
@@ -415,7 +481,15 @@ export function ReportsPage() {
         </div>
 
         {/* الرصيد الآجل علينا */}
-        <div className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800">
+        <div
+          className="flex items-center justify-between p-3 rounded-xl bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 cursor-pointer select-none active:scale-[0.98] transition-transform"
+          onMouseDown={() => startLongPress('DEFERRED', 'EXPENSE')}
+          onMouseUp={cancelLongPress}
+          onMouseLeave={cancelLongPress}
+          onTouchStart={() => startLongPress('DEFERRED', 'EXPENSE')}
+          onTouchEnd={cancelLongPress}
+          onTouchCancel={cancelLongPress}
+        >
           <div className="flex items-center gap-2 min-w-0">
             <div className="w-7 h-7 rounded-lg flex items-center justify-center bg-red-500/10 flex-shrink-0">
               <TrendingDown className="w-3.5 h-3.5 text-red-500" />
@@ -676,6 +750,67 @@ export function ReportsPage() {
           </div>
         )}
       </motion.div>
+      {/* 🔸 نافذة الحركات المفلترة (الضغط المطوّل) */}
+      <Dialog open={!!longPressFilter} onOpenChange={(open) => { if (!open) setLongPressFilter(null); }}>
+        <DialogContent className="max-w-lg max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {longPressFilter?.type === 'INCOME' ? (
+                <ArrowUpRight className="w-5 h-5 text-emerald-500" />
+              ) : (
+                <ArrowDownRight className="w-5 h-5 text-red-500" />
+              )}
+              <span>
+                {longPressFilter?.paymentType === 'CASH' ? 'كاش' : 'آجل'}{' '}
+                {longPressFilter?.type === 'INCOME' ? 'لنا' : 'علينا'}
+                {' — '}
+                {selectedCurrency.name} ({selectedCurrency.code})
+              </span>
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2 overflow-y-auto max-h-[60vh] pr-1">
+            {filteredTransactions.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">لا توجد حركات</p>
+            ) : (
+              <>
+                <p className="text-xs text-muted-foreground text-center mb-2">
+                  {filteredTransactions.length} حركة
+                </p>
+                {filteredTransactions.map((t) => {
+                  const acc = accounts.find(a => a.id === t.accountId);
+                  const isSYP = isSYPCurrency(selectedCurrencyId, selectedCurrency.code);
+                  return (
+                    <div
+                      key={t.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-muted/50 border border-border"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{acc?.name || 'غير معروف'}</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          {formatDate(t.date)}
+                          {' • '}
+                          {t.paymentType === 'CASH' ? 'كاش' : 'آجل'}
+                          {t.description ? ` • ${t.description}` : ''}
+                        </p>
+                      </div>
+                      <p className={cn(
+                        "text-sm font-semibold whitespace-nowrap flex-shrink-0 mr-2",
+                        t.type === 'INCOME' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
+                      )} dir="ltr">
+                        {isSYP
+                          ? `${formatSYPDualDisplay(Math.abs(t.finalBalance))}`
+                          : `${formatNumber(Math.abs(t.finalBalance))} ${selectedCurrency.symbol}`
+                        }
+                      </p>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

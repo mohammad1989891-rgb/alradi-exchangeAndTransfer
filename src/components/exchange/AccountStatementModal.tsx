@@ -239,14 +239,14 @@ export function AccountStatementModal() {
           .header {
             text-align: center;
             border-bottom: 2px solid #333;
-            padding-bottom: 10px;
-            margin-bottom: 15px;
+            padding-bottom: 8px;
+            margin-bottom: 10px;
           }
-          .header h1 { font-size: 22px; margin-bottom: 4px; }
-          .header p { color: #666; font-size: 13px; }
+          .header h1 { font-size: 20px; margin-bottom: 2px; }
+          .header p { color: #666; font-size: 12px; }
           
           .currency-section {
-            margin-bottom: 20px;
+            margin-bottom: 15px;
           }
           .currency-title {
             background: #f5f5f5;
@@ -298,12 +298,12 @@ export function AccountStatementModal() {
           .debt-row { background: #fffbeb; }
           
           .debt-section {
-            margin-top: 20px;
+            margin-top: 15px;
           }
           
           .footer {
-            margin-top: 30px;
-            padding-top: 15px;
+            margin-top: 15px;
+            padding-top: 10px;
             border-top: 1px solid #ddd;
             text-align: center;
             color: #666;
@@ -318,7 +318,10 @@ export function AccountStatementModal() {
             tr { page-break-inside: avoid; }
             thead { display: table-header-group; }
             tfoot { display: table-footer-group; }
-            .header { page-break-after: avoid; }
+            .header { page-break-after: avoid; page-break-inside: avoid; }
+            .summary-grid { page-break-inside: avoid; page-break-after: avoid; }
+            .currency-title { page-break-after: avoid; }
+            .footer { page-break-before: avoid; }
           }
         </style>
       </head>
@@ -427,9 +430,9 @@ export function AccountStatementModal() {
                   <thead>
                     <tr>
                       <th>التاريخ</th>
-                      <th>النوع</th>
+                      <th>المبلغ الأساسي</th>
+                      <th>العملة</th>
                       <th>المبلغ</th>
-                      <th>مدفوع</th>
                       <th>متبقي</th>
                       <th>البيان</th>
                     </tr>
@@ -441,26 +444,29 @@ export function AccountStatementModal() {
                       const remaining = remainingByDebt[d.id] ?? d.finalBalance;
                       const isReceivable = d.debtType === 'RECEIVABLE' || !d.debtType;
                       const isFullyPaid = remaining <= 0;
+                      const debtCurrency = currencies.find(c => c.id === d.currencyId);
                       
                       return `
                         <tr class="${isFullyPaid ? 'income-row' : 'debt-row'}">
                           <td>${format(new Date(d.date), 'dd/MM/yyyy')}</td>
-                          <td>${isReceivable ? 'لنا' : 'علينا'}</td>
+                          <td>${formatNumber(d.amount)}</td>
+                          <td>${debtCurrency ? debtCurrency.code : ''}</td>
                           <td class="debt">${formatNumber(d.finalBalance)}</td>
-                          <td class="income">${formatNumber(paid)}</td>
                           <td class="${isFullyPaid ? 'income' : 'expense'}">${formatNumber(remaining)}</td>
                           <td>${d.description || '-'}</td>
                         </tr>
-                        ${payments.map(p => `
+                        ${payments.map(p => {
+                          const pCurrency = currencies.find(c => c.id === p.currencyId);
+                          return `
                           <tr style="background: #f0fdfa; font-size: 11px;">
                             <td style="padding-right: 30px;">└ ${format(new Date(p.date), 'dd/MM/yyyy')}</td>
-                            <td>دفعة</td>
+                            <td>${formatNumber(p.amount)}</td>
+                            <td>${pCurrency ? pCurrency.code : ''}</td>
                             <td></td>
-                            <td class="income">-${formatNumber(p.amount)}</td>
                             <td></td>
                             <td>${p.description || ''}</td>
                           </tr>
-                        `).join('')}
+                        `;}).join('')}
                       `;
                     }).join('')}
                   </tbody>

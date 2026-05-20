@@ -74,37 +74,49 @@ export function ReportsPage() {
     return t.currencyId;
   };
 
+  // 🔸 دالة تحويل أي مبلغ إلى دولار
+  const convertToUsd = useCallback((amount: number, currencyId: string): number => {
+    const cur = currencies.find((c) => c.id === currencyId);
+    if (!cur) return amount;
+    const method = cur.conversionMethod || 'MULTIPLY';
+    if (method === 'MULTIPLY') {
+      return amount * cur.exchangeRate;
+    } else {
+      return amount / cur.exchangeRate;
+    }
+  }, [currencies]);
+
   // ============================================
   // 1. أكثر عملة تداولًا
   // ============================================
   const currencyStats = useMemo(() => {
     const map = new Map<string, { count: number; volume: number; name: string; code: string; symbol: string }>();
 
-    // من الحركات
+    // من الحركات - تحويل volume إلى USD
     transactions.forEach((t) => {
       const finalCurId = getFinalCurrencyId(t);
       const cur = currencies.find((c) => c.id === finalCurId);
       if (!cur) return;
       const existing = map.get(cur.id) || { count: 0, volume: 0, name: cur.name, code: cur.code, symbol: cur.symbol };
       existing.count += 1;
-      existing.volume += Math.abs(t.finalBalance);
+      existing.volume += convertToUsd(Math.abs(t.finalBalance), finalCurId);
       map.set(cur.id, existing);
     });
 
-    // من عمليات الصرافة
+    // من عمليات الصرافة - استخدام القيم بالدولار المحسوبة مسبقًا
     currencyExchanges.forEach((e) => {
       const outCur = currencies.find((c) => c.id === e.outgoingCurrencyId);
       const inCur = currencies.find((c) => c.id === e.incomingCurrencyId);
       if (outCur) {
         const existing = map.get(outCur.id) || { count: 0, volume: 0, name: outCur.name, code: outCur.code, symbol: outCur.symbol };
         existing.count += 1;
-        existing.volume += Math.abs(e.outgoingAmount);
+        existing.volume += Math.abs(e.outgoingUsd);
         map.set(outCur.id, existing);
       }
       if (inCur) {
         const existing = map.get(inCur.id) || { count: 0, volume: 0, name: inCur.name, code: inCur.code, symbol: inCur.symbol };
         existing.count += 1;
-        existing.volume += Math.abs(e.incomingAmount);
+        existing.volume += Math.abs(e.incomingUsd);
         map.set(inCur.id, existing);
       }
     });
@@ -112,8 +124,7 @@ export function ReportsPage() {
     return Array.from(map.entries())
       .map(([id, data]) => ({ id, ...data }))
       .sort((a, b) => b.count - a.count);
-  }, [transactions, currencyExchanges, currencies]);
-
+  }, [transactions, currencyExchanges, currencies, convertToUsd]);
   const mostTradedCurrency = currencyStats[0] || null;
 
   // ============================================
@@ -122,28 +133,31 @@ export function ReportsPage() {
   const accountStats = useMemo(() => {
     const map = new Map<string, { count: number; totalValue: number; name: string }>();
 
+    // من الحركات - تحويل finalBalance إلى USD
     transactions.forEach((t) => {
       const acc = accounts.find((a) => a.id === t.accountId);
       if (!acc) return;
       const existing = map.get(acc.id) || { count: 0, totalValue: 0, name: acc.name };
       existing.count += 1;
-      existing.totalValue += Math.abs(t.finalBalance);
+      const finalCurId = getFinalCurrencyId(t);
+      existing.totalValue += convertToUsd(Math.abs(t.finalBalance), finalCurId);
       map.set(acc.id, existing);
     });
 
+    // من الديون - تحويل finalBalance إلى USD
     debts.forEach((d) => {
       const acc = accounts.find((a) => a.id === d.accountId);
       if (!acc) return;
       const existing = map.get(acc.id) || { count: 0, totalValue: 0, name: acc.name };
       existing.count += 1;
-      existing.totalValue += Math.abs(d.finalBalance);
+      existing.totalValue += convertToUsd(Math.abs(d.finalBalance), d.currencyId);
       map.set(acc.id, existing);
     });
 
     return Array.from(map.entries())
       .map(([id, data]) => ({ id, ...data }))
       .sort((a, b) => b.count - a.count);
-  }, [transactions, debts, accounts]);
+  }, [transactions, debts, accounts, currencies, convertToUsd]);
 
   const mostActiveAccount = accountStats[0] || null;
 
@@ -552,7 +566,7 @@ export function ReportsPage() {
                 </div>
                 <div className="text-left">
                   <p className={cn("text-sm font-semibold", index === 0 && "text-blue-700 dark:text-blue-400")} dir="ltr">
-                    {formatNumber(cur.volume)} {cur.symbol}
+                    {formatNumber(cur.volume)} $
                   </p>
                   <p className="text-[10px] text-muted-foreground">حجم التداول</p>
                 </div>

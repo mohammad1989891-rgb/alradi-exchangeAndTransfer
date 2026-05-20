@@ -98,13 +98,13 @@ export function ReportsPage() {
       if (outCur) {
         const existing = map.get(outCur.id) || { count: 0, volume: 0, name: outCur.name, code: outCur.code, symbol: outCur.symbol };
         existing.count += 1;
-        existing.volume += Math.abs(e.outgoingUsd);
+        existing.volume += Math.abs(e.outgoingAmount);
         map.set(outCur.id, existing);
       }
       if (inCur) {
         const existing = map.get(inCur.id) || { count: 0, volume: 0, name: inCur.name, code: inCur.code, symbol: inCur.symbol };
         existing.count += 1;
-        existing.volume += Math.abs(e.incomingUsd);
+        existing.volume += Math.abs(e.incomingAmount);
         map.set(inCur.id, existing);
       }
     });
@@ -552,7 +552,7 @@ export function ReportsPage() {
                 </div>
                 <div className="text-left">
                   <p className={cn("text-sm font-semibold", index === 0 && "text-blue-700 dark:text-blue-400")} dir="ltr">
-                    {formatNumber(cur.volume)} $
+                    {formatNumber(cur.volume)} {cur.symbol}
                   </p>
                   <p className="text-[10px] text-muted-foreground">حجم التداول</p>
                 </div>

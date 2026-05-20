@@ -239,15 +239,14 @@ export function AccountStatementModal() {
           .header {
             text-align: center;
             border-bottom: 2px solid #333;
-            padding-bottom: 15px;
-            margin-bottom: 20px;
+            padding-bottom: 10px;
+            margin-bottom: 15px;
           }
-          .header h1 { font-size: 24px; margin-bottom: 5px; }
-          .header p { color: #666; font-size: 14px; }
+          .header h1 { font-size: 22px; margin-bottom: 4px; }
+          .header p { color: #666; font-size: 13px; }
           
           .currency-section {
-            margin-bottom: 30px;
-            page-break-inside: avoid;
+            margin-bottom: 20px;
           }
           .currency-title {
             background: #f5f5f5;
@@ -299,8 +298,7 @@ export function AccountStatementModal() {
           .debt-row { background: #fffbeb; }
           
           .debt-section {
-            margin-top: 30px;
-            page-break-inside: avoid;
+            margin-top: 20px;
           }
           
           .footer {
@@ -313,8 +311,14 @@ export function AccountStatementModal() {
           }
           
           @media print {
-            body { padding: 10px; }
-            .currency-section { page-break-inside: avoid; }
+            body { padding: 10px; margin: 0; }
+            .currency-section { page-break-inside: auto; }
+            .debt-section { page-break-inside: auto; }
+            table { page-break-inside: auto; }
+            tr { page-break-inside: avoid; }
+            thead { display: table-header-group; }
+            tfoot { display: table-footer-group; }
+            .header { page-break-after: avoid; }
           }
         </style>
       </head>
@@ -359,8 +363,8 @@ export function AccountStatementModal() {
                 <thead>
                   <tr>
                     <th>التاريخ</th>
-                    <th>النوع</th>
-                    <th>الدفع</th>
+                    <th>المبلغ الأساسي</th>
+                    <th>العملة</th>
                     <th>المبلغ</th>
                     <th>الرصيد التراكمي</th>
                     <th>البيان</th>
@@ -370,8 +374,8 @@ export function AccountStatementModal() {
                   ${stat.transactions.map(t => `
                     <tr class="${t.type === 'INCOME' ? 'income-row' : 'expense-row'}">
                       <td>${format(new Date(t.date), 'dd/MM/yyyy')}</td>
-                      <td>${t.type === 'INCOME' ? 'لنا' : 'علينا'}</td>
-                      <td>${t.paymentType === 'CASH' ? 'كاش' : 'آجل'}</td>
+                      <td>${formatNumber(t.amount)}</td>
+                      <td>${(() => { const c = currencies.find(c => c.id === (t.baseCurrencyId || t.currencyId)); return c ? c.code : ''; })()}</td>
                       <td class="${t.type === 'INCOME' ? 'income' : 'expense'}">
                         ${t.type === 'INCOME' ? '+' : '-'}${formatNumber(t.finalBalance)}
                       </td>

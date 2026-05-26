@@ -38,7 +38,7 @@ export function AccountCard({
   
   // Calculate counts from local data
   const transactionCount = useMemo(() => {
-    return transactions.filter(t => t.accountId === account.id).length;
+    return transactions.filter(t => t.accountId === account.id && t.status !== 'PENDING').length;
   }, [transactions, account.id]);
   
   const debtCount = useMemo(() => {

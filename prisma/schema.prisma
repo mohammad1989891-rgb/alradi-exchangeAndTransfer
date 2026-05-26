@@ -79,6 +79,7 @@ model Transaction {
   feesDirection   FeesDirection @default(INCOME) // اتجاه الأجور: لنا / علينا
   finalBalance    Float    // الرصيد النهائي
   description     String?  // البيان
+  status          TransactionStatus @default(COMPLETED) // حالة الحركة: مكتملة أو معلقة
   date            DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -113,6 +114,11 @@ enum FeesType {
 enum FeesDirection {
   INCOME    // لنا
   EXPENSE   // علينا
+}
+
+enum TransactionStatus {
+  COMPLETED  // مكتملة
+  PENDING    // معلقة
 }
 
 // الديون

@@ -55,8 +55,9 @@ export function VaultQueryModal() {
     // - الحركات التي baseCurrencyId يساوي عملة الصندوق (المبلغ الأساسي بهذه العملة)
     // - أو الحركات التي currencyId يساوي عملة الصندوق (العملة النهائية بهذه العملة)
     const currencyTx = transactions.filter(t => 
-      t.baseCurrencyId === selectedCurrencyId || 
-      t.currencyId === selectedCurrencyId
+      (t.baseCurrencyId === selectedCurrencyId || 
+      t.currencyId === selectedCurrencyId) &&
+      t.status !== 'PENDING'
     );
     const incomeTx = currencyTx.filter(t => t.type === 'INCOME');
     const expenseTx = currencyTx.filter(t => t.type === 'EXPENSE');

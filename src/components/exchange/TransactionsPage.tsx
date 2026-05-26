@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X, Clock } from 'lucide-react';
+import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X, Clock, CheckCircle2 } from 'lucide-react';
 import { TransactionCard } from './TransactionCard';
 import { TransactionModal } from './TransactionModal';
 import { Button } from '@/components/ui/button';
@@ -315,6 +315,10 @@ export function TransactionsPage() {
               transaction={selectedTransaction}
               onEdit={() => handleEdit(selectedTransaction)}
               onDelete={() => setDeleteTransaction(selectedTransaction)}
+              onComplete={() => {
+                setSelectedTransaction(null);
+                openTransactionModal(selectedTransaction);
+              }}
             />
           )}
         </DialogContent>
@@ -351,32 +355,53 @@ export function TransactionsPage() {
 function TransactionDetailContent({ 
   transaction, 
   onEdit, 
-  onDelete 
+  onDelete,
+  onComplete
 }: { 
   transaction: Transaction; 
   onEdit: () => void; 
   onDelete: () => void;
+  onComplete?: () => void;
 }) {
   const isIncome = transaction.type === 'INCOME';
   const isCash = transaction.paymentType === 'CASH';
   const isFeesIncome = transaction.feesDirection === 'INCOME';
+  const isPending = transaction.status === 'PENDING';
   
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className={cn(
         'rounded-xl p-4',
-        isIncome ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'
+        isPending
+          ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 border-dashed'
+          : isIncome ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'
       )}>
         <div className="flex items-center gap-3">
           <div className={cn(
             'w-12 h-12 rounded-full flex items-center justify-center',
-            isIncome ? 'bg-emerald-100 dark:bg-emerald-900/50' : 'bg-red-100 dark:bg-red-900/50'
+            isPending
+              ? 'bg-amber-100 dark:bg-amber-900/50'
+              : isIncome ? 'bg-emerald-100 dark:bg-emerald-900/50' : 'bg-red-100 dark:bg-red-900/50'
           )}>
-            <span className="text-xl font-bold">{transaction.currency?.symbol}</span>
+            {isPending ? (
+              <Clock className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+            ) : (
+              <span className="text-xl font-bold">{transaction.currency?.symbol}</span>
+            )}
           </div>
           <div className="flex-1">
-            <p className="text-2xl font-bold">
+            {/* 🔸 شارة المعلّق */}
+            {isPending && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-800/50 text-amber-700 dark:text-amber-300 font-medium inline-flex items-center gap-1 mb-1">
+                <Clock className="w-3 h-3" />
+                حركة معلّقة
+              </span>
+            )}
+            <p className={cn(
+              'text-2xl font-bold',
+              isPending && 'opacity-60'
+            )}>
               {formatNumber(transaction.finalBalance)} {transaction.currency?.symbol}
             </p>
             <div className="flex items-center gap-2 mt-1">
@@ -394,6 +419,20 @@ function TransactionDetailContent({
                 {isCash ? 'كاش' : 'آجل'}
               </span>
             </div>
+            {/* 🔸 بيانات ناقصة للمعلّق */}
+            {isPending && (
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">بيانات ناقصة:</p>
+                <div className="flex flex-wrap gap-1">
+                  {!transaction.amount && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">المبلغ الأساسي</span>
+                  )}
+                  {(!transaction.conversionFactor || transaction.conversionFactor === 0 || transaction.conversionFactor === 1) && transaction.baseCurrencyId && transaction.baseCurrencyId !== transaction.currencyId && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400">معامل التحويل</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -427,24 +466,55 @@ function TransactionDetailContent({
       )}
       
       {/* Action Buttons */}
-      <div className="grid grid-cols-2 gap-3 pt-2">
-        <Button
-          variant="outline"
-          onClick={onEdit}
-          className="gap-2"
-        >
-          <Edit className="w-4 h-4" />
-          تعديل
-        </Button>
-        <Button
-          variant="destructive"
-          onClick={onDelete}
-          className="gap-2"
-        >
-          <Trash2 className="w-4 h-4" />
-          حذف
-        </Button>
-      </div>
+      {isPending ? (
+        <div className="space-y-3 pt-2">
+          {/* 🔸 زر إكمال الحركة المعلّقة */}
+          <Button
+            onClick={onComplete || onEdit}
+            className="w-full gap-2 bg-emerald-500 hover:bg-emerald-600 text-white"
+          >
+            <CheckCircle2 className="w-5 h-5" />
+            إكمال الحركة
+          </Button>
+          <div className="grid grid-cols-2 gap-3">
+            <Button
+              variant="outline"
+              onClick={onEdit}
+              className="gap-2"
+            >
+              <Edit className="w-4 h-4" />
+              تعديل
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={onDelete}
+              className="gap-2"
+            >
+              <Trash2 className="w-4 h-4" />
+              حذف
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-3 pt-2">
+          <Button
+            variant="outline"
+            onClick={onEdit}
+            className="gap-2"
+          >
+            <Edit className="w-4 h-4" />
+            تعديل
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={onDelete}
+            className="gap-2"
+          >
+            <Trash2 className="w-4 h-4" />
+            حذف
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -49,6 +49,7 @@ export type TransactionFormData = {
   feesCurrencyId?: string;  // عملة الأجور
   description?: string;
   date: string | Date;
+  status?: 'COMPLETED' | 'PENDING';
 };
 
 export type DebtFormData = {

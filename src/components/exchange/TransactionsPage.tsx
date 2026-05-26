@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useLocalData } from '@/hooks/useLocalData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X } from 'lucide-react';
+import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X, Clock } from 'lucide-react';
 import { TransactionCard } from './TransactionCard';
 import { TransactionModal } from './TransactionModal';
 import { Button } from '@/components/ui/button';
@@ -99,6 +99,15 @@ export function TransactionsPage() {
 
     return result;
   }, [transactions, searchQuery, filterType, filterPaymentType, fromDate, toDate]);
+
+  // 🔸 تقسيم الحركات إلى مكتملة ومعلّقة
+  const completedTransactions = useMemo(() => {
+    return filteredTransactions.filter(t => t.status !== 'PENDING');
+  }, [filteredTransactions]);
+
+  const pendingTransactions = useMemo(() => {
+    return filteredTransactions.filter(t => t.status === 'PENDING');
+  }, [filteredTransactions]);
 
   const handleEdit = (transaction: Transaction) => {
     setSelectedTransaction(null);
@@ -239,6 +248,28 @@ export function TransactionsPage() {
         </div>
       </div>
       
+      {/* 🔸 الحركات المعلّقة */}
+      {pendingTransactions.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Clock className="w-5 h-5 text-amber-500" />
+            <h2 className="text-lg font-semibold text-amber-600 dark:text-amber-400">
+              حركات معلّقة ({pendingTransactions.length})
+            </h2>
+          </div>
+          <AnimatePresence mode="popLayout">
+            {pendingTransactions.map((transaction, index) => (
+              <TransactionCard
+                key={transaction.id}
+                transaction={transaction}
+                index={index}
+                onClick={() => setSelectedTransaction(transaction)}
+              />
+            ))}
+          </AnimatePresence>
+        </div>
+      )}
+
       {/* Transactions List */}
       {filteredTransactions.length === 0 ? (
         <div className="text-center py-12 rounded-2xl bg-muted/30">
@@ -257,7 +288,7 @@ export function TransactionsPage() {
       ) : (
         <div className="space-y-3">
           <AnimatePresence mode="popLayout">
-            {filteredTransactions.map((transaction, index) => (
+            {completedTransactions.map((transaction, index) => (
               <TransactionCard
                 key={transaction.id}
                 transaction={transaction}

@@ -40,6 +40,11 @@ export function ReportsPage() {
     currencyExchanges,
   } = useLocalData();
 
+  // 🔸 تصفية الحركات المعلّقة من جميع الحسابات
+  const completedTransactions = useMemo(() => 
+    transactions.filter(t => t.status !== 'PENDING'), 
+  [transactions]);
+
   // ============================================
   // 🔸 دالة مساعدة: تحديد عملة المبلغ النهائي
   // المنطق:
@@ -93,7 +98,7 @@ export function ReportsPage() {
     const map = new Map<string, { count: number; volume: number; name: string; code: string; symbol: string }>();
 
     // من الحركات - تحويل volume إلى USD
-    transactions.forEach((t) => {
+    completedTransactions.forEach((t) => {
       const finalCurId = getFinalCurrencyId(t);
       const cur = currencies.find((c) => c.id === finalCurId);
       if (!cur) return;
@@ -124,7 +129,7 @@ export function ReportsPage() {
     return Array.from(map.entries())
       .map(([id, data]) => ({ id, ...data }))
       .sort((a, b) => b.count - a.count);
-  }, [transactions, currencyExchanges, currencies, convertToUsd]);
+  }, [completedTransactions, currencyExchanges, currencies, convertToUsd]);
   const mostTradedCurrency = currencyStats[0] || null;
 
   // ============================================
@@ -134,7 +139,7 @@ export function ReportsPage() {
     const map = new Map<string, { count: number; totalValue: number; name: string }>();
 
     // من الحركات - تحويل finalBalance إلى USD
-    transactions.forEach((t) => {
+    completedTransactions.forEach((t) => {
       const acc = accounts.find((a) => a.id === t.accountId);
       if (!acc) return;
       const existing = map.get(acc.id) || { count: 0, totalValue: 0, name: acc.name };
@@ -157,7 +162,7 @@ export function ReportsPage() {
     return Array.from(map.entries())
       .map(([id, data]) => ({ id, ...data }))
       .sort((a, b) => b.count - a.count);
-  }, [transactions, debts, accounts, currencies, convertToUsd]);
+  }, [completedTransactions, debts, accounts, currencies, convertToUsd]);
 
   const mostActiveAccount = accountStats[0] || null;
 
@@ -169,7 +174,7 @@ export function ReportsPage() {
   // أرصدة الكاش حسب العملة النهائية
   const cashByCurrency = useMemo(() => {
     const map = new Map<string, { income: number; expense: number }>();
-    transactions.forEach(t => {
+    completedTransactions.forEach(t => {
       if (t.paymentType !== 'CASH') return;
       const curId = getFinalCurrencyId(t);
       if (!curId) return;
@@ -182,12 +187,12 @@ export function ReportsPage() {
       map.set(curId, existing);
     });
     return map;
-  }, [transactions]);
+  }, [completedTransactions]);
 
   // أرصدة الآجل حسب العملة النهائية
   const deferredByCurrency = useMemo(() => {
     const map = new Map<string, { income: number; expense: number }>();
-    transactions.forEach(t => {
+    completedTransactions.forEach(t => {
       if (t.paymentType !== 'DEFERRED') return;
       const curId = getFinalCurrencyId(t);
       if (!curId) return;
@@ -200,9 +205,7 @@ export function ReportsPage() {
       map.set(curId, existing);
     });
     return map;
-  }, [transactions]);
-
-  // البيانات حسب العملة المختارة
+  }, [completedTransactions]);
   const selectedCurrency = useMemo(() => {
     return currencies.find(c => c.id === selectedCurrencyId) || { id: 'cur_usd', name: 'دولار', code: 'USD', symbol: '$' };
   }, [currencies, selectedCurrencyId]);
@@ -239,7 +242,7 @@ export function ReportsPage() {
   // الحركات المفلترة حسب الضغط المطوّل
   const filteredTransactions = useMemo(() => {
     if (!longPressFilter) return [];
-    return transactions
+    return completedTransactions
       .filter(t => {
         if (t.paymentType !== longPressFilter.paymentType) return false;
         if (t.type !== longPressFilter.type) return false;
@@ -247,7 +250,7 @@ export function ReportsPage() {
         return curId === selectedCurrencyId;
       })
       .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  }, [transactions, longPressFilter, selectedCurrencyId]);
+  }, [completedTransactions, longPressFilter, selectedCurrencyId]);
 
   // ============================================
   // 3. إحصائيات الديون
@@ -286,17 +289,17 @@ export function ReportsPage() {
   // ملخص سريع
   // ============================================
   const summaryStats = useMemo(() => {
-    const totalTx = transactions.length;
+    const totalTx = completedTransactions.length;
     const totalExchanges = currencyExchanges.length;
     const totalDebtsCount = unpaidDebts.length;
     const totalOverdue = overdueDebts.length;
     const totalLongTerm = longTermDebts.length;
 
-    const totalVolumeUSD = transactions.reduce((sum, t) => sum + Math.abs(t.finalBalance), 0);
+    const totalVolumeUSD = completedTransactions.reduce((sum, t) => sum + Math.abs(t.finalBalance), 0);
     const totalExchangeVolumeUSD = currencyExchanges.reduce((sum, e) => sum + Math.abs(e.outgoingUsd), 0);
 
     return { totalTx, totalExchanges, totalDebtsCount, totalOverdue, totalLongTerm, totalVolumeUSD, totalExchangeVolumeUSD };
-  }, [transactions, currencyExchanges, unpaidDebts, overdueDebts, longTermDebts]);
+  }, [completedTransactions, currencyExchanges, unpaidDebts, overdueDebts, longTermDebts]);
 
   const formatDays = (days: number) => {
     if (days < 30) return `${days} يوم`;

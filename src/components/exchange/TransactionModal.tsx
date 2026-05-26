@@ -87,6 +87,10 @@ export function TransactionModal() {
   const [conversionFactorDisplay, setConversionFactorDisplay] = useState('1');
   const [feesAmountDisplay, setFeesAmountDisplay] = useState('');
   
+  // 🔸 وضع الإدخال الذكي
+  const [inputMode, setInputMode] = useState<'FACTOR_TO_FINAL' | 'FINAL_TO_FACTOR'>('FACTOR_TO_FINAL');
+  const [finalAmountDisplay, setFinalAmountDisplay] = useState('');
+  
   // SYP version support - دائماً الإصدار القديم للمدخلات
   // (no conversion needed since OLD = stored value)
   
@@ -211,13 +215,36 @@ export function TransactionModal() {
     setFormData({ ...formData, feesAmount: numValue });
   };
   
+  // 🔸 معالجة إدخال المبلغ النهائي (وضع نهائي → معامل)
+  const handleFinalAmountChange = (value: string) => {
+    const cleanValue = value.replace(/[^0-9.,]/g, '');
+    setFinalAmountDisplay(cleanValue);
+    const finalAmount = parseFormattedNumber(cleanValue);
+    
+    if (formData.amount > 0 && finalAmount > 0) {
+      let factor: number;
+      if (formData.conversionMethod === 'MULTIPLY') {
+        factor = finalAmount / formData.amount;
+      } else {
+        factor = formData.amount / finalAmount;
+      }
+      setFormData(prev => ({ ...prev, conversionFactor: factor }));
+      setConversionFactorDisplay(formatInputNumber(factor));
+    }
+  };
+  
   // SYP version is always OLD - no toggle needed
   // const handleAmountSYPVersionChange = (version: 'NEW' | 'OLD') => { ... }
   
   const handleSubmit = async () => {
-    if (!formData.accountId || !formData.currencyId || !formData.amount || !formData.date) {
+    if (!formData.accountId || !formData.currencyId || !formData.date) {
       return;
     }
+    
+    // 🔸 تحديد حالة الحركة تلقائيًا
+    const isPending = !formData.conversionFactor || formData.conversionFactor === 0 
+      || !formData.amount || formData.amount === 0;
+    const submitStatus = isPending ? 'PENDING' as const : 'COMPLETED' as const;
     
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -240,6 +267,7 @@ export function TransactionModal() {
           feesAmount: formData.feesAmount,
           description: formData.description,
           date: formData.date,
+          status: submitStatus,
         });
         
         if (result.success) {
@@ -264,6 +292,7 @@ export function TransactionModal() {
           feesAmount: formData.feesAmount,
           description: formData.description,
           date: formData.date,
+          status: submitStatus,
         });
         
         if (result.success) {
@@ -493,6 +522,35 @@ export function TransactionModal() {
                 exit={{ opacity: 0, height: 0 }}
                 className="space-y-3"
               >
+                {/* 🔸 Input Mode Toggle */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">طريقة الإدخال:</span>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('FACTOR_TO_FINAL')}
+                    className={cn(
+                      'px-2 py-1 rounded-lg text-xs font-medium transition-all',
+                      inputMode === 'FACTOR_TO_FINAL'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground'
+                    )}
+                  >
+                    معامل → نهائي
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputMode('FINAL_TO_FACTOR')}
+                    className={cn(
+                      'px-2 py-1 rounded-lg text-xs font-medium transition-all',
+                      inputMode === 'FINAL_TO_FACTOR'
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground'
+                    )}
+                  >
+                    نهائي → معامل
+                  </button>
+                </div>
+                
                 {/* Conversion Factor */}
                 <div className="flex items-center gap-2">
                   <div className="flex-1 space-y-2">
@@ -504,6 +562,7 @@ export function TransactionModal() {
                       onChange={(e) => handleConversionFactorChange(e.target.value)}
                       className="text-left font-mono h-10"
                       dir="ltr"
+                      readOnly={inputMode === 'FINAL_TO_FACTOR'}
                     />
                   </div>
                   <div className="flex gap-1 mt-6">
@@ -533,6 +592,22 @@ export function TransactionModal() {
                     </button>
                   </div>
                 </div>
+                
+                {/* 🔸 Final Amount Input (only in FINAL_TO_FACTOR mode) */}
+                {inputMode === 'FINAL_TO_FACTOR' && (
+                  <div className="space-y-2">
+                    <Label>المبلغ النهائي ({targetCurrency?.symbol})</Label>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={finalAmountDisplay}
+                      onChange={(e) => handleFinalAmountChange(e.target.value)}
+                      placeholder="أدخل المبلغ النهائي"
+                      className="text-left font-mono h-10"
+                      dir="ltr"
+                    />
+                  </div>
+                )}
                 
                 {/* SYP Rate Note */}
                 {isSYPInvolved && (
@@ -769,17 +844,28 @@ export function TransactionModal() {
           </AnimatePresence>
           
           {/* Submit Button */}
+          {/* 🔸 تحذير الحالة المعلّقة */}
+          {(!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0) && formData.accountId && (
+            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+              <span className="text-sm text-amber-700 dark:text-amber-300">
+                سيتم حفظ الحركة كـ "معلّقة" حتى يتم استكمال البيانات
+              </span>
+            </div>
+          )}
           <Button
             onClick={handleSubmit}
-            disabled={isSubmitting || !formData.accountId || !formData.amount}
+            disabled={isSubmitting || !formData.accountId}
             className={cn(
               "w-full h-14 text-base font-medium",
-              formData.type === 'INCOME' 
-                ? 'bg-emerald-500 hover:bg-emerald-600' 
-                : 'bg-red-500 hover:bg-red-600'
+              (!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0)
+                ? 'bg-amber-500 hover:bg-amber-600'
+                : formData.type === 'INCOME' 
+                  ? 'bg-emerald-500 hover:bg-emerald-600' 
+                  : 'bg-red-500 hover:bg-red-600'
             )}
           >
-            {isSubmitting ? 'جاري الحفظ...' : 'حفظ الحركة'}
+            {isSubmitting ? 'جاري الحفظ...' : (!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0) ? 'حفظ كمعّلق' : 'حفظ الحركة'}
           </Button>
         </div>
       </DialogContent>

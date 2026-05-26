@@ -17,6 +17,7 @@ export function TransactionCard({ transaction, index, onClick }: TransactionCard
   const isCash = transaction.paymentType === 'CASH';
   const hasConversion = transaction.baseCurrencyId && transaction.baseCurrencyId !== transaction.currencyId;
   const isOverflow = transaction.isOverflowTransaction;  // حركة ناتجة عن فائض
+  const isPending = transaction.status === 'PENDING';  // 🔸 حركة معلّقة
 
   return (
     <motion.div
@@ -28,19 +29,31 @@ export function TransactionCard({ transaction, index, onClick }: TransactionCard
       className={cn(
         'relative overflow-hidden rounded-xl border cursor-pointer transition-all duration-200',
         'hover:shadow-md active:scale-[0.98]',
-        // تمييز الحركات الناتجة عن الفائض
-        isOverflow
-          ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-300/70 dark:border-amber-700/50'
-          : isIncome
-            ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-800/30'
-            : 'bg-red-50/50 dark:bg-red-950/20 border-red-200/50 dark:border-red-800/30'
+        // 🔸 تمييز الحركات المعلّقة
+        isPending
+          ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-400/70 dark:border-amber-600/50 border-dashed'
+          : isOverflow
+            ? 'bg-amber-50/80 dark:bg-amber-950/30 border-amber-300/70 dark:border-amber-700/50'
+            : isIncome
+              ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50 dark:border-emerald-800/30'
+              : 'bg-red-50/50 dark:bg-red-950/20 border-red-200/50 dark:border-red-800/30'
       )}
     >
       {/* Side indicator */}
       <div className={cn(
         'absolute right-0 top-0 bottom-0 w-1',
-        isOverflow ? 'bg-amber-500' : isIncome ? 'bg-emerald-500' : 'bg-red-500'
+        isPending ? 'bg-amber-500 animate-pulse' : isOverflow ? 'bg-amber-500' : isIncome ? 'bg-emerald-500' : 'bg-red-500'
       )} />
+
+      {/* 🔸 شارة المعلّق */}
+      {isPending && (
+        <div className="absolute left-2 top-2">
+          <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-200/80 dark:bg-amber-800/50 text-amber-700 dark:text-amber-300 font-medium flex items-center gap-0.5">
+            <Clock className="w-2.5 h-2.5" />
+            معلّقة
+          </span>
+        </div>
+      )}
 
       {/* شارة الفائض */}
       {isOverflow && (
@@ -52,17 +65,21 @@ export function TransactionCard({ transaction, index, onClick }: TransactionCard
         </div>
       )}
 
-      <div className={cn("p-4 pr-5 flex items-center gap-4", isOverflow && "pt-8")}>
+      <div className={cn("p-4 pr-5 flex items-center gap-4", (isOverflow || isPending) && "pt-8")}>
         {/* Icon */}
         <div className={cn(
           'w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0',
-          isOverflow
+          isPending
             ? 'bg-amber-100 dark:bg-amber-900/50'
-            : isIncome
-              ? 'bg-emerald-100 dark:bg-emerald-900/50'
-              : 'bg-red-100 dark:bg-red-900/50'
+            : isOverflow
+              ? 'bg-amber-100 dark:bg-amber-900/50'
+              : isIncome
+                ? 'bg-emerald-100 dark:bg-emerald-900/50'
+                : 'bg-red-100 dark:bg-red-900/50'
         )}>
-          {isOverflow ? (
+          {isPending ? (
+            <Clock className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+          ) : isOverflow ? (
             <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
           ) : isIncome ? (
             <ArrowUpRight className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />

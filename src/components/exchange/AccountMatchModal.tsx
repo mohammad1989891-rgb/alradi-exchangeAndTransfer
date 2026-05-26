@@ -243,7 +243,7 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
   
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-hidden">
+      <DialogContent className="max-w-md max-h-[90vh] overflow-hidden flex flex-col">
         <DialogHeader>
           <DialogTitle className="text-xl flex items-center gap-2">
             <MessageSquare className="w-5 h-5 text-primary" />
@@ -256,7 +256,8 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
           </DialogTitle>
         </DialogHeader>
         
-        <div className="mt-4 space-y-4">
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-4 mt-4">
           {/* Balance Summary */}
           <div className="grid grid-cols-2 gap-2">
             {Object.entries(balancesByCurrency).map(([currencyId, balance]) => (
@@ -315,34 +316,34 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
               dir="rtl"
             />
           </div>
-          
-          {/* Action Buttons */}
-          <div className="grid grid-cols-2 gap-3">
-            <Button
-              onClick={handleCopy}
-              variant="outline"
-              className="gap-2"
-            >
-              {copied ? (
-                <>
-                  <Check className="w-4 h-4 text-emerald-500" />
-                  تم النسخ
-                </>
-              ) : (
-                <>
-                  <Copy className="w-4 h-4" />
-                  نسخ
-                </>
-              )}
-            </Button>
-            <Button
-              onClick={handleShare}
-              className="gap-2"
-            >
-              <Share2 className="w-4 h-4" />
-              مشاركة
-            </Button>
-          </div>
+        </div>
+        
+        {/* Fixed Action Buttons */}
+        <div className="grid grid-cols-2 gap-3 pt-4 border-t mt-2 shrink-0">
+          <Button
+            onClick={handleCopy}
+            variant="outline"
+            className="gap-2"
+          >
+            {copied ? (
+              <>
+                <Check className="w-4 h-4 text-emerald-500" />
+                تم النسخ
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                نسخ
+              </>
+            )}
+          </Button>
+          <Button
+            onClick={handleShare}
+            className="gap-2"
+          >
+            <Share2 className="w-4 h-4" />
+            مشاركة
+          </Button>
         </div>
       </DialogContent>
     </Dialog>

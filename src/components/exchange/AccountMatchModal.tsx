@@ -77,13 +77,13 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
     const lines: string[] = [];
     
     // Header
-    lines.push('< الصرافة');
+    lines.push('<الراضي للصرافة>');
     lines.push('');
-    lines.push('-------------------');
+    lines.push('━━━━━━━━━━━━━━━━━━');
     lines.push('');
-    lines.push('    *السلام عليكم ورحمة الله وبركاته*');
-    lines.push('══════════════════════     ');
-    lines.push('              *🖥️مطابقة حساب🖥️*');
+    lines.push('السلام عليكم ورحمة الله وبركاته،');
+    lines.push('');
+    lines.push('🖥️ مطابقة حساب 🖥️');
     lines.push('');
     
     // Group balances: positive (لنا) and negative (لكم)
@@ -105,25 +105,35 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
       }
     }
     
-    // Add "الرصيد لنا" lines
-    for (const bal of positiveBalances) {
-      lines.push(`    *الـرصـيـد لنا { ${formatNum(bal.amount)} } ${bal.currency?.name || ''}*`);
+    // Add "الرصيد المستحق لنا" lines
+    if (positiveBalances.length > 0) {
+      lines.push('نحيطكم علمًا بأن الرصيد المستحق لنا يبلغ:');
+      for (const bal of positiveBalances) {
+        lines.push(`${formatNum(bal.amount)} ${bal.currency?.name || ''}`);
+      }
     }
     
-    // Add "الرصيد لكم" lines
-    for (const bal of negativeBalances) {
-      lines.push(`    *الـرصـيـد لكم { ${formatNum(bal.amount)} } ${bal.currency?.name || ''}*`);
+    // Add "الرصيد المستحق لكم" lines
+    if (negativeBalances.length > 0) {
+      lines.push('نحيطكم علمًا بأن الرصيد المستحق لكم يبلغ:');
+      for (const bal of negativeBalances) {
+        lines.push(`${formatNum(bal.amount)} ${bal.currency?.name || ''}`);
+      }
     }
     
     // If no balance
     if (positiveBalances.length === 0 && negativeBalances.length === 0) {
-      lines.push('    *لا يوجد رصيد*');
+      lines.push('لا يوجد رصيد مستحق');
     }
     
     lines.push('');
-    lines.push('══════════════════════');
-    lines.push('يرجي المطابقة خلال مدة اقصاها 24 ساعة لضمان جودة العمل ... شاكرين تعاونكم');
-    lines.push('             *🖋️قسم المحاسبة🖋️*>');
+    lines.push('━━━━━━━━━━━━━━━━━━');
+    lines.push('');
+    lines.push('نرجو منكم التكرم بمطابقة الحساب خلال مدة أقصاها 24 ساعة، وذلك حرصًا على دقة العمل وجودته.');
+    lines.push('');
+    lines.push('شاكرين حسن تعاونكم وتفهمكم.');
+    lines.push('');
+    lines.push('🖋️ قسم المحاسبة 🖋️');
     
     return lines.join('\n');
   }, [balancesByCurrency]);

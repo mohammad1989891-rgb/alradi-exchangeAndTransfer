@@ -686,11 +686,8 @@ export async function addTransaction(data: {
   const now = new Date();
   
   // 🔸 تحديد حالة الحركة تلقائيًا
-  const isPending = !data.conversionFactor || data.conversionFactor === 0 
-    || !data.amount || data.amount === 0;
-  const status = data.status || (isPending ? 'PENDING' : 'COMPLETED');
-  
-  const finalBalance = calculateFinalBalance(
+  // الحركة معلّقة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
+  const finalBalanceResult = calculateFinalBalance(
     data.amount || 0, 
     data.conversionFactor || 1, 
     data.conversionMethod || 'MULTIPLY', 
@@ -699,6 +696,11 @@ export async function addTransaction(data: {
     data.feesDirection || 'INCOME',
     data.type
   );
+  const isPending = !data.conversionFactor || data.conversionFactor === 0 
+    || !data.amount || data.amount === 0
+    || !finalBalanceResult.finalBalance || finalBalanceResult.finalBalance === 0;
+  const status = data.status || (isPending ? 'PENDING' : 'COMPLETED');
+  const finalBalance = finalBalanceResult.finalBalance;
   
   // 🔸 التحقق من الرصيد فقط للحركات المكتملة
   if (status === 'COMPLETED' && data.paymentType === 'CASH' && data.type === 'INCOME') {
@@ -767,7 +769,7 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     }
   }
   
-  const finalBalance = calculateFinalBalance(
+  const finalBalanceResult = calculateFinalBalance(
     data.amount || old.amount, 
     data.conversionFactor || old.conversionFactor, 
     data.conversionMethod || old.conversionMethod, 
@@ -776,11 +778,15 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     data.feesDirection || old.feesDirection,
     data.type || old.type
   );
+  const finalBalance = finalBalanceResult.finalBalance;
   
-  await db.table('transactions').update(id, { ...data, finalBalance, status: newStatus, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
+  // 🔸 إذا كان الرصيد النهائي = 0، اجعل الحركة معلّقة
+  const effectiveNewStatus = (!finalBalance || finalBalance === 0) ? 'PENDING' : newStatus;
+  
+  await db.table('transactions').update(id, { ...data, finalBalance, status: effectiveNewStatus, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
   
   // 🔸 تطبيق التأثير على الصندوق فقط إذا كانت الحركة الجديدة مكتملة ونقدية
-  if (newStatus === 'COMPLETED' && (data.paymentType || old.paymentType) === 'CASH') {
+  if (effectiveNewStatus === 'COMPLETED' && (data.paymentType || old.paymentType) === 'CASH') {
     const vaultCurrencyId = (data.baseCurrencyId || data.currencyId) || (old.baseCurrencyId || old.currencyId);
     const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
     if (vault) {

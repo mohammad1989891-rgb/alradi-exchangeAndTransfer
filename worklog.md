@@ -504,3 +504,37 @@ Stage Summary:
 - ✅ شارة "الرصيد النهائي" في بيانات الحركة المعلّقة الناقصة
 - ✅ UI Freeze محفوظ بالكامل
 - ✅ ملفات معدّلة: TransactionModal.tsx, TransactionsPage.tsx, localDb.ts
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: إصلاح خلل نظام الحركات المعلّقة - الحركة لا تتحول إلى مكتملة بعد إكمال البيانات + إضافة فلتر معلّقة
+
+Work Log:
+- اكتشاف أن النظام موجود مسبقاً على GitHub (commits 2705d68, 3fbae17, da82557, b8aa0bc)
+- تحليل جذري للخلل: calculateFinalBalance() في localDb.ts تعيد number لكن الكود يستخدم .finalBalance عليها
+  - finalBalanceResult.finalBalance كان دائماً undefined
+  - هذا جعل isPending دائماً true (undefined falsy)
+  - finalBalance يُحفظ كـ undefined (NaN/0 في DB)
+- إصلاح Bug #1: calculateFinalBalance return type - استخدام القيمة مباشرة كـ number بدلاً من .finalBalance
+  - في addTransaction: finalBalance = calculateFinalBalance(...) بدلاً من finalBalanceResult.finalBalance
+  - في updateTransaction: نفس الإصلاح
+- إصلاح Bug #2: isDataComplete في updateTransaction كان يفحص فقط amount > 0 && finalBalance > 0
+  - إضافة effectiveConversionFactor > 0 للفحص
+  - الآن: isDataComplete = effectiveAmount > 0 && effectiveConversionFactor > 0 && finalBalance > 0
+- النتيجة: الآن عند تعديل حركة معلّقة وإكمال البيانات:
+  1. ✅ يتم إعادة تقييم الحالة تلقائياً
+  2. ✅ إذا البيانات مكتملة → COMPLETED
+  3. ✅ يتم تطبيق التأثير على الصندوق
+  4. ✅ تنتقل من قسم المعلّقة إلى الحركات المكتملة
+- فلتر معلّقة موجود مسبقاً (الكل | كاش | آجل | معلّقة)
+- قسم الحركات المعلّقة موجود مسبقاً في TransactionsPage
+- Push إلى GitHub: commit 693664d
+
+Stage Summary:
+- ✅ إصلاح Bug حرج: calculateFinalBalance يعيد number وليس object
+- ✅ إصلاح Bug: isDataComplete لا يفحص conversionFactor
+- ✅ الآن تعديل حركة معلّقة → إكمال البيانات → تتحول لمكتملة تلقائياً
+- ✅ فلتر معلّقة يعمل بشكل صحيح
+- ✅ التأثير المالي يُطبّق عند التحويل لمكتملة
+- ✅ UI Freeze محفوظ بالكامل

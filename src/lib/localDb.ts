@@ -685,9 +685,8 @@ export async function addTransaction(data: {
   await initializeDatabase();
   const now = new Date();
   
-  // 🔸 تحديد حالة الحركة تلقائيًا
-  // الحركة معلّقة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
-  const finalBalanceResult = calculateFinalBalance(
+  // 🔸 حساب الرصيد النهائي
+  const finalBalance = calculateFinalBalance(
     data.amount || 0, 
     data.conversionFactor || 1, 
     data.conversionMethod || 'MULTIPLY', 
@@ -696,11 +695,13 @@ export async function addTransaction(data: {
     data.feesDirection || 'INCOME',
     data.type
   );
+  
+  // 🔹 تحديد حالة الحركة تلقائيًا
+  // الحركة معلّقة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
   const isPending = !data.conversionFactor || data.conversionFactor === 0 
     || !data.amount || data.amount === 0
-    || !finalBalanceResult.finalBalance || finalBalanceResult.finalBalance === 0;
+    || !finalBalance || finalBalance === 0;
   const status = data.status || (isPending ? 'PENDING' : 'COMPLETED');
-  const finalBalance = finalBalanceResult.finalBalance;
   
   // 🔸 التحقق من الرصيد فقط للحركات المكتملة
   if (status === 'COMPLETED' && data.paymentType === 'CASH' && data.type === 'INCOME') {
@@ -780,7 +781,7 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     }
   }
   
-  const finalBalanceResult = calculateFinalBalance(
+  const finalBalance = calculateFinalBalance(
     effectiveAmount,
     effectiveConversionFactor, 
     effectiveConversionMethod, 
@@ -789,12 +790,11 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     effectiveFeesDirection,
     effectiveType
   );
-  const finalBalance = finalBalanceResult.finalBalance;
   
   // 🔸 تحديد الحالة النهائية:
-  // إذا كان الرصيد النهائي > 0 والبيانات مكتملة → مكتملة
-  // إذا كان الرصيد النهائي = 0 أو المبلغ = 0 → معلّقة
-  const isDataComplete = effectiveAmount > 0 && finalBalance > 0;
+  // إذا كانت جميع البيانات مكتملة (مبلغ > 0 + معامل تحويل > 0 + رصيد نهائي > 0) → نستخدم الحالة الممررة
+  // إذا نقص أي حقل → معلّقة تلقائيًا
+  const isDataComplete = effectiveAmount > 0 && effectiveConversionFactor > 0 && finalBalance > 0;
   const effectiveNewStatus = isDataComplete ? newStatus : 'PENDING';
   
   // 🔸 تنظيف البيانات - إزالة الحقول غير المعرفة (undefined)

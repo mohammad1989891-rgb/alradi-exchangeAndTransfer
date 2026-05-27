@@ -49,7 +49,7 @@ export function TransactionsPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'INCOME' | 'EXPENSE'>('all');
-  const [filterPaymentType, setFilterPaymentType] = useState<'all' | 'CASH' | 'DEFERRED'>('all');
+  const [filterPaymentType, setFilterPaymentType] = useState<'all' | 'CASH' | 'DEFERRED' | 'PENDING'>('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
@@ -72,7 +72,10 @@ export function TransactionsPage() {
         t.account?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         t.description?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'all' || t.type === filterType;
-      const matchesPaymentType = filterPaymentType === 'all' || t.paymentType === filterPaymentType;
+      const matchesPaymentType = filterPaymentType === 'all' 
+        || (filterPaymentType === 'PENDING' && t.status === 'PENDING')
+        || (filterPaymentType === 'CASH' && t.paymentType === 'CASH' && t.status !== 'PENDING')
+        || (filterPaymentType === 'DEFERRED' && t.paymentType === 'DEFERRED' && t.status !== 'PENDING');
 
       // فلتر التاريخ
       let matchesDate = true;
@@ -202,7 +205,7 @@ export function TransactionsPage() {
           
           <Select
             value={filterPaymentType}
-            onValueChange={(value: 'all' | 'CASH' | 'DEFERRED') => setFilterPaymentType(value)}
+            onValueChange={(value: 'all' | 'CASH' | 'DEFERRED' | 'PENDING') => setFilterPaymentType(value)}
           >
             <SelectTrigger className="flex-1">
               <SelectValue placeholder="نوع الدفع" />
@@ -211,6 +214,7 @@ export function TransactionsPage() {
               <SelectItem value="all">الكل</SelectItem>
               <SelectItem value="CASH">كاش</SelectItem>
               <SelectItem value="DEFERRED">آجل</SelectItem>
+              <SelectItem value="PENDING">معلّقة</SelectItem>
             </SelectContent>
           </Select>
         </div>

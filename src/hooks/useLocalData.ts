@@ -129,16 +129,29 @@ export function useLocalData() {
   const REFRESH_DEBOUNCE_MS = 300;
 
   // 🔸 تحميل البيانات مع حماية من التكرار
-  const refreshData = useCallback(async (skipEvent = false) => {
-    // 🔸 منع التحديث المتزامن
-    if (isRefreshingRef.current) return;
+  // forceRefresh: تجاوز debounce وانتظار التحديث الحالي (للعمليات المهمة مثل حفظ/تحديث حركات)
+  const refreshData = useCallback(async (skipEvent = false, forceRefresh = false) => {
+    // 🔸 إذا كان هناك تحديث جاري ولم يكن إجبارياً، انتظره
+    if (isRefreshingRef.current && !forceRefresh) return;
     
-    // 🔸 منع التحديث المتكرر السريع (debounce)
-    const now = Date.now();
-    if (now - lastRefreshTimeRef.current < REFRESH_DEBOUNCE_MS) return;
+    // 🔸 إذا كان هناك تحديث جاري وكان إجبارياً، انتظر حتى ينتهي ثم نفّذ
+    if (isRefreshingRef.current && forceRefresh) {
+      // انتظر حتى ينتهي التحديث الحالي (بحد أقصى 2 ثانية)
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 100));
+        if (!isRefreshingRef.current) break;
+      }
+      if (isRefreshingRef.current) return; // تجاوز إذا استغرق وقتاً طويلاً
+    }
+    
+    // 🔸 منع التحديث المتكرر السريع (debounce) - فقط إذا لم يكن إجبارياً
+    if (!forceRefresh) {
+      const debounceNow = Date.now();
+      if (debounceNow - lastRefreshTimeRef.current < REFRESH_DEBOUNCE_MS) return;
+    }
     
     isRefreshingRef.current = true;
-    lastRefreshTimeRef.current = now;
+    lastRefreshTimeRef.current = Date.now();
     
     try {
       const [allCur, activeCur, vaultsData, accountsData, txData, debtData, debtPaymentsData, totalUSD, debtRemainingData, exchangeData, exchangeStatsData] = await Promise.all([
@@ -482,7 +495,7 @@ export function useLocalData() {
     addTransaction: async (data: Parameters<typeof addTransaction>[0]) => {
       try {
         const result = await addTransaction(data);
-        await refreshData();
+        await refreshData(false, true); // forceRefresh = true لضمان تحديث الواجهة
         return { success: true, data: result };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'حدث خطأ' };
@@ -491,7 +504,7 @@ export function useLocalData() {
     updateTransaction: async (id: string, data: Partial<Transaction>) => {
       try {
         const result = await updateTransaction(id, data);
-        await refreshData();
+        await refreshData(false, true); // forceRefresh = true لضمان تحديث الواجهة
         return { success: true, data: result };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'حدث خطأ' };
@@ -500,7 +513,7 @@ export function useLocalData() {
     deleteTransaction: async (id: string) => {
       try {
         await deleteTransaction(id);
-        await refreshData();
+        await refreshData(false, true); // forceRefresh = true لضمان تحديث الواجهة
         return { success: true };
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : 'حدث خطأ' };

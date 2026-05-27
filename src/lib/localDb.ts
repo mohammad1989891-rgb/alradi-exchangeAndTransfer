@@ -757,7 +757,18 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
   
   const now = new Date();
   const oldStatus = old.status || 'COMPLETED';
-  const newStatus = data.status || oldStatus;
+  const newStatus = data.status ?? oldStatus;
+  
+  // 🔸 استخدام القيم الجديدة إذا وُجدت، وإلا القيم القديمة
+  // ملاحظة: نستخدم ?? بدلاً من || لأن القيمة 0 قيمة صحيحة يجب احترامها
+  const effectiveAmount = data.amount ?? old.amount;
+  const effectiveConversionFactor = data.conversionFactor ?? old.conversionFactor;
+  const effectiveConversionMethod = data.conversionMethod ?? old.conversionMethod;
+  const effectiveFeesType = data.feesType ?? old.feesType;
+  const effectiveFeesAmount = data.feesAmount ?? old.feesAmount;
+  const effectiveFeesDirection = data.feesDirection ?? old.feesDirection;
+  const effectiveType = data.type ?? old.type;
+  const effectivePaymentType = data.paymentType ?? old.paymentType;
   
   // 🔸 عكس التأثير على الصندوق فقط إذا كانت الحركة القديمة مكتملة ونقدية
   if (oldStatus === 'COMPLETED' && old.paymentType === 'CASH') {
@@ -770,29 +781,38 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
   }
   
   const finalBalanceResult = calculateFinalBalance(
-    data.amount || old.amount, 
-    data.conversionFactor || old.conversionFactor, 
-    data.conversionMethod || old.conversionMethod, 
-    data.feesType || old.feesType, 
-    data.feesAmount || old.feesAmount, 
-    data.feesDirection || old.feesDirection,
-    data.type || old.type
+    effectiveAmount,
+    effectiveConversionFactor, 
+    effectiveConversionMethod, 
+    effectiveFeesType, 
+    effectiveFeesAmount, 
+    effectiveFeesDirection,
+    effectiveType
   );
   const finalBalance = finalBalanceResult.finalBalance;
   
-  // 🔸 إذا كان الرصيد النهائي = 0، اجعل الحركة معلّقة
-  const effectiveNewStatus = (!finalBalance || finalBalance === 0) ? 'PENDING' : newStatus;
+  // 🔸 تحديد الحالة النهائية:
+  // إذا كان الرصيد النهائي > 0 والبيانات مكتملة → مكتملة
+  // إذا كان الرصيد النهائي = 0 أو المبلغ = 0 → معلّقة
+  const isDataComplete = effectiveAmount > 0 && finalBalance > 0;
+  const effectiveNewStatus = isDataComplete ? newStatus : 'PENDING';
   
-  await db.table('transactions').update(id, { ...data, finalBalance, status: effectiveNewStatus, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
+  // 🔸 تنظيف البيانات - إزالة الحقول غير المعرفة (undefined)
+  const cleanData: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      cleanData[key] = value;
+    }
+  }
+  
+  await db.table('transactions').update(id, { ...cleanData, finalBalance, status: effectiveNewStatus, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
   
   // 🔸 تطبيق التأثير على الصندوق فقط إذا كانت الحركة الجديدة مكتملة ونقدية
-  if (effectiveNewStatus === 'COMPLETED' && (data.paymentType || old.paymentType) === 'CASH') {
-    const vaultCurrencyId = (data.baseCurrencyId || data.currencyId) || (old.baseCurrencyId || old.currencyId);
+  if (effectiveNewStatus === 'COMPLETED' && effectivePaymentType === 'CASH') {
+    const vaultCurrencyId = (data.baseCurrencyId ?? data.currencyId) ?? (old.baseCurrencyId || old.currencyId);
     const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
     if (vault) {
-      const type = data.type || old.type;
-      const amount = data.amount || old.amount;
-      const newBalance = type === 'INCOME' ? vault.balance - amount : vault.balance + amount;
+      const newBalance = effectiveType === 'INCOME' ? vault.balance - effectiveAmount : vault.balance + effectiveAmount;
       await db.table('vaults').update(vault.id, { balance: newBalance, updatedAt: now });
     }
   }

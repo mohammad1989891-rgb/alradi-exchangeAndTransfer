@@ -538,3 +538,40 @@ Stage Summary:
 - ✅ فلتر معلّقة يعمل بشكل صحيح
 - ✅ التأثير المالي يُطبّق عند التحويل لمكتملة
 - ✅ UI Freeze محفوظ بالكامل
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: استبدال نظام الحركات المعلّقة (Pending Transactions System) بنظام isComplete احترافي
+
+Work Log:
+- تحليل شامل للكود الحالي وتحديد جميع الملفات المرتبطة بنظام status (PENDING/COMPLETED)
+- تحديث src/lib/localDb.ts:
+  - تغيير Transaction interface: status → isComplete (boolean)
+  - إضافة Dexie v6 migration: تحويل status قديم إلى isComplete
+  - تحديث addTransaction: استبدال status logic بـ isComplete logic
+  - تحديث updateTransaction: استبدال status logic بـ isComplete logic + معالجة التأثير المالي عند التحويل
+  - تحديث deleteTransaction: استبدال status check بـ isComplete check
+- تحديث src/types/index.ts: استبدال status بـ isComplete في TransactionFormData
+- تحديث src/components/exchange/TransactionModal.tsx: استبدال submitStatus بـ submitIsComplete boolean
+- تحديث src/components/exchange/TransactionCard.tsx: استبدال isPending بـ isIncomplete
+- تحديث src/components/exchange/TransactionsPage.tsx:
+  - إزالة قسم الحركات المعلّقة المنفصل
+  - دمج جميع الحركات في قائمة واحدة
+  - تحديث الفلتر: PENDING → INCOMPLETE (غير مكتملة)
+  - تحديث TransactionDetailContent: isPending → isIncomplete
+- تحديث src/components/exchange/ReportsPage.tsx: تصفية isComplete !== false
+- تحديث 5 ملفات إضافية: VaultQueryModal, CurrencyTransactionsModal, AccountMatchModal, AccountStatementModal, AccountCard
+- تحديث prisma/schema.prisma: استبدال status + TransactionStatus enum بـ isComplete boolean
+- تحديث header.tsx و stats-cards.tsx: تغيير تسمية "معلقة" → "غير مكتملة"
+- Push Prisma schema changes بنجاح
+
+Stage Summary:
+- ✅ استبدال status (COMPLETED/PENDING) بـ isComplete (boolean)
+- ✅ لا يوجد قسم منفصل - جميع الحركات في نفس القائمة
+- ✅ الحركات غير المكتملة مميزة بصرياً (border-dashed + شارة)
+- ✅ الفلتر: الكل | كاش | آجل | غير مكتملة
+- ✅ التأثير المالي: isComplete=false لا يؤثر، isComplete=true يؤثر طبيعياً
+- ✅ عند تعديل حركة وإكمال البيانات → isComplete=true تلقائياً + تطبيق التأثير المالي
+- ✅ Dexie v6 migration يحوّل البيانات القديمة تلقائياً
+- ✅ UI Freeze محفوظ بالكامل

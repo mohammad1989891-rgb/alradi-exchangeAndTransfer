@@ -57,7 +57,7 @@ export function VaultQueryModal() {
     const currencyTx = transactions.filter(t => 
       (t.baseCurrencyId === selectedCurrencyId || 
       t.currencyId === selectedCurrencyId) &&
-      t.status !== 'PENDING'
+      t.isComplete !== false
     );
     const incomeTx = currencyTx.filter(t => t.type === 'INCOME');
     const expenseTx = currencyTx.filter(t => t.type === 'EXPENSE');

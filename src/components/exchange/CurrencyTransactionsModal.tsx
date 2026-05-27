@@ -30,7 +30,7 @@ export function CurrencyTransactionsModal() {
   
   // Get transactions for this currency
   const currencyTransactions = useMemo(() => {
-    return transactions.filter(t => t.currencyId === selectedCurrencyId && t.status !== 'PENDING');
+    return transactions.filter(t => t.currencyId === selectedCurrencyId && t.isComplete !== false);
   }, [transactions, selectedCurrencyId]);
   
   // Calculate stats

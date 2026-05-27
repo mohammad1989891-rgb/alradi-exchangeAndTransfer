@@ -49,7 +49,7 @@ export function TransactionsPage() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'INCOME' | 'EXPENSE'>('all');
-  const [filterPaymentType, setFilterPaymentType] = useState<'all' | 'CASH' | 'DEFERRED' | 'PENDING'>('all');
+  const [filterPaymentType, setFilterPaymentType] = useState<'all' | 'CASH' | 'DEFERRED' | 'INCOMPLETE'>('all');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
@@ -73,9 +73,9 @@ export function TransactionsPage() {
         t.description?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'all' || t.type === filterType;
       const matchesPaymentType = filterPaymentType === 'all' 
-        || (filterPaymentType === 'PENDING' && t.status === 'PENDING')
-        || (filterPaymentType === 'CASH' && t.paymentType === 'CASH' && t.status !== 'PENDING')
-        || (filterPaymentType === 'DEFERRED' && t.paymentType === 'DEFERRED' && t.status !== 'PENDING');
+        || (filterPaymentType === 'INCOMPLETE' && !t.isComplete)
+        || (filterPaymentType === 'CASH' && t.paymentType === 'CASH' && t.isComplete !== false)
+        || (filterPaymentType === 'DEFERRED' && t.paymentType === 'DEFERRED' && t.isComplete !== false);
 
       // فلتر التاريخ
       let matchesDate = true;
@@ -102,15 +102,6 @@ export function TransactionsPage() {
 
     return result;
   }, [transactions, searchQuery, filterType, filterPaymentType, fromDate, toDate]);
-
-  // 🔸 تقسيم الحركات إلى مكتملة ومعلّقة
-  const completedTransactions = useMemo(() => {
-    return filteredTransactions.filter(t => t.status !== 'PENDING');
-  }, [filteredTransactions]);
-
-  const pendingTransactions = useMemo(() => {
-    return filteredTransactions.filter(t => t.status === 'PENDING');
-  }, [filteredTransactions]);
 
   const handleEdit = (transaction: Transaction) => {
     setSelectedTransaction(null);
@@ -205,7 +196,7 @@ export function TransactionsPage() {
           
           <Select
             value={filterPaymentType}
-            onValueChange={(value: 'all' | 'CASH' | 'DEFERRED' | 'PENDING') => setFilterPaymentType(value)}
+            onValueChange={(value: 'all' | 'CASH' | 'DEFERRED' | 'INCOMPLETE') => setFilterPaymentType(value)}
           >
             <SelectTrigger className="flex-1">
               <SelectValue placeholder="نوع الدفع" />
@@ -214,7 +205,7 @@ export function TransactionsPage() {
               <SelectItem value="all">الكل</SelectItem>
               <SelectItem value="CASH">كاش</SelectItem>
               <SelectItem value="DEFERRED">آجل</SelectItem>
-              <SelectItem value="PENDING">معلّقة</SelectItem>
+              <SelectItem value="INCOMPLETE">غير مكتملة</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -252,29 +243,7 @@ export function TransactionsPage() {
         </div>
       </div>
       
-      {/* 🔸 الحركات المعلّقة */}
-      {pendingTransactions.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <Clock className="w-5 h-5 text-amber-500" />
-            <h2 className="text-lg font-semibold text-amber-600 dark:text-amber-400">
-              حركات معلّقة ({pendingTransactions.length})
-            </h2>
-          </div>
-          <AnimatePresence mode="popLayout">
-            {pendingTransactions.map((transaction, index) => (
-              <TransactionCard
-                key={transaction.id}
-                transaction={transaction}
-                index={index}
-                onClick={() => setSelectedTransaction(transaction)}
-              />
-            ))}
-          </AnimatePresence>
-        </div>
-      )}
-
-      {/* Transactions List */}
+      {/* 🔸 الحركات غير المكتملة - تظهر مع باقي الحركات في نفس القائمة */}
       {filteredTransactions.length === 0 ? (
         <div className="text-center py-12 rounded-2xl bg-muted/30">
           <ArrowLeftRight className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
@@ -292,7 +261,7 @@ export function TransactionsPage() {
       ) : (
         <div className="space-y-3">
           <AnimatePresence mode="popLayout">
-            {completedTransactions.map((transaction, index) => (
+            {filteredTransactions.map((transaction, index) => (
               <TransactionCard
                 key={transaction.id}
                 transaction={transaction}
@@ -370,41 +339,41 @@ function TransactionDetailContent({
   const isIncome = transaction.type === 'INCOME';
   const isCash = transaction.paymentType === 'CASH';
   const isFeesIncome = transaction.feesDirection === 'INCOME';
-  const isPending = transaction.status === 'PENDING';
+  const isIncomplete = !transaction.isComplete;
   
   return (
     <div className="space-y-4">
       {/* Header */}
       <div className={cn(
         'rounded-xl p-4',
-        isPending
+        isIncomplete
           ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 border-dashed'
           : isIncome ? 'bg-emerald-50 dark:bg-emerald-950/20' : 'bg-red-50 dark:bg-red-950/20'
       )}>
         <div className="flex items-center gap-3">
           <div className={cn(
             'w-12 h-12 rounded-full flex items-center justify-center',
-            isPending
+            isIncomplete
               ? 'bg-amber-100 dark:bg-amber-900/50'
               : isIncome ? 'bg-emerald-100 dark:bg-emerald-900/50' : 'bg-red-100 dark:bg-red-900/50'
           )}>
-            {isPending ? (
+            {isIncomplete ? (
               <Clock className="w-6 h-6 text-amber-600 dark:text-amber-400" />
             ) : (
               <span className="text-xl font-bold">{transaction.currency?.symbol}</span>
             )}
           </div>
           <div className="flex-1">
-            {/* 🔸 شارة المعلّق */}
-            {isPending && (
+            {/* 🔸 شارة غير مكتملة */}
+            {isIncomplete && (
               <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-200 dark:bg-amber-800/50 text-amber-700 dark:text-amber-300 font-medium inline-flex items-center gap-1 mb-1">
                 <Clock className="w-3 h-3" />
-                حركة معلّقة
+                حركة غير مكتملة
               </span>
             )}
             <p className={cn(
               'text-2xl font-bold',
-              isPending && 'opacity-60'
+              isIncomplete && 'opacity-60'
             )}>
               {formatNumber(transaction.finalBalance)} {transaction.currency?.symbol}
             </p>
@@ -423,8 +392,8 @@ function TransactionDetailContent({
                 {isCash ? 'كاش' : 'آجل'}
               </span>
             </div>
-            {/* 🔸 بيانات ناقصة للمعلّق */}
-            {isPending && (
+            {/* 🔸 بيانات ناقصة */}
+            {isIncomplete && (
               <div className="mt-2 space-y-1">
                 <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">بيانات ناقصة:</p>
                 <div className="flex flex-wrap gap-1">
@@ -473,9 +442,9 @@ function TransactionDetailContent({
       )}
       
       {/* Action Buttons */}
-      {isPending ? (
+      {isIncomplete ? (
         <div className="space-y-3 pt-2">
-          {/* 🔸 زر إكمال الحركة المعلّقة */}
+          {/* 🔸 زر إكمال الحركة غير المكتملة */}
           <Button
             onClick={onComplete || onEdit}
             className="w-full gap-2 bg-emerald-500 hover:bg-emerald-600 text-white"

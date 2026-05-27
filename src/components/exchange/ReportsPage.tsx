@@ -40,9 +40,9 @@ export function ReportsPage() {
     currencyExchanges,
   } = useLocalData();
 
-  // 🔸 تصفية الحركات المعلّقة من جميع الحسابات
+  // 🔸 تصفية الحركات غير المكتملة من جميع الحسابات
   const completedTransactions = useMemo(() => 
-    transactions.filter(t => t.status !== 'PENDING'), 
+    transactions.filter(t => t.isComplete !== false), 
   [transactions]);
 
   // ============================================

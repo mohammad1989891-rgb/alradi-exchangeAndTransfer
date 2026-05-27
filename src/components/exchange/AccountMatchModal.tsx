@@ -43,7 +43,7 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
   
   // Filter transactions for this account
   const accountTransactions = useMemo(() => {
-    return transactions.filter(t => t.accountId === accountId && t.status !== 'PENDING');
+    return transactions.filter(t => t.accountId === accountId && t.isComplete !== false);
   }, [transactions, accountId]);
   
   // Calculate balance by currency

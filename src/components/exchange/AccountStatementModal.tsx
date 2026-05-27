@@ -62,7 +62,7 @@ export function AccountStatementModal() {
   // Filter data for selected account
   const accountTransactions = useMemo(() => {
     if (!selectedAccountId) return [];
-    let filtered = transactions.filter(t => t.accountId === selectedAccountId && t.status !== 'PENDING');
+    let filtered = transactions.filter(t => t.accountId === selectedAccountId && t.isComplete !== false);
     
     // Apply date filter
     if (hasDateFilter) {

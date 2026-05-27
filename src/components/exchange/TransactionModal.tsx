@@ -241,12 +241,12 @@ export function TransactionModal() {
       return;
     }
     
-    // 🔸 تحديد حالة الحركة تلقائيًا
-    // الحركة معلّقة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0 أو فارغ
-    const isPending = !formData.conversionFactor || formData.conversionFactor === 0 
+    // 🔸 تحديد حالة الاكتمال تلقائيًا
+    // الحركة غير مكتملة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0 أو فارغ
+    const isIncomplete = !formData.conversionFactor || formData.conversionFactor === 0 
       || !formData.amount || formData.amount === 0
       || !calculatedBalance || calculatedBalance === 0;
-    const submitStatus = isPending ? 'PENDING' as const : 'COMPLETED' as const;
+    const submitIsComplete = !isIncomplete;
     
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -269,7 +269,7 @@ export function TransactionModal() {
           feesAmount: formData.feesAmount,
           description: formData.description,
           date: formData.date,
-          status: submitStatus,
+          isComplete: submitIsComplete,
         });
         
         if (result.success) {
@@ -294,7 +294,7 @@ export function TransactionModal() {
           feesAmount: formData.feesAmount,
           description: formData.description,
           date: formData.date,
-          status: submitStatus,
+          isComplete: submitIsComplete,
         });
         
         if (result.success) {
@@ -612,7 +612,7 @@ export function TransactionModal() {
                     {(!finalAmountDisplay || parseFormattedNumber(finalAmountDisplay) === 0) && formData.accountId && (
                       <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                         <AlertCircle className="w-3 h-3" />
-                        عدم إدخال الرصيد النهائي سيجعل الحركة معلّقة
+                        عدم إدخال الرصيد النهائي سيجعل الحركة غير مكتملة
                       </p>
                     )}
                   </div>
@@ -853,14 +853,14 @@ export function TransactionModal() {
           </AnimatePresence>
           
           {/* Submit Button */}
-          {/* 🔸 تحذير الحالة المعلّقة */}
+          {/* 🔸 تحذير الحالة غير المكتملة */}
           {(!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0 || !calculatedBalance || calculatedBalance === 0) && formData.accountId && (
             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
               <span className="text-sm text-amber-700 dark:text-amber-300">
                 {(!calculatedBalance || calculatedBalance === 0) && formData.amount > 0
                   ? 'الحركة غير مكتملة بسبب عدم إدخال الرصيد النهائي'
-                  : 'سيتم حفظ الحركة كـ "معلّقة" حتى يتم استكمال البيانات'
+                  : 'سيتم حفظ الحركة كـ "غير مكتملة" حتى يتم استكمال البيانات'
                 }
               </span>
             </div>
@@ -877,7 +877,7 @@ export function TransactionModal() {
                   : 'bg-red-500 hover:bg-red-600'
             )}
           >
-            {isSubmitting ? 'جاري الحفظ...' : (!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0 || !calculatedBalance || calculatedBalance === 0) ? 'حفظ كمعّلق' : 'حفظ الحركة'}
+            {isSubmitting ? 'جاري الحفظ...' : (!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0 || !calculatedBalance || calculatedBalance === 0) ? 'حفظ كغير مكتملة' : 'حفظ الحركة'}
           </Button>
         </div>
       </DialogContent>

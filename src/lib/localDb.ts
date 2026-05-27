@@ -56,8 +56,8 @@ export interface Transaction {
   isOverflowTransaction?: boolean;
   // ربط الحركة بالدفعة التي أنتجتها
   relatedPaymentId?: string | null;
-  // حالة الحركة: مكتملة أو معلقة
-  status: 'COMPLETED' | 'PENDING';
+  // حالة الاكتمال: true = مكتملة (تؤثر على الصندوق), false = غير مكتملة (لا تؤثر)
+  isComplete: boolean;
   createdAt: Date;
   updatedAt: Date;
   // خصائص إضافية للتوافق مع المكونات
@@ -214,11 +214,8 @@ db.version(4).stores({
   transactions: 'id, accountId, currencyId, type, paymentType, date',
   debts: 'id, accountId, currencyId, isPaid, date',
   debtPayments: 'id, debtId, date',
-  // جدول عمليات الصرف
   currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
-  // جدول المستخدمين
   users: 'id, username',
-  // جداول المركبات
   vehicles: 'id, name, plateNumber, isActive',
   vehicleTransactions: 'id, vehicleId, partner, paymentType, date',
   sharedTransactions: 'id, partner, paymentType, date',
@@ -247,6 +244,35 @@ db.version(5).stores({
     if (!transaction.status) {
       transaction.status = 'COMPLETED';
     }
+  });
+});
+
+// ============================================
+// 🔹 ترقية إلى v6: استبدال status بـ isComplete
+// status = 'COMPLETED' → isComplete = true
+// status = 'PENDING' → isComplete = false
+// ============================================
+db.version(6).stores({
+  currencies: 'id, code, name, isDefault, isActive, exchangeRate',
+  vaults: 'id, currencyId',
+  accounts: 'id, name, type, isActive',
+  transactions: 'id, accountId, currencyId, type, paymentType, isComplete, date',
+  debts: 'id, accountId, currencyId, isPaid, date',
+  debtPayments: 'id, debtId, date',
+  currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
+  users: 'id, username',
+  vehicles: 'id, name, plateNumber, isActive',
+  vehicleTransactions: 'id, vehicleId, partner, paymentType, date',
+  sharedTransactions: 'id, partner, paymentType, date',
+  vehiclesSettings: 'id',
+}).upgrade(tx => {
+  return tx.table('transactions').toCollection().modify(transaction => {
+    // تحويل status القديم إلى isComplete
+    if (transaction.isComplete === undefined) {
+      transaction.isComplete = transaction.status !== 'PENDING';
+    }
+    // حذف الحقل القديم
+    delete transaction.status;
   });
 });
 
@@ -680,7 +706,7 @@ export async function addTransaction(data: {
   date: string;
   isOverflowTransaction?: boolean;
   relatedPaymentId?: string | null;
-  status?: 'COMPLETED' | 'PENDING';
+  isComplete?: boolean;
 }): Promise<Transaction> {
   await initializeDatabase();
   const now = new Date();
@@ -696,15 +722,15 @@ export async function addTransaction(data: {
     data.type
   );
   
-  // 🔹 تحديد حالة الحركة تلقائيًا
-  // الحركة معلّقة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
-  const isPending = !data.conversionFactor || data.conversionFactor === 0 
-    || !data.amount || data.amount === 0
-    || !finalBalance || finalBalance === 0;
-  const status = data.status || (isPending ? 'PENDING' : 'COMPLETED');
+  // 🔹 تحديد حالة الاكتمال تلقائيًا
+  // الحركة غير مكتملة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
+  const isDataComplete = !!(data.conversionFactor && data.conversionFactor !== 0 
+    && data.amount && data.amount !== 0
+    && finalBalance && finalBalance !== 0);
+  const isComplete = data.isComplete !== undefined ? data.isComplete : isDataComplete;
   
   // 🔸 التحقق من الرصيد فقط للحركات المكتملة
-  if (status === 'COMPLETED' && data.paymentType === 'CASH' && data.type === 'INCOME') {
+  if (isComplete && data.paymentType === 'CASH' && data.type === 'INCOME') {
     const vaultCurrencyId = data.baseCurrencyId || data.currencyId;
     const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
     if (vault && vault.balance - data.amount < 0) {
@@ -731,7 +757,7 @@ export async function addTransaction(data: {
     date: new Date(data.date),
     isOverflowTransaction: data.isOverflowTransaction || false,
     relatedPaymentId: data.relatedPaymentId || null,
-    status,
+    isComplete,
     createdAt: now, 
     updatedAt: now 
   };
@@ -739,7 +765,7 @@ export async function addTransaction(data: {
   await db.table('transactions').add(transaction);
   
   // 🔸 تحديث الصندوق فقط للحركات المكتملة والنقدية
-  if (status === 'COMPLETED' && data.paymentType === 'CASH') {
+  if (isComplete && data.paymentType === 'CASH') {
     const vaultCurrencyId = data.baseCurrencyId || data.currencyId;
     const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
     if (vault) {
@@ -757,8 +783,7 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
   if (!old) throw new Error('الحركة غير موجودة');
   
   const now = new Date();
-  const oldStatus = old.status || 'COMPLETED';
-  const newStatus = data.status ?? oldStatus;
+  const oldIsComplete = old.isComplete !== undefined ? old.isComplete : true; // التوافق مع البيانات القديمة
   
   // 🔸 استخدام القيم الجديدة إذا وُجدت، وإلا القيم القديمة
   // ملاحظة: نستخدم ?? بدلاً من || لأن القيمة 0 قيمة صحيحة يجب احترامها
@@ -772,7 +797,7 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
   const effectivePaymentType = data.paymentType ?? old.paymentType;
   
   // 🔸 عكس التأثير على الصندوق فقط إذا كانت الحركة القديمة مكتملة ونقدية
-  if (oldStatus === 'COMPLETED' && old.paymentType === 'CASH') {
+  if (oldIsComplete && old.paymentType === 'CASH') {
     const oldVaultCurrencyId = old.baseCurrencyId || old.currencyId;
     const oldVault = await db.table<Vault>('vaults').where('currencyId').equals(oldVaultCurrencyId).first();
     if (oldVault) {
@@ -791,11 +816,13 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     effectiveType
   );
   
-  // 🔸 تحديد الحالة النهائية:
-  // إذا كانت جميع البيانات مكتملة (مبلغ > 0 + معامل تحويل > 0 + رصيد نهائي > 0) → نستخدم الحالة الممررة
-  // إذا نقص أي حقل → معلّقة تلقائيًا
+  // 🔸 تحديد حالة الاكتمال تلقائيًا:
+  // إذا كانت جميع البيانات مكتملة (مبلغ > 0 + معامل تحويل > 0 + رصيد نهائي > 0) → مكتملة
+  // إذا نقص أي حقل → غير مكتملة تلقائيًا
   const isDataComplete = effectiveAmount > 0 && effectiveConversionFactor > 0 && finalBalance > 0;
-  const effectiveNewStatus = isDataComplete ? newStatus : 'PENDING';
+  const newIsComplete = data.isComplete !== undefined 
+    ? (isDataComplete && data.isComplete)  // إذا مرر isComplete يدويًا، نحترمه فقط إذا البيانات مكتملة
+    : isDataComplete;  // تلقائي حسب البيانات
   
   // 🔸 تنظيف البيانات - إزالة الحقول غير المعرفة (undefined)
   const cleanData: Record<string, unknown> = {};
@@ -805,10 +832,10 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     }
   }
   
-  await db.table('transactions').update(id, { ...cleanData, finalBalance, status: effectiveNewStatus, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
+  await db.table('transactions').update(id, { ...cleanData, finalBalance, isComplete: newIsComplete, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
   
   // 🔸 تطبيق التأثير على الصندوق فقط إذا كانت الحركة الجديدة مكتملة ونقدية
-  if (effectiveNewStatus === 'COMPLETED' && effectivePaymentType === 'CASH') {
+  if (newIsComplete && effectivePaymentType === 'CASH') {
     const vaultCurrencyId = (data.baseCurrencyId ?? data.currencyId) ?? (old.baseCurrencyId || old.currencyId);
     const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
     if (vault) {
@@ -833,7 +860,7 @@ export async function deleteTransaction(id: string): Promise<void> {
   // 🔸 EXPENSE (علينا) = كانت إضافة → نخصم
   // ============================================
   // 🔸 عكس التأثير على الصندوق فقط للحركات المكتملة والنقدية
-  if ((transaction.status || 'COMPLETED') !== 'PENDING' && transaction.paymentType === 'CASH') {
+  if ((transaction.isComplete !== false) && transaction.paymentType === 'CASH') {
     // تحديد عملة الصندوق
     // لحركات الفائض: نستخدم currencyId مباشرة لأن baseCurrencyId يكون null
     // للحركات العادية: نستخدم baseCurrencyId إذا وجد، وإلا currencyId

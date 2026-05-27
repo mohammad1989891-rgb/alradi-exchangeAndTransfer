@@ -44,7 +44,7 @@ export function StatsCards() {
       valueColor: 'text-amber-700',
     },
     {
-      title: 'المعاملات المعلقة',
+      title: 'الحركات غير المكتملة',
       value: stats.pendingTransactions.toString(),
       subtitle: 'بانتظار المراجعة',
       icon: Clock,

@@ -87,7 +87,7 @@ export function Header() {
                 <TrendingDown className="h-3 w-3 text-orange-400" />
               </div>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-emerald-300/70 text-xs">معلقة</span>
+                <span className="text-emerald-300/70 text-xs">غير مكتملة</span>
                 <span className="font-bold text-amber-400 text-sm">{stats.pendingTransactions}</span>
               </div>
             </div>

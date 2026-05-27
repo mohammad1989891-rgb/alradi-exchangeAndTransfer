@@ -575,3 +575,31 @@ Stage Summary:
 - ✅ عند تعديل حركة وإكمال البيانات → isComplete=true تلقائياً + تطبيق التأثير المالي
 - ✅ Dexie v6 migration يحوّل البيانات القديمة تلقائياً
 - ✅ UI Freeze محفوظ بالكامل
+---
+Task ID: 4
+Agent: Main Agent
+Task: تحسين سلوك عرض حالة الحركات غير المكتملة والتمييز البصري + مزامنة الرصيد النهائي Real-time
+
+Work Log:
+- تحليل شامل للكود: TransactionCard, TransactionModal, TransactionsPage, localDb, useAppStore, useLocalData
+- اكتشاف Bug حرج: `!transaction.isComplete` يعطي true لـ undefined، بينما `transaction.isComplete === false` هو التحقق الصحيح
+- إصلاح TransactionCard.tsx:
+  - تغيير `!transaction.isComplete` → `transaction.isComplete === false` (السطر 20)
+  - إضافة أيقونة ⚠️ (AlertTriangle) بجانب المبلغ للحركات غير المكتملة
+  - إضافة opacity-60 للمبلغ غير المكتمل
+- إصلاح TransactionsPage.tsx:
+  - تغيير `!t.isComplete` → `t.isComplete === false` في فلتر INCOMPLETE (السطر 76)
+  - تغيير `!transaction.isComplete` → `transaction.isComplete === false` في TransactionDetailContent (السطر 342)
+- إصلاح TransactionModal.tsx:
+  - مزامنة finalAmountDisplay مع calculatedBalance في وضع FACTOR_TO_FINAL
+  - عند تغيير أي قيمة في وضع معامل ← نهائي، يتم تحديث finalAmountDisplay تلقائياً
+  - هذا يضمن أن المستخدم يرى نفس القيمة في حقل الإدخال إذا بدّل الوضع
+- التحقق: dev server يعمل بدون أخطاء، lint يمر (فقط خطأ قديم في VehicleTransactionModal.tsx)
+
+Stage Summary:
+- ✅ إصلاح Bug: isIncomplete يستخدم `=== false` بدلاً من `!` لتجنب مشكلة undefined
+- ✅ إضافة أيقونة ⚠️ بجانب مبلغ الحركة غير المكتملة
+- ✅ إضافة opacity-60 للمبلغ غير المكتمل
+- ✅ مزامنة finalAmountDisplay مع calculatedBalance في Real-time
+- ✅ UI Freeze محفوظ بالكامل - فقط إضافة تمييز بصري بسيط
+- ✅ لا صفحات جديدة، لا نقل بيانات، تعديل Patch فقط

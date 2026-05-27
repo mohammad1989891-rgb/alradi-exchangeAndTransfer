@@ -73,7 +73,7 @@ export function TransactionsPage() {
         t.description?.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesType = filterType === 'all' || t.type === filterType;
       const matchesPaymentType = filterPaymentType === 'all' 
-        || (filterPaymentType === 'INCOMPLETE' && !t.isComplete)
+        || (filterPaymentType === 'INCOMPLETE' && t.isComplete === false)
         || (filterPaymentType === 'CASH' && t.paymentType === 'CASH' && t.isComplete !== false)
         || (filterPaymentType === 'DEFERRED' && t.paymentType === 'DEFERRED' && t.isComplete !== false);
 
@@ -339,7 +339,7 @@ function TransactionDetailContent({
   const isIncome = transaction.type === 'INCOME';
   const isCash = transaction.paymentType === 'CASH';
   const isFeesIncome = transaction.feesDirection === 'INCOME';
-  const isIncomplete = !transaction.isComplete;
+  const isIncomplete = transaction.isComplete === false;
   
   return (
     <div className="space-y-4">

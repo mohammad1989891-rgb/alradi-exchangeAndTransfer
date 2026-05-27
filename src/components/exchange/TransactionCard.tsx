@@ -17,7 +17,7 @@ export function TransactionCard({ transaction, index, onClick }: TransactionCard
   const isCash = transaction.paymentType === 'CASH';
   const hasConversion = transaction.baseCurrencyId && transaction.baseCurrencyId !== transaction.currencyId;
   const isOverflow = transaction.isOverflowTransaction;  // حركة ناتجة عن فائض
-  const isIncomplete = !transaction.isComplete;  // 🔸 حركة غير مكتملة
+  const isIncomplete = transaction.isComplete === false;  // 🔸 حركة غير مكتملة (=== false لتجنب undefined)
 
   return (
     <motion.div
@@ -138,16 +138,22 @@ export function TransactionCard({ transaction, index, onClick }: TransactionCard
 
         {/* Amount */}
         <div className="text-left flex-shrink-0">
-          <p className={cn(
-            'text-lg font-bold',
-            isOverflow
-              ? 'text-amber-600 dark:text-amber-400'
-              : isIncome
-                ? 'text-emerald-600 dark:text-emerald-400'
-                : 'text-red-600 dark:text-red-400'
-          )}>
-            {formatNumber(transaction.finalBalance)}
-          </p>
+          <div className="flex items-center gap-1">
+            <p className={cn(
+              'text-lg font-bold',
+              isOverflow
+                ? 'text-amber-600 dark:text-amber-400'
+                : isIncome
+                  ? 'text-emerald-600 dark:text-emerald-400'
+                  : 'text-red-600 dark:text-red-400',
+              isIncomplete && 'opacity-60'
+            )}>
+              {formatNumber(transaction.finalBalance)}
+            </p>
+            {isIncomplete && (
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />
+            )}
+          </div>
           <div className="flex items-center justify-end gap-1">
             <p className="text-[10px] text-muted-foreground">
               {transaction.currency?.symbol}

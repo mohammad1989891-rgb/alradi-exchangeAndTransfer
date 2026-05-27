@@ -185,7 +185,14 @@ export function TransactionModal() {
     
     setFeesValue(result.feesValue);
     setCalculatedBalance(result.finalBalance);
-  }, [formData, isSameCurrency]);
+    
+    // 🔸 مزامنة المبلغ النهائي مع حقل الإدخال في وضع نهائي ← معامل
+    // عند تغيير أي قيمة في وضع معامل ← نهائي، نحدّث finalAmountDisplay
+    // حتى يكون جاهزاً إذا بدّل المستخدم الوضع
+    if (inputMode === 'FACTOR_TO_FINAL' && result.finalBalance > 0) {
+      setFinalAmountDisplay(formatInputNumber(result.finalBalance));
+    }
+  }, [formData, isSameCurrency, inputMode]);
   
   // Handle amount input with formatting
   const handleAmountChange = (value: string) => {

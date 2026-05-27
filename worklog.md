@@ -478,3 +478,29 @@ Stage Summary:
   5. ✅ Pending transaction management: edit, complete
   6. ✅ Accounting rules: pending transactions don't affect balances/box/reports
   7. ✅ UI Freeze maintained
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: إضافة شرط الرصيد النهائي (=0 أو فارغ) لمنطق التحقق في نافذة إضافة حركة جديدة
+
+Work Log:
+- تحليل المنطق الحالي في TransactionModal.tsx: شرط isPending كان يفحص فقط conversionFactor و amount
+- إضافة شرط calculatedBalance === 0 أو فارغ لشرط isPending في handleSubmit
+- إضافة تنبيه مخصص "الحركة غير مكتملة بسبب عدم إدخال الرصيد النهائي" عند calculatedBalance = 0 مع amount > 0
+- إضافة تنبيه أسفل حقل المبلغ النهائي في وضع نهائي → معامل عند عدم الإدخال
+- تحديث شرط زر الحفظ وشارات التحذير لتشمل calculatedBalance
+- إضافة شارة "الرصيد النهائي" في بيانات الحركة المعلّقة الناقصة في TransactionsPage.tsx
+- إصلاح bug في localDb.ts: calculateFinalBalance يعيد كائن وليس عدد - إصلاح في addTransaction و updateTransaction
+- إضافة شرط finalBalance === 0 في addTransaction و updateTransaction في localDb.ts
+- فحص شامل: جميع المكونات تستبعد الحركات المعلّقة من الحسابات المالية ✅
+- Push إلى GitHub بنجاح
+
+Stage Summary:
+- ✅ شرط الرصيد النهائي = 0 يُفعّل حالة معلّق تلقائياً
+- ✅ رسالة تحذير مخصصة عند عدم إدخال الرصيد النهائي
+- ✅ تنبيه أسفل حقل المبلغ النهائي في وضع نهائي → معامل
+- ✅ إصلاح bug في localDb.ts (calculateFinalBalance return type)
+- ✅ شارة "الرصيد النهائي" في بيانات الحركة المعلّقة الناقصة
+- ✅ UI Freeze محفوظ بالكامل
+- ✅ ملفات معدّلة: TransactionModal.tsx, TransactionsPage.tsx, localDb.ts

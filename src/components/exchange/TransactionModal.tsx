@@ -162,6 +162,15 @@ export function TransactionModal() {
   
   // Calculate converted amount
   useEffect(() => {
+    // 🔸 إذا كان معامل التحويل = 0 (المستخدم أدخل 0 كرصيد نهائي)
+    // الرصيد النهائي = 0 مباشرة
+    if (!isSameCurrency && formData.conversionFactor === 0) {
+      setConvertedAmount(0);
+      setCalculatedBalance(0);
+      setFeesValue(0);
+      return;
+    }
+    
     let converted = formData.amount;
     if (!isSameCurrency && formData.conversionFactor > 0) {
       if (formData.conversionMethod === 'MULTIPLY') {
@@ -222,7 +231,7 @@ export function TransactionModal() {
     setFormData({ ...formData, feesAmount: numValue });
   };
   
-  // 🔸 معالجة إدخال المبلغ النهائي (وضع نهائي → معامل)
+  // 🔸 معالجة إدخال المبلغ النهائي (وضع نهائي ← معامل)
   const handleFinalAmountChange = (value: string) => {
     const cleanValue = value.replace(/[^0-9.,]/g, '');
     setFinalAmountDisplay(cleanValue);
@@ -237,7 +246,14 @@ export function TransactionModal() {
       }
       setFormData(prev => ({ ...prev, conversionFactor: factor }));
       setConversionFactorDisplay(formatInputNumber(factor));
+    } else if (cleanValue !== '' && finalAmount === 0 && formData.amount > 0) {
+      // 🔸 المستخدم أدخل 0 صراحةً (وليس حقل فارغ)
+      // نعيّن conversionFactor = 0 ليتم عرض 0 في الرصيد النهائي
+      setFormData(prev => ({ ...prev, conversionFactor: 0 }));
+      setConversionFactorDisplay('0');
     }
+    // إذا كان الحقل فارغاً (cleanValue === '') لا نغيّر conversionFactor
+    // يتم منع الحفظ لاحقاً عبر التحقق من finalAmountDisplay
   };
   
   // SYP version is always OLD - no toggle needed
@@ -245,6 +261,13 @@ export function TransactionModal() {
   
   const handleSubmit = async () => {
     if (!formData.accountId || !formData.currencyId || !formData.date) {
+      return;
+    }
+    
+    // 🔸 التحقق من إدخال الرصيد النهائي في وضع الإدخال اليدوي
+    // منع الحفظ إذا كان الحقل فارغاً (وليس صفر)
+    if (!isSameCurrency && inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay === '') {
+      setErrorMessage('يرجى إدخال قيمة الرصيد النهائي');
       return;
     }
     
@@ -616,11 +639,21 @@ export function TransactionModal() {
                       dir="ltr"
                     />
                     {/* 🔸 تنبيه عند عدم إدخال الرصيد النهائي */}
-                    {(!finalAmountDisplay || parseFormattedNumber(finalAmountDisplay) === 0) && formData.accountId && (
-                      <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        عدم إدخال الرصيد النهائي سيجعل الحركة غير مكتملة
-                      </p>
+                    {formData.accountId && (
+                      <>
+                        {finalAmountDisplay === '' && (
+                          <p className="text-xs text-red-500 dark:text-red-400 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            يرجى إدخال قيمة الرصيد النهائي
+                          </p>
+                        )}
+                        {finalAmountDisplay !== '' && parseFormattedNumber(finalAmountDisplay) === 0 && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                            <AlertCircle className="w-3 h-3" />
+                            القيمة 0 ستجعل الحركة غير مكتملة
+                          </p>
+                        )}
+                      </>
                     )}
                   </div>
                 )}

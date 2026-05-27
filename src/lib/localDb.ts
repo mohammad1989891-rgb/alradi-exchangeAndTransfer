@@ -290,6 +290,12 @@ function calculateFinalBalance(
   feesDirection: string,
   transactionType: 'INCOME' | 'EXPENSE' = 'INCOME'
 ): number {
+  // 🔸 حماية: إذا كان معامل التحويل = 0، الرصيد النهائي = 0
+  // (لتجنب القسمة على صفر في وضع DIVIDE)
+  if (!conversionFactor || conversionFactor === 0) {
+    return 0;
+  }
+  
   let finalBalance = amount;
   
   if (conversionMethod === 'MULTIPLY') {
@@ -712,9 +718,11 @@ export async function addTransaction(data: {
   const now = new Date();
   
   // 🔸 حساب الرصيد النهائي
+  // ملاحظة: نستخدم ?? بدلاً من || لأن conversionFactor يمكن أن يكون 0 (قيمة صحيحة)
+  const effectiveFactor = data.conversionFactor ?? 1;
   const finalBalance = calculateFinalBalance(
     data.amount || 0, 
-    data.conversionFactor || 1, 
+    effectiveFactor, 
     data.conversionMethod || 'MULTIPLY', 
     data.feesType || 'FIXED', 
     data.feesAmount || 0, 
@@ -724,7 +732,7 @@ export async function addTransaction(data: {
   
   // 🔹 تحديد حالة الاكتمال تلقائيًا
   // الحركة غير مكتملة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
-  const isDataComplete = !!(data.conversionFactor && data.conversionFactor !== 0 
+  const isDataComplete = !!(effectiveFactor && effectiveFactor !== 0 
     && data.amount && data.amount !== 0
     && finalBalance && finalBalance !== 0);
   const isComplete = data.isComplete !== undefined ? data.isComplete : isDataComplete;
@@ -747,7 +755,7 @@ export async function addTransaction(data: {
     type: data.type, 
     paymentType: data.paymentType, 
     amount: data.amount, 
-    conversionFactor: data.conversionFactor || 1, 
+    conversionFactor: effectiveFactor, 
     conversionMethod: data.conversionMethod || 'MULTIPLY', 
     feesType: data.feesType || 'FIXED', 
     feesDirection: data.feesDirection || 'INCOME', 

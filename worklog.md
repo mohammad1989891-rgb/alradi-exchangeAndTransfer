@@ -603,3 +603,46 @@ Stage Summary:
 - ✅ مزامنة finalAmountDisplay مع calculatedBalance في Real-time
 - ✅ UI Freeze محفوظ بالكامل - فقط إضافة تمييز بصري بسيط
 - ✅ لا صفحات جديدة، لا نقل بيانات، تعديل Patch فقط
+---
+Task ID: 5
+Agent: Main Agent
+Task: تحسين منطق إدخال الرصيد النهائي والتحقق من القيم في نافذة إضافة حركة
+
+Work Log:
+- تحليل شامل لكود TransactionModal.tsx و localDb.ts
+- اكتشاف Bug #1: calculateFinalBalance في localDb.ts يُنتج Infinity عند conversionFactor=0 وطريقة DIVIDE
+- اكتشاف Bug #2: data.conversionFactor || 1 في addTransaction يحوّل 0 إلى 1 (0 || 1 = 1)
+- اكتشاف Bug #3: handleFinalAmountChange لا يتعامل مع القيمة 0 (لا يحدّث conversionFactor)
+- اكتشاف Bug #4: لا يوجد تحقق من الحقل الفارغ في وضع FINAL_TO_FACTOR
+
+إصلاحات localDb.ts:
+- إضافة حماية في calculateFinalBalance: إذا conversionFactor = 0 → return 0 (لتجنب القسمة على صفر)
+- تغيير data.conversionFactor || 1 → data.conversionFactor ?? 1 (?? تحترم 0 كقيمة صحيحة)
+- تخزين effectiveFactor في Transaction.conversionFactor بدلاً من data.conversionFactor || 1
+- تحديث isDataComplete لاستخدام effectiveFactor بدلاً من data.conversionFactor
+
+إصلاحات TransactionModal.tsx:
+- handleFinalAmountChange: إضافة فرع جديد للقيمة 0 (cleanValue !== '' && finalAmount === 0)
+  - تعيين conversionFactor = 0 لعرض 0 في الرصيد النهائي
+  - تمييز الحقل الفارغ ('') عن القيمة 0
+- useEffect حسابي: إضافة شرط في البداية إذا conversionFactor === 0
+  - تعيين convertedAmount = 0, calculatedBalance = 0, feesValue = 0 مباشرة
+- handleSubmit: إضافة تحقق جديد
+  - إذا !isSameCurrency && inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay === ''
+  - منع الحفظ + عرض رسالة "يرجى إدخال قيمة الرصيد النهائي"
+- تحديث تنبيهات حقل المبلغ النهائي:
+  - حقل فارغ → تنبيه أحمر "يرجى إدخال قيمة الرصيد النهائي"
+  - قيمة 0 → تنبيه ذهبي "القيمة 0 ستجعل الحركة غير مكتملة"
+
+منطق حالة الحركة:
+- الرصيد النهائي = 0 → isComplete = false (غير مكتملة، لا تؤثر على الصندوق)
+- الرصيد النهائي > 0 → isComplete = true (مكتملة، تؤثر طبيعياً)
+- الحقل فارغ → منع الحفظ بالكامل
+
+Stage Summary:
+- ✅ إصلاح Bug: calculateFinalBalance لا يُنتج Infinity بعد الآن
+- ✅ إصلاح Bug: conversionFactor = 0 يُحترم بدلاً من تحويله إلى 1
+- ✅ إدخال 0 يعرض 0 فوراً في الرصيد النهائي
+- ✅ الحقل الفارغ يمنع الحفظ مع رسالة تنبيه
+- ✅ تمييز بصري بين فارغ (أحمر) وصفر (ذهبي)
+- ✅ UI Freeze محفوظ بالكامل - Patch فقط

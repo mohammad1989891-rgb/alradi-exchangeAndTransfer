@@ -9,7 +9,7 @@ import {
   getCurrencyExchanges,
   getTotalBalanceInUSD,
   getTotalDebtRemaining,
-} from '@/lib/localDb';
+} from '@/lib/supabaseDb';
 
 type Tab = 'balances' | 'accounts' | 'transactions' | 'debts' | 'settings' | 'exchange' | 'vehicles' | 'reports';
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, AlertCircle, CreditCard, Trash2, ArrowUpRight, ArrowDownRight, Banknote, Clock, ChevronLeft, AlertTriangle, CheckCircle, List, X } from 'lucide-react';
 import { DebtModal } from './DebtModal';
@@ -29,8 +29,8 @@ import {
 import { formatNumber, formatDate } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import type { Debt, DebtPayment } from '@/lib/localDb';
-import { getAccountDebtSummary, deleteTransaction, type AccountDebtSummary } from '@/lib/localDb';
+import type { Debt, DebtPayment } from '@/lib/supabaseDb';
+import { getAccountDebtSummary, deleteTransaction, type AccountDebtSummary } from '@/lib/supabaseDb';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
 interface UnifiedMovement {
@@ -64,7 +64,7 @@ interface CumulativeAccountSummary extends AccountDebtSummary {
 
 export function DebtsPage() {
   const { accounts, openDebtModal, currencies } = useAppStore();
-  const { debtRemaining, debtPayments, addDebtPayment, deleteDebtPayment, deleteDebt, refreshData, addTransaction } = useLocalData();
+  const { debtRemaining, debtPayments, addDebtPayment, deleteDebtPayment, deleteDebt, refreshData, addTransaction } = useSupabaseData();
   const { toast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');

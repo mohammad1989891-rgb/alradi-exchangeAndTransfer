@@ -26,7 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { CurrencyExchange, Currency } from '@/lib/localDb';
+import { CurrencyExchange, Currency } from '@/lib/supabaseDb';
 import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import { format } from 'date-fns';
 import { ar } from 'date-fns/locale';

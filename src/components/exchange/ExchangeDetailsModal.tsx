@@ -1,6 +1,6 @@
 'use client';
 
-import type { Currency, Exchange } from '@/lib/localDb';
+import type { Currency, Exchange } from '@/lib/supabaseDb';
 import { formatNumber, formatDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';

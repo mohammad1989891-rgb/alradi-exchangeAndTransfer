@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Plus,
@@ -23,13 +23,13 @@ import {
   getExchangeStats,
   deleteCurrencyExchange,
   CurrencyExchange,
-} from '@/lib/localDb';
+} from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
 
 export function CurrencyExchangePage() {
   const { openExchangeModal } = useAppStore();
-  const { currencies, refreshData } = useLocalData();
+  const { currencies, refreshData } = useSupabaseData();
   const { toast } = useToast();
 
   const [exchanges, setExchanges] = useState<CurrencyExchange[]>([]);

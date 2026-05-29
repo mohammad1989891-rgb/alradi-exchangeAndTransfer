@@ -45,7 +45,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
-import * as db from '@/lib/localDb';
+import * as db from '@/lib/supabaseDb';
 
 // ============================================
 // 🔹 دالة تحويل الأرقام العربية إلى إنجليزية
@@ -840,7 +840,7 @@ export function VehiclesPage() {
         </motion.div>
 
         {/* 🔹 بطاقتا الشركاء - بديل البطاقة الرئيسية */}
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* بطاقة الشريك الأول */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}

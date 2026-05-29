@@ -5,8 +5,8 @@ import { motion } from 'framer-motion';
 import { ArrowLeftRight, TrendingUp, TrendingDown, Info, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatNumber, formatDate } from '@/lib/format';
-import type { Currency } from '@/lib/localDb';
-import type { Exchange } from '@/lib/localDb';
+import type { Currency } from '@/lib/supabaseDb';
+import type { Exchange } from '@/lib/supabaseDb';
 import { Button } from '@/components/ui/button';
 import { ExchangeDetailsModal } from './ExchangeDetailsModal';
 import {

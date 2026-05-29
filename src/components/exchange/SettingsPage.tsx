@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { useTheme } from 'next-themes';
 import { motion } from 'framer-motion';
 import {
@@ -57,13 +57,13 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb } from '@/lib/localDb';
+import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb } from '@/lib/supabaseDb';
 import type { Currency as CurrencyType } from '@/types';
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { currencies, setCurrencies, vaults, accounts, transactions, debts } = useAppStore();
-  const { refreshData: refreshLocalData } = useLocalData();
+  const { refreshData: refreshLocalData } = useSupabaseData();
   const { toast } = useToast();
   
   const [expandedSection, setExpandedSection] = useState<string | null>('appearance');

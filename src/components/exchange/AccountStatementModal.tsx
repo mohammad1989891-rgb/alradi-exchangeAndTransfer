@@ -2,7 +2,7 @@
 
 import { useState, useMemo, Fragment } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatNumber } from '@/lib/format';
-import type { Transaction, Debt, DebtPayment, Currency } from '@/lib/localDb';
+import type { Transaction, Debt, DebtPayment, Currency } from '@/lib/supabaseDb';
 
 export function AccountStatementModal() {
   const { 
@@ -36,7 +36,7 @@ export function AccountStatementModal() {
     selectedAccountForStatement 
   } = useAppStore();
   
-  const { transactions, debts, debtPayments } = useLocalData();
+  const { transactions, debts, debtPayments } = useSupabaseData();
   
   // Determine initial selected account using useMemo
   const defaultAccountId = useMemo(() => {

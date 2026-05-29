@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
 import {
@@ -17,11 +17,11 @@ import { Switch } from '@/components/ui/switch';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Coins, Check, X, RefreshCw, DollarSign, TrendingUp, Info } from 'lucide-react';
-import type { Currency } from '@/lib/localDb';
+import type { Currency } from '@/lib/supabaseDb';
 
 export function CurrencyManagementModal() {
   const { isCurrencyModalOpen, closeCurrencyModal } = useAppStore();
-  const { allCurrencies, activateCurrency, deactivateCurrency, updateCurrencyExchangeRate, refreshData, isLoading } = useLocalData();
+  const { allCurrencies, activateCurrency, deactivateCurrency, updateCurrencyExchangeRate, refreshData, isLoading } = useSupabaseData();
   
   const [editingCurrency, setEditingCurrency] = useState<string | null>(null);
   const [exchangeRateInput, setExchangeRateInput] = useState<string>('');

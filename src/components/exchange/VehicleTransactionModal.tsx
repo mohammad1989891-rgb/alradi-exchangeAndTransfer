@@ -85,30 +85,33 @@ export function VehicleTransactionModal({
   onSave,
 }: VehicleTransactionModalProps) {
   // Form state
+  // تحديث القيم عند فتح النافذة للتعديل
+  // استخدام key pattern لإعادة تعيين النموذج عند تغيير المعرفات
+  const editKey = editTransaction ? `${editTransaction.id}-${editTransaction.partner}` : 'new';
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [amount, setAmount] = useState('');
   const [partner, setPartner] = useState<'first' | 'second'>('first');
   const [paymentType, setPaymentType] = useState<'cash' | 'deferred'>('cash');
   const [description, setDescription] = useState('');
+  const [lastEditKey, setLastEditKey] = useState(editKey);
 
-  // تحديث القيم عند فتح النافذة للتعديل
-  useEffect(() => {
+  // تحديث الحقول عند تغيير حالة التعديل
+  if (editKey !== lastEditKey) {
+    setLastEditKey(editKey);
     if (editTransaction) {
       setDate(new Date(editTransaction.date).toISOString().split('T')[0]);
       setAmount(editTransaction.amount.toString());
       setPartner(editTransaction.partner);
-      // الشريك الثاني دائماً آجل
       setPaymentType(editTransaction.partner === 'second' ? 'deferred' : editTransaction.paymentType);
       setDescription(editTransaction.description);
     } else {
-      // إعادة تعيين للإضافة الجديدة
       setDate(new Date().toISOString().split('T')[0]);
       setAmount('');
       setPartner('first');
       setPaymentType('cash');
       setDescription('');
     }
-  }, [editTransaction, isOpen]);
+  }
 
   // 🔹 عند تغيير الشريك: تعيين نوع الدفع تلقائياً
   // الشريك الثاني → آجل دائماً

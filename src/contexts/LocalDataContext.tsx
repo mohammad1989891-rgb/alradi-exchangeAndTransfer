@@ -33,8 +33,8 @@ import {
   exportAllData as dbExportAllData,
   importAllData as dbImportAllData,
   clearAllData as dbClearAllData,
-} from '@/lib/localDb';
-import type { Currency, Vault, Account, Transaction, Debt, DebtPayment } from '@/lib/localDb';
+} from '@/lib/supabaseDb';
+import type { Currency, Vault, Account, Transaction, Debt, DebtPayment } from '@/lib/supabaseDb';
 
 interface LocalDataContextType {
   // Data
@@ -305,7 +305,7 @@ export function LocalDataProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function useLocalData() {
+export function useSupabaseData() {
   const context = useContext(LocalDataContext);
   if (context === undefined) {
     throw new Error('useLocalData must be used within a LocalDataProvider');

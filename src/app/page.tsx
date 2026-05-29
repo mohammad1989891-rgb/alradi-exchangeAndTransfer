@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { BottomNav } from '@/components/exchange/BottomNav';
 import { BalancesPage } from '@/components/exchange/BalancesPage';
 import { AccountsPage } from '@/components/exchange/AccountsPage';
@@ -21,6 +21,7 @@ import { OpeningBalanceModal } from '@/components/exchange/OpeningBalanceModal';
 import { CurrencyExchangeModal } from '@/components/exchange/CurrencyExchangeModal';
 import { SplashScreen } from '@/components/exchange/SplashScreen';
 import { LoginPage } from '@/components/exchange/LoginPage';
+import { SupabaseSetup } from '@/components/exchange/SupabaseSetup';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Menu, Search, Loader2, Settings, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -46,7 +47,7 @@ export default function Home() {
     isSideMenuOpen, closeSideMenu, refreshAllData
   } = useAppStore();
   
-  const localData = useLocalData();
+  const localData = useSupabaseData();
   const { toast } = useToast();
   
   // App state management
@@ -101,6 +102,40 @@ export default function Home() {
     });
   };
   
+  // 🔸 اكتشاف عدم وجود جداول Supabase — عرض شاشة الإعداد
+  const needsSupabaseSetup = useMemo(() => {
+    // Primary check: tablesMissing flag from the hook
+    if (localData.tablesMissing && localData.isInitialized) {
+      return true;
+    }
+    // Fallback: check error message patterns (for backwards compatibility)
+    if (localData.initError && localData.isInitialized) {
+      const errorMsg = localData.initError.toLowerCase();
+      if (
+        errorMsg.includes('could not find') ||
+        errorMsg.includes('does not exist') ||
+        errorMsg.includes('schema cache') ||
+        errorMsg.includes('relation') ||
+        errorMsg.includes('لم يتم العثور على جداول') ||
+        errorMsg.includes('إعداد قاعدة البيانات')
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }, [localData.tablesMissing, localData.initError, localData.isInitialized]);
+
+  // Track if setup was completed (to dismiss the setup screen)
+  const [setupCompleted, setSetupCompleted] = useState(false);
+  const showSupabaseSetup = needsSupabaseSetup && !setupCompleted;
+
+  // 🔸 عند إكمال إعداد Supabase — إعادة تهيئة التطبيق
+  const handleSetupComplete = useCallback(async () => {
+    setSetupCompleted(true);
+    // Retry initialization
+    await localData.retryInit();
+  }, [localData]);
+
   // 🔸 تحميل البيانات عند التهيئة — مع حماية من حلقة إعادة التصيير
   // يستخدم JSON serialization للمقارنة بدل المقارنة بالمرجع
   const lastDataHashRef = useRef('');
@@ -314,6 +349,11 @@ export default function Home() {
     return <LoginPage onLogin={handleLogin} />;
   }
   
+  // Show Supabase setup guide if tables don't exist
+  if (showSupabaseSetup) {
+    return <SupabaseSetup onSetupComplete={handleSetupComplete} />;
+  }
+  
   // Show loading screen while initializing
   if (isLoading || !isInitialized) {
     return (
@@ -321,22 +361,61 @@ export default function Home() {
         <motion.div
           initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="flex flex-col items-center gap-4"
+          transition={{ duration: 0.3 }}
+          className="flex flex-col items-center gap-6"
         >
-          <Loader2 className="w-12 h-12 text-primary animate-spin" />
-          <p className="text-muted-foreground">جاري تحميل البيانات...</p>
+          {/* Animated logo */}
+          <motion.div
+            animate={{ rotate: 360 }}
+            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+            className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center"
+          >
+            <svg 
+              className="w-10 h-10 text-primary-foreground" 
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path 
+                strokeLinecap="round" 
+                strokeLinejoin="round" 
+                strokeWidth={2} 
+                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" 
+              />
+            </svg>
+          </motion.div>
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-lg font-medium text-foreground">الراضي للصرافة</p>
+            <p className="text-sm text-muted-foreground">جاري تحميل البيانات...</p>
+          </div>
           {localData.initError && (
-            <div className="text-center space-y-2 mt-2">
+            <div className="text-center space-y-3 mt-2 max-w-sm px-4">
               <p className="text-sm text-red-500">{localData.initError}</p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={localData.retryInit}
-                className="gap-2"
-              >
-                <Loader2 className="w-4 h-4" />
-                إعادة المحاولة
-              </Button>
+              <div className="flex gap-2 justify-center flex-wrap">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={localData.retryInit}
+                  className="gap-2"
+                >
+                  <Loader2 className="w-4 h-4" />
+                  إعادة المحاولة
+                </Button>
+                {(localData.tablesMissing ||
+                  localData.initError.toLowerCase().includes('could not find') || 
+                  localData.initError.toLowerCase().includes('does not exist') ||
+                  localData.initError.toLowerCase().includes('schema cache') ||
+                  localData.initError.toLowerCase().includes('لم يتم العثور على جداول')) && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => setSetupCompleted(false)}
+                    className="gap-2"
+                  >
+                    إعداد قاعدة البيانات
+                  </Button>
+                )}
+              </div>
             </div>
           )}
         </motion.div>

@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState, useRef, useCallback } from 'react';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion } from 'framer-motion';
 import {
   BarChart3,
@@ -38,7 +38,7 @@ export function ReportsPage() {
     debts,
     debtPayments,
     currencyExchanges,
-  } = useLocalData();
+  } = useSupabaseData();
 
   // 🔸 تصفية الحركات غير المكتملة من جميع الحسابات
   const completedTransactions = useMemo(() => 

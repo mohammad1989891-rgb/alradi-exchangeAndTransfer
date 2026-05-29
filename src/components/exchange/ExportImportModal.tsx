@@ -40,8 +40,8 @@ import {
   restoreFromBackup,
   getDataStats,
   clearAllData,
-} from '@/lib/localDb';
-import type { ExportData } from '@/lib/localDb';
+} from '@/lib/supabaseDb';
+import type { ExportData } from '@/lib/supabaseDb';
 
 interface DataStats {
   currencies: number;

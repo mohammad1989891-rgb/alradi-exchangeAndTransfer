@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -17,7 +17,7 @@ import {
   Copy, Check, Share2, MessageSquare, RefreshCcw 
 } from 'lucide-react';
 import { formatNumber } from '@/lib/format';
-import type { Currency } from '@/lib/localDb';
+import type { Currency } from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 
 interface AccountMatchModalProps {
@@ -33,7 +33,7 @@ function formatNum(num: number): string {
 
 export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchModalProps) {
   const { accounts, currencies } = useAppStore();
-  const { transactions } = useLocalData();
+  const { transactions } = useSupabaseData();
   const { toast } = useToast();
   
   const [copied, setCopied] = useState(false);

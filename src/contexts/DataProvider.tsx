@@ -33,8 +33,8 @@ import {
   exportAllData,
   importAllData,
   clearAllData,
-} from '@/lib/localDb';
-import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, Exchange } from '@/lib/localDb';
+} from '@/lib/supabaseDb';
+import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, Exchange } from '@/lib/supabaseDb';
 
 interface DebtRemaining {
   totalDebts: number;

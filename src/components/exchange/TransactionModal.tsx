@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -73,7 +73,7 @@ export function TransactionModal() {
     currencies,
   } = useAppStore();
   
-  const { addTransaction, updateTransaction, deleteTransaction } = useLocalData();
+  const { addTransaction, updateTransaction, deleteTransaction } = useSupabaseData();
   
   const [formData, setFormData] = useState<TransactionFormData>(defaultFormData);
   const [isSubmitting, setIsSubmitting] = useState(false);

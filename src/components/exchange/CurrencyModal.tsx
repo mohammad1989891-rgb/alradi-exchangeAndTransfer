@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
@@ -36,13 +36,13 @@ import { isSYPCurrency, convertInverseExchangeRateForDisplay, isLikelyOldVersion
 import { useSYPSettings } from '@/store/useSYPSettings';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Coins, DollarSign, TrendingUp, Info, Check, Search, RefreshCw, RotateCcw, ArrowUpRight, ArrowDownRight } from 'lucide-react';
-import type { Currency } from '@/lib/localDb';
-import { resetCurrenciesToDefault, updateCurrencyConversionMethod as updateCurrencyConversionMethodDb } from '@/lib/localDb';
+import type { Currency } from '@/lib/supabaseDb';
+import { resetCurrenciesToDefault, updateCurrencyConversionMethod as updateCurrencyConversionMethodDb } from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 
 export function CurrencyModal() {
   const { isCurrencyModalOpen, closeCurrencyModal } = useAppStore();
-  const { allCurrencies, activateCurrency, deactivateCurrency, updateCurrencyExchangeRate, refreshData, isLoading } = useLocalData();
+  const { allCurrencies, activateCurrency, deactivateCurrency, updateCurrencyExchangeRate, refreshData, isLoading } = useSupabaseData();
   const { toast } = useToast();
   const { displayVersion } = useSYPSettings();
   

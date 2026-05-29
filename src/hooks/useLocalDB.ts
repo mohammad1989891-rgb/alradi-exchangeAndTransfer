@@ -17,7 +17,7 @@ import {
 import type { Currency, Vault, Account, Transaction, Debt, AccountVault, TransactionFormData, DebtFormData, AccountFormData } from '@/types';
 
 // Hook for managing all data
-export function useLocalData() {
+export function useSupabaseData() {
   const {
     setCurrencies,
     setVaults,
@@ -684,7 +684,7 @@ export function useVaults() {
 
 // Backup/Restore operations
 export function useBackup() {
-  const { loadData } = useLocalData();
+  const { loadData } = useSupabaseData();
 
   const backup = useCallback(async () => {
     const data = await exportData();

@@ -1,5 +1,5 @@
 // Re-export types from localDb for consistency
-export type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange, Exchange, ExportData } from '@/lib/localDb';
+export type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange, Exchange, ExportData } from '@/lib/supabaseDb';
 
 // AccountVault type for account-specific vaults
 export interface AccountVault {
@@ -9,8 +9,8 @@ export interface AccountVault {
   balance: number;
   openingBalance: number;
   isDefault: boolean;
-  currency?: import('@/lib/localDb').Currency;
-  account?: import('@/lib/localDb').Account;
+  currency?: import('@/lib/supabaseDb').Currency;
+  account?: import('@/lib/supabaseDb').Account;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,7 +86,7 @@ export type AccountStatementItem = {
   runningBalance: number;
 };
 
-import type { Account, Transaction, Debt } from '@/lib/localDb';
+import type { Account, Transaction, Debt } from '@/lib/supabaseDb';
 
 export type AccountStatementSummary = {
   account: Account;

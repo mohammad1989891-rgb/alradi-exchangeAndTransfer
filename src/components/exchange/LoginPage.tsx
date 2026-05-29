@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { loginUser, initializeDefaultUser } from '@/lib/localDb';
+import { loginUser, initializeDefaultUser } from '@/lib/supabaseDb';
 import { Loader2, Eye, EyeOff, Lock, User } from 'lucide-react';
 
 interface LoginPageProps {

@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { formatNumber } from '@/lib/format';
-import type { Currency } from '@/lib/localDb';
+import type { Currency } from '@/lib/supabaseDb';
 
 export function ExchangeModal() {
   const { 

@@ -2,19 +2,19 @@
 
 import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Wallet, Plus, DollarSign, TrendingUp, Coins, RefreshCcw, ChevronDown, ChevronUp, HandCoins, Scale } from 'lucide-react';
 import { VaultCard } from './VaultCard';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
-import type { Vault } from '@/lib/localDb';
+import type { Vault } from '@/lib/supabaseDb';
 
 export function BalancesPage() {
   const { isLoading, setIsLoading, openCurrencyModal } = useAppStore();
   // استخدام البيانات من useLocalData مباشرة لضمان التحديث الفوري
-  const { refreshData, totalBalanceUSD, debtRemaining, transactions, vaults, currencies, debts, debtPayments } = useLocalData();
+  const { refreshData, totalBalanceUSD, debtRemaining, transactions, vaults, currencies, debts, debtPayments } = useSupabaseData();
   
   // حالة إظهار/إخفاء تفاصيل الديون
   const [showDebtDetails, setShowDebtDetails] = useState(false);

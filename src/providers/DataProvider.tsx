@@ -31,8 +31,8 @@ import {
   getTotalDebtRemaining,
   addExchange,
   deleteExchange,
-} from '@/lib/localDb';
-import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, Exchange } from '@/lib/localDb';
+} from '@/lib/supabaseDb';
+import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, Exchange } from '@/lib/supabaseDb';
 
 interface DataContextValue {
   // Data

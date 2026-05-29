@@ -34,8 +34,8 @@ import {
   getExchangeStats,
   getAccountDebtSummary,
   getAllAccountsDebtSummary,
-} from '@/lib/localDb';
-import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange, AccountDebtSummary } from '@/lib/localDb';
+} from '@/lib/supabaseDb';
+import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange, AccountDebtSummary } from '@/lib/supabaseDb';
 
 // 🔸 ثوابت آلية إعادة المحاولة
 const MAX_RETRIES = 3;
@@ -56,7 +56,7 @@ async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES, delay =
   throw new Error('فشلت جميع المحاولات');
 }
 
-export function useLocalData() {
+export function useSupabaseData() {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [allCurrencies, setAllCurrencies] = useState<Currency[]>([]);
   const [vaults, setVaults] = useState<Vault[]>([]);

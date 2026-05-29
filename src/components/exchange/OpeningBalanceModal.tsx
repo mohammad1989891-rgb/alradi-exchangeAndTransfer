@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
 import {
@@ -41,7 +41,7 @@ export function OpeningBalanceModal() {
     currencies, 
   } = useAppStore();
   
-  const { updateVaultOpeningBalance } = useLocalData();
+  const { updateVaultOpeningBalance } = useSupabaseData();
   
   const [selectedVaultId, setSelectedVaultId] = useState<string>('');
   const [openingBalance, setOpeningBalance] = useState<string>('0');

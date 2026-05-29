@@ -4,7 +4,7 @@ import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Wallet, DollarSign } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
-import type { Vault, Currency } from '@/lib/localDb';
+import type { Vault, Currency } from '@/lib/supabaseDb';
 import { useAppStore } from '@/store/useAppStore';
 import { useSYPSettings } from '@/store/useSYPSettings';
 import { isSYPCurrency, formatSYPDualDisplay, getSypPerUnitRate } from '@/lib/syp-conversion';

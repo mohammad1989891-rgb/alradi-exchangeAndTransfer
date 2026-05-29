@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import {
   Dialog,
   DialogContent,
@@ -33,7 +33,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { format } from 'date-fns';
-import { addCurrencyExchange, Currency, Vault } from '@/lib/localDb';
+import { addCurrencyExchange, Currency, Vault } from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 import { motion } from 'framer-motion';
 import {
@@ -44,7 +44,7 @@ import {
 
 export function CurrencyExchangeModal() {
   const { isExchangeModalOpen, closeExchangeModal } = useAppStore();
-  const { currencies, vaults, refreshData } = useLocalData();
+  const { currencies, vaults, refreshData } = useSupabaseData();
   const { toast } = useToast();
 
   // Form state

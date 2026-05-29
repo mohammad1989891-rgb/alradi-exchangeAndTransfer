@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X, Clock, CheckCircle2 } from 'lucide-react';
 import { TransactionCard } from './TransactionCard';
@@ -44,7 +44,7 @@ export function TransactionsPage() {
     isTransactionModalOpen,
     closeTransactionModal
   } = useAppStore();
-  const { deleteTransaction } = useLocalData();
+  const { deleteTransaction } = useSupabaseData();
   const { toast } = useToast();
 
   const [searchQuery, setSearchQuery] = useState('');

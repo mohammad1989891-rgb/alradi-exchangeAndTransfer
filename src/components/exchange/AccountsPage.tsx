@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useLocalData } from '@/hooks/useLocalData';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, Users, Building2 } from 'lucide-react';
 import { AccountCard } from './AccountCard';
@@ -23,7 +23,7 @@ import type { Account } from '@/types';
 
 export function AccountsPage() {
   const { accounts, openAccountModal, openAccountStatement } = useAppStore();
-  const { transactions, debts, deleteAccount: removeAccount } = useLocalData();
+  const { transactions, debts, deleteAccount: removeAccount } = useSupabaseData();
   
   const [searchQuery, setSearchQuery] = useState('');
   const [deleteAccount, setDeleteAccount] = useState<Account | null>(null);

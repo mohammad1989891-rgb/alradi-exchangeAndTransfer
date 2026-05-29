@@ -46,7 +46,7 @@ import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, Currency
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
 const INIT_TIMEOUT_MS = 15000;
-const FALLBACK_POLL_INTERVAL_MS = 30000;
+const FALLBACK_POLL_INTERVAL_MS = 10000; // 10s — fast enough for cross-device sync
 const REFRESH_DEBOUNCE_MS = 300;
 
 // ============================================
@@ -419,15 +419,17 @@ export function useSupabaseData() {
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
             realtimeConnectedRef.current = true;
-            console.log('Supabase Realtime: subscribed successfully');
-            // Clear fallback polling if Realtime is working
-            if (fallbackPollRef.current) {
-              clearInterval(fallbackPollRef.current);
-              fallbackPollRef.current = null;
+            console.log('Supabase Realtime: ✅ subscribed successfully');
+            // Keep periodic polling even with Realtime — ensures cross-device sync reliability
+            // (Realtime only works while tab is open; polling catches up after tab reactivation)
+            if (!fallbackPollRef.current) {
+              fallbackPollRef.current = setInterval(() => {
+                refreshDataRef.current(true);
+              }, FALLBACK_POLL_INTERVAL_MS);
             }
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             realtimeConnectedRef.current = false;
-            console.warn('Supabase Realtime: subscription error, falling back to polling');
+            console.warn('Supabase Realtime: ❌ subscription error, using polling only');
             // Start fallback polling if not already running
             if (!fallbackPollRef.current) {
               fallbackPollRef.current = setInterval(() => {
@@ -438,6 +440,14 @@ export function useSupabaseData() {
         });
 
       channelRef.current = channel;
+
+      // 🔸 ALWAYS start periodic polling for reliable cross-device sync
+      // Even when Realtime works, polling ensures data consistency
+      if (!fallbackPollRef.current) {
+        fallbackPollRef.current = setInterval(() => {
+          refreshDataRef.current(true);
+        }, FALLBACK_POLL_INTERVAL_MS);
+      }
     };
 
     setupRealtime();
@@ -595,6 +605,33 @@ export function useSupabaseData() {
   }, [refreshData]);
 
   // ============================================
+  // 🔸 Visibility change: reload data when user switches back to tab
+  // 🔸 Critical for cross-device sync — data may have changed while tab was hidden
+  // ============================================
+  useEffect(() => {
+    let cancelled = false;
+
+    const handleVisibilityChange = async () => {
+      if (cancelled) return;
+      if (document.visibilityState === 'visible') {
+        console.log('[Supabase] 🔸 Tab became visible — refreshing data for cross-device sync');
+        try {
+          await refreshData(true, true); // forceRefresh to ensure latest data
+        } catch (error) {
+          console.error('Error refreshing data on visibility change:', error);
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [refreshData]);
+
+  // ============================================
   // Calculate total balance dynamically from vaults + currencies
   // (same logic as useLocalData)
   // ============================================
@@ -695,6 +732,16 @@ export function useSupabaseData() {
   }, [refreshData]);
 
   // ============================================
+  // Manual sync: force refresh from Supabase
+  // 🔸 Used by the sync button in the header
+  // ============================================
+  const manualSync = useCallback(async () => {
+    console.log('[Supabase] 🔄 Manual sync triggered');
+    resetInitializationState();
+    await refreshData(false, true); // forceRefresh=true
+  }, [refreshData]);
+
+  // ============================================
   // Return: EXACT same interface as useLocalData
   // ============================================
   return {
@@ -713,10 +760,12 @@ export function useSupabaseData() {
     isInitialized,
     initError,
     tablesMissing,
+    realtimeConnected: realtimeConnectedRef.current,
 
     // Actions
     refreshData,
     retryInit,
+    manualSync,
     setCurrencies,
     setVaults,
     setAccounts,

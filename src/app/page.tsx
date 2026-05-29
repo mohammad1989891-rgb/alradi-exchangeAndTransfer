@@ -23,7 +23,7 @@ import { SplashScreen } from '@/components/exchange/SplashScreen';
 import { LoginPage } from '@/components/exchange/LoginPage';
 import { SupabaseSetup } from '@/components/exchange/SupabaseSetup';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, Search, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff } from 'lucide-react';
+import { Menu, Search, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -458,27 +458,45 @@ export default function Home() {
           </div>
           
           <div className="flex items-center gap-2">
-            {/* Supabase Connection Status Indicator */}
+            {/* Supabase Connection Status Indicator + Sync Button */}
             {localData.isInitialized && !localData.isLoading && (
-              <div 
-                className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
-                  localData.initError 
-                    ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' 
-                    : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-                }`}
-                title={localData.initError || 'متصل بقاعدة البيانات'}
-              >
-                {localData.initError ? (
-                  <>
-                    <CloudOff className="w-3 h-3" />
-                    <span className="hidden sm:inline">غير متصل</span>
-                  </>
-                ) : (
-                  <>
-                    <Cloud className="w-3 h-3" />
-                    <span className="hidden sm:inline">متصل</span>
-                  </>
-                )}
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="rounded-full h-8 w-8"
+                  onClick={async () => {
+                    try {
+                      await localData.manualSync();
+                      toast({ title: 'تمت المزامنة', description: 'تم تحديث البيانات بنجاح' });
+                    } catch {
+                      toast({ title: 'خطأ في المزامنة', description: 'فشل تحديث البيانات', variant: 'destructive' });
+                    }
+                  }}
+                  title="مزامنة البيانات"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                </Button>
+                <div 
+                  className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${
+                    localData.initError 
+                      ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' 
+                      : 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
+                  }`}
+                  title={localData.initError || 'متصل بقاعدة البيانات'}
+                >
+                  {localData.initError ? (
+                    <>
+                      <CloudOff className="w-3 h-3" />
+                      <span className="hidden sm:inline">غير متصل</span>
+                    </>
+                  ) : (
+                    <>
+                      <Cloud className="w-3 h-3" />
+                      <span className="hidden sm:inline">متصل</span>
+                    </>
+                  )}
+                </div>
               </div>
             )}
             <Button

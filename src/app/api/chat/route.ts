@@ -1,7 +1,15 @@
-import ZAI from 'z-ai-web-dev-sdk';
 import { NextRequest, NextResponse } from 'next/server';
 
-const zai = ZAI.create();
+// Lazy-load z-ai-web-dev-sdk to avoid build-time config errors on Vercel
+let zaiInstancePromise: Promise<any> | null = null;
+
+async function getZaiInstance() {
+  if (!zaiInstancePromise) {
+    const ZAI = (await import('z-ai-web-dev-sdk')).default;
+    zaiInstancePromise = ZAI.create();
+  }
+  return zaiInstancePromise;
+}
 
 interface ChatMessage {
   role: 'system' | 'user' | 'assistant';
@@ -55,8 +63,8 @@ export async function POST(request: NextRequest) {
       { role: 'user', content: message },
     ];
 
-    // Call ZAI API
-    const zaiInstance = await zai;
+    // Call ZAI API (lazy-loaded to avoid build errors)
+    const zaiInstance = await getZaiInstance();
     const completion = await zaiInstance.chat.completions.create({
       messages,
       thinking: { type: 'disabled' },

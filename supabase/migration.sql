@@ -217,6 +217,7 @@ CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 -- ============================================
 -- Row Level Security (RLS) Policies
 -- Allow full access with anon key (since this is a private app)
+-- 🔸 Uses DROP POLICY IF EXISTS for safe re-runs
 -- ============================================
 
 -- Enable RLS on all tables
@@ -233,23 +234,47 @@ ALTER TABLE vehicle_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shared_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicles_settings ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies first (safe re-run)
+DROP POLICY IF EXISTS "Allow all on currencies" ON currencies;
+DROP POLICY IF EXISTS "Allow all on vaults" ON vaults;
+DROP POLICY IF EXISTS "Allow all on accounts" ON accounts;
+DROP POLICY IF EXISTS "Allow all on transactions" ON transactions;
+DROP POLICY IF EXISTS "Allow all on debts" ON debts;
+DROP POLICY IF EXISTS "Allow all on debt_payments" ON debt_payments;
+DROP POLICY IF EXISTS "Allow all on currency_exchanges" ON currency_exchanges;
+DROP POLICY IF EXISTS "Allow all on users" ON users;
+DROP POLICY IF EXISTS "Allow all on vehicles" ON vehicles;
+DROP POLICY IF EXISTS "Allow all on vehicle_transactions" ON vehicle_transactions;
+DROP POLICY IF EXISTS "Allow all on shared_transactions" ON shared_transactions;
+DROP POLICY IF EXISTS "Allow all on vehicles_settings" ON vehicles_settings;
+
+-- Also drop policies from old naming convention
+DROP POLICY IF EXISTS "Allow all operations on currencies" ON currencies;
+DROP POLICY IF EXISTS "Allow all operations on vaults" ON vaults;
+DROP POLICY IF EXISTS "Allow all operations on accounts" ON accounts;
+DROP POLICY IF EXISTS "Allow all operations on transactions" ON transactions;
+DROP POLICY IF EXISTS "Allow all operations on debts" ON debts;
+DROP POLICY IF EXISTS "Allow all operations on debt_payments" ON debt_payments;
+DROP POLICY IF EXISTS "Allow all operations on currency_exchanges" ON currency_exchanges;
+DROP POLICY IF EXISTS "Allow all operations on users" ON users;
+DROP POLICY IF EXISTS "Allow all operations on vehicles" ON vehicles;
+DROP POLICY IF EXISTS "Allow all operations on vehicle_transactions" ON vehicle_transactions;
+DROP POLICY IF EXISTS "Allow all operations on shared_transactions" ON shared_transactions;
+DROP POLICY IF EXISTS "Allow all operations on vehicles_settings" ON vehicles_settings;
+
 -- Create policies that allow all operations for authenticated and anon users
--- (using service_role or anon key)
-DO $$
-DECLARE
-  tbl TEXT;
-BEGIN
-  FOR tbl IN SELECT unnest(ARRAY[
-    'currencies', 'vaults', 'accounts', 'transactions', 'debts',
-    'debt_payments', 'currency_exchanges', 'users', 'vehicles',
-    'vehicle_transactions', 'shared_transactions', 'vehicles_settings'
-  ]) LOOP
-    EXECUTE format('
-      CREATE POLICY "Allow all operations on %I" ON %I
-      FOR ALL USING (true) WITH CHECK (true);
-    ', tbl, tbl);
-  END LOOP;
-END $$;
+CREATE POLICY "Allow all on currencies" ON currencies FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on vaults" ON vaults FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on accounts" ON accounts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on transactions" ON transactions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on debts" ON debts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on debt_payments" ON debt_payments FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on currency_exchanges" ON currency_exchanges FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on users" ON users FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on vehicles" ON vehicles FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on vehicle_transactions" ON vehicle_transactions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on shared_transactions" ON shared_transactions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on vehicles_settings" ON vehicles_settings FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
 -- Enable Realtime for all tables

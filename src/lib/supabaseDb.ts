@@ -550,16 +550,19 @@ export async function checkTablesExist(): Promise<boolean> {
   // First check if Supabase is even configured
   if (!isSupabaseConfigured) {
     console.error('[Supabase] ❌ Client not configured — missing env vars');
+    console.error('[Supabase] 💡 Check: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set');
+    console.error('[Supabase] 💡 On Vercel: add in Settings → Environment Variables');
     tablesExist = false;
     return false;
   }
 
   try {
+    console.log('[Supabase] 🔍 Checking if tables exist...');
     const { data, error, status } = await supabase.from('currencies').select('id').limit(1);
 
     if (error) {
       const msg = (error.message || '').toLowerCase();
-      console.error('[Supabase] ❌ checkTablesExist error:', { message: error.message, code: error.code, status });
+      console.error('[Supabase] ❌ checkTablesExist error:', { message: error.message, code: error.code, status, hint: error.hint });
 
       // These messages mean the table doesn't exist at all
       if (
@@ -568,14 +571,16 @@ export async function checkTablesExist(): Promise<boolean> {
         msg.includes('schema cache') ||
         msg.includes('relation')
       ) {
+        console.error('[Supabase] 💡 Tables do NOT exist. Run the migration SQL in Supabase SQL Editor.');
         tablesExist = false;
         return false;
       }
 
       // RLS or auth errors mean tables exist but access is denied
       // This is a different problem — don't mark tables as missing
-      if (msg.includes('policy') || msg.includes('permission') || msg.includes('jwt') || msg.includes('rls')) {
-        console.error('[Supabase] ⚠️ Tables exist but RLS blocks access — check policies');
+      if (msg.includes('policy') || msg.includes('permission') || msg.includes('jwt') || msg.includes('rls') || msg.includes('new row violates')) {
+        console.error('[Supabase] ⚠️ Tables EXIST but RLS blocks access — FIX: Run fix-rls.sql in Supabase SQL Editor');
+        console.error('[Supabase] 💡 fix-rls.sql is located in: supabase/fix-rls.sql');
         tablesExist = true; // Tables exist, just can't access them
         return true;
       }
@@ -611,12 +616,14 @@ export function resetInitializationState(): void {
 export async function initializeDatabase(): Promise<void> {
   if (isDbInitialized) return;
 
+  console.log('[Supabase] 🔄 initializeDatabase() called...');
+
   // First check if tables exist
   const exist = await checkTablesExist();
   if (!exist) {
     // Don't throw — just set the flag and return silently
     // This allows the app to continue with empty data and show the setup screen
-    console.warn('Supabase tables do not exist. App will run with empty data.');
+    console.warn('[Supabase] ⚠️ Tables do not exist. App will run with empty data.');
     isDbInitialized = true; // Mark as initialized so getters don't keep re-checking
     return;
   }
@@ -625,11 +632,18 @@ export async function initializeDatabase(): Promise<void> {
   if (error) {
     // Check if the error is because tables don't exist
     const msg = error.message || '';
+    console.error('[Supabase] ❌ Error fetching currencies during init:', { message: msg, code: error.code, hint: error.hint });
     if (msg.includes('could not find') || msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('relation')) {
       tablesExist = false;
       // Don't throw — return silently so the app can show setup screen
-      console.warn('Supabase tables do not exist (detected during init). App will run with empty data.');
+      console.warn('[Supabase] ⚠️ Tables do not exist (detected during init). App will run with empty data.');
       isDbInitialized = true; // Mark as initialized so getters don't keep re-checking
+      return;
+    }
+    // RLS error - log but don't crash
+    if (msg.includes('policy') || msg.includes('permission') || msg.includes('violates row-level')) {
+      console.error('[Supabase] ❌ RLS is blocking access! Run fix-rls.sql in Supabase SQL Editor to fix this.');
+      isDbInitialized = true;
       return;
     }
     throw new Error(error.message);
@@ -747,7 +761,11 @@ export async function getAllAvailableCurrencies(): Promise<Currency[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
   const { data, error } = await supabase.from('currencies').select('*');
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[Supabase] ❌ getAllAvailableCurrencies error:', error.message, error.code);
+    throw new Error(error.message);
+  }
+  console.log('[Supabase] 📊 Currencies loaded:', data?.length ?? 0);
   return (data || []).map(rowToCurrency);
 }
 
@@ -755,8 +773,13 @@ export async function getActiveCurrencies(): Promise<Currency[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
   const { data, error } = await supabase.from('currencies').select('*');
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToCurrency).filter(c => c.isActive);
+  if (error) {
+    console.error('[Supabase] ❌ getActiveCurrencies error:', error.message, error.code);
+    throw new Error(error.message);
+  }
+  const active = (data || []).map(rowToCurrency).filter(c => c.isActive);
+  console.log('[Supabase] 📊 Active currencies:', active.length);
+  return active;
 }
 
 export async function activateCurrency(currencyId: string, exchangeRate?: number): Promise<Currency> {
@@ -925,7 +948,11 @@ export async function getVaults(): Promise<Vault[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
   const { data, error } = await supabase.from('vaults').select('*');
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[Supabase] ❌ getVaults error:', error.message, error.code);
+    throw new Error(error.message);
+  }
+  console.log('[Supabase] 📊 Vaults loaded:', data?.length ?? 0);
   return (data || []).map(rowToVault);
 }
 
@@ -996,8 +1023,13 @@ export async function getAccounts(): Promise<Account[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
   const { data, error } = await supabase.from('accounts').select('*');
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToAccount).filter(a => a.isActive);
+  if (error) {
+    console.error('[Supabase] ❌ getAccounts error:', error.message, error.code);
+    throw new Error(error.message);
+  }
+  const active = (data || []).map(rowToAccount).filter(a => a.isActive);
+  console.log('[Supabase] 📊 Active accounts loaded:', active.length);
+  return active;
 }
 
 export async function addAccount(data: Partial<Account>): Promise<Account> {
@@ -1045,7 +1077,11 @@ export async function getTransactions(limit = 100): Promise<Transaction[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
   const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false }).limit(limit);
-  if (error) throw new Error(error.message);
+  if (error) {
+    console.error('[Supabase] ❌ getTransactions error:', error.message, error.code);
+    throw new Error(error.message);
+  }
+  console.log('[Supabase] 📊 Transactions loaded:', data?.length ?? 0);
   return (data || []).map(rowToTransaction);
 }
 

@@ -40,7 +40,7 @@ Work Log:
 - Added console logging to src/lib/supabaseDb.ts for checkTablesExist, initializeDatabase, and all getter functions
 - Added RLS-specific error detection in checkTablesExist and initializeDatabase with fix hints
 - Created /api/debug-supabase endpoint that tests: env vars, anon key connection, service role connection, and provides fix steps
-- Pushed all changes to GitHub with new token ([REDACTED])
+- Pushed all changes to GitHub with new token
 - Verified dev server runs correctly, debug API returns successful connection test
 
 Stage Summary:

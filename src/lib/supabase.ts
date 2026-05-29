@@ -5,10 +5,16 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 // 🔸 Uses NEXT_PUBLIC_ prefix so values are embedded in client bundle
 // 🔸 Works on ALL devices after build - no local dependency
 // 🔸 Graceful fallback if env vars are missing
+// 🔸 Hardcoded defaults as last resort (for Vercel deployment without env vars)
 // ============================================
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+// Hardcoded defaults — these are PUBLIC values (anon key is safe to expose)
+// They serve as fallback when env vars are not set (e.g., on Vercel without config)
+const HARDCODED_SUPABASE_URL = 'https://hdlpvtuplwthqcksaynt.supabase.co';
+const HARDCODED_SUPABASE_ANON_KEY = 'sb_publishable_zcZexMLCWisjShuWEINCAQ_34FQCViu';
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || HARDCODED_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || HARDCODED_SUPABASE_ANON_KEY;
 
 // Flag to check if Supabase is properly configured
 export const isSupabaseConfigured = !!(supabaseUrl && supabaseAnonKey);
@@ -46,6 +52,7 @@ export const supabase: SupabaseClient = createClient(
 );
 
 // Service role client for admin operations (server-side only)
+// Service role key must be set via env var — it's a secret and cannot be hardcoded
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 export const supabaseAdmin: SupabaseClient = (isSupabaseConfigured && serviceRoleKey)

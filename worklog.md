@@ -27,3 +27,26 @@ Stage Summary:
 - All 23 getter functions in supabaseDb.ts have `if (!tablesExist)` guards
 - Realtime subscriptions are skipped when tables don't exist
 - The ChunkLoadError should be resolved by clearing the .next cache and refreshing the browser
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Fix cross-device data sync - RLS policies, debug logging, diagnostics API
+
+Work Log:
+- Created supabase/fix-rls.sql with SQL to disable RLS or add permissive policies on all 12 tables
+- Updated supabase/migration.sql with safer RLS policy creation (DROP POLICY IF EXISTS + CREATE POLICY instead of DO $$ block)
+- Added detailed console logging to src/lib/supabase.ts for cross-device debugging (URL, key prefix, fix hints)
+- Added console logging to src/lib/supabaseDb.ts for checkTablesExist, initializeDatabase, and all getter functions
+- Added RLS-specific error detection in checkTablesExist and initializeDatabase with fix hints
+- Created /api/debug-supabase endpoint that tests: env vars, anon key connection, service role connection, and provides fix steps
+- Pushed all changes to GitHub with new token ([REDACTED])
+- Verified dev server runs correctly, debug API returns successful connection test
+
+Stage Summary:
+- fix-rls.sql provides two options: disable RLS entirely or add permissive policies
+- migration.sql now uses DROP IF EXISTS for safe re-runs
+- Debug API at /api/debug-supabase helps diagnose: missing env vars, RLS blocking, network issues
+- Local test shows Supabase connection is working (anon key + service role both succeed)
+- The most likely cause for "no data on other devices" is missing NEXT_PUBLIC_ env vars on deployment platform
+- User needs to: (1) Set env vars on Vercel, (2) Run fix-rls.sql in Supabase SQL Editor, (3) Redeploy

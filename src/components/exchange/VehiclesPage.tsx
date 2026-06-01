@@ -151,16 +151,18 @@ function printVehicleReport(
 
         /* Summary Cards */
         .summary-grid {
-          display: grid;
-          grid-template-columns: 1fr 1fr 1fr;
-          gap: 16px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
           margin-bottom: 28px;
         }
         .summary-card {
           border: 2px solid;
           border-radius: 12px;
-          padding: 16px 12px;
-          text-align: center;
+          padding: 14px 20px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
         }
         .summary-card.first {
           border-color: #10b981;
@@ -175,10 +177,12 @@ function printVehicleReport(
           background: #f0fdfa;
         }
         .summary-card .label {
-          font-size: 13px;
+          font-size: 15px;
           font-weight: 600;
           color: #4b5563;
-          margin-bottom: 6px;
+        }
+        .summary-card .value-group {
+          text-align: left;
         }
         .summary-card .value {
           font-size: 26px;
@@ -190,7 +194,7 @@ function printVehicleReport(
         .summary-card .currency {
           font-size: 12px;
           color: #6b7280;
-          margin-top: 4px;
+          margin-top: 2px;
         }
 
         /* Table */
@@ -247,8 +251,10 @@ function printVehicleReport(
         /* Print settings */
         @media print {
           body { padding: 20px 30px; }
-          .summary-grid { gap: 12px; }
+          .summary-grid { gap: 10px; }
+          .summary-card { padding: 10px 16px; }
           .summary-card .value { font-size: 22px; }
+          .summary-card .label { font-size: 14px; }
           table { font-size: 12px; }
           thead th { padding: 8px 10px; }
           tbody td { padding: 7px 10px; }
@@ -302,18 +308,24 @@ function printVehicleReport(
       <div class="summary-grid">
         <div class="summary-card first">
           <div class="label">مساهمة ${firstPartnerName}</div>
-          <div class="value">${toEnglishNumbers(firstPartnerTotal)}</div>
-          <div class="currency">دولار أمريكي</div>
+          <div class="value-group">
+            <div class="value">${toEnglishNumbers(firstPartnerTotal)}</div>
+            <div class="currency">دولار أمريكي</div>
+          </div>
         </div>
         <div class="summary-card second">
           <div class="label">مساهمة ${secondPartnerName}</div>
-          <div class="value">${toEnglishNumbers(secondPartnerTotal)}</div>
-          <div class="currency">دولار أمريكي</div>
+          <div class="value-group">
+            <div class="value">${toEnglishNumbers(secondPartnerTotal)}</div>
+            <div class="currency">دولار أمريكي</div>
+          </div>
         </div>
         <div class="summary-card total">
           <div class="label">تكلفة المركبة (الإجمالي)</div>
-          <div class="value">${toEnglishNumbers(totalCostValue)}</div>
-          <div class="currency">دولار أمريكي</div>
+          <div class="value-group">
+            <div class="value">${toEnglishNumbers(totalCostValue)}</div>
+            <div class="currency">دولار أمريكي</div>
+          </div>
         </div>
       </div>
 

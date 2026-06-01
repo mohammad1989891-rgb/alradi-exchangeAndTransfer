@@ -14,7 +14,8 @@ import {
   Check,
   X,
   Truck,
-  Trash2
+  Trash2,
+  Printer
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -65,6 +66,309 @@ function toEnglishNumbers(num: number | string): string {
     return num.toLocaleString('en-US');
   }
   return str;
+}
+
+// ============================================
+// 🔹 دالة تنسيق التاريخ للطباعة
+// 🔹 Additive Feature: مساعدة عرض التاريخ
+// ============================================
+function formatDateForPrint(date: Date): string {
+  const d = new Date(date);
+  return d.toLocaleDateString('ar-SY', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+}
+
+// ============================================
+// 🔹 دالة طباعة تقرير المركبة
+// 🔹 Additive Feature: زر الطباعة فقط
+// 🔹 لا تغيير للتصميم أو المنطق المحاسبي
+// ============================================
+function printVehicleReport(
+  vehicleName: string,
+  firstPartnerName: string,
+  secondPartnerName: string,
+  firstPartnerTotal: number,
+  secondPartnerTotal: number,
+  totalCost: number,
+  transactions: VehicleTransaction[]
+) {
+  const totalCostValue = firstPartnerTotal + secondPartnerTotal;
+  // Sort transactions by date (newest first)
+  const sortedTransactions = [...transactions].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  const printContent = `
+    <!DOCTYPE html>
+    <html dir="rtl" lang="ar">
+    <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>تقرير ${vehicleName}</title>
+      <style>
+        @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap');
+        
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        body {
+          font-family: 'Tajawal', 'Segoe UI', Tahoma, Arial, sans-serif;
+          direction: rtl;
+          color: #1a1a2e;
+          background: #fff;
+          padding: 30px 40px;
+          max-width: 210mm;
+          margin: 0 auto;
+        }
+
+        /* Header */
+        .report-header {
+          text-align: center;
+          margin-bottom: 24px;
+          padding-bottom: 16px;
+          border-bottom: 3px solid #0d9488;
+        }
+        .report-header h1 {
+          font-size: 22px;
+          font-weight: 800;
+          color: #0d9488;
+          margin-bottom: 4px;
+        }
+        .report-header .vehicle-name {
+          font-size: 28px;
+          font-weight: 800;
+          color: #1a1a2e;
+          margin-bottom: 6px;
+        }
+        .report-header .date {
+          font-size: 13px;
+          color: #6b7280;
+        }
+
+        /* Summary Cards */
+        .summary-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 16px;
+          margin-bottom: 28px;
+        }
+        .summary-card {
+          border: 2px solid;
+          border-radius: 12px;
+          padding: 16px 12px;
+          text-align: center;
+        }
+        .summary-card.first {
+          border-color: #10b981;
+          background: #ecfdf5;
+        }
+        .summary-card.second {
+          border-color: #f97316;
+          background: #fff7ed;
+        }
+        .summary-card.total {
+          border-color: #0d9488;
+          background: #f0fdfa;
+        }
+        .summary-card .label {
+          font-size: 13px;
+          font-weight: 600;
+          color: #4b5563;
+          margin-bottom: 6px;
+        }
+        .summary-card .value {
+          font-size: 26px;
+          font-weight: 800;
+        }
+        .summary-card.first .value { color: #059669; }
+        .summary-card.second .value { color: #ea580c; }
+        .summary-card.total .value { color: #0d9488; }
+        .summary-card .currency {
+          font-size: 12px;
+          color: #6b7280;
+          margin-top: 4px;
+        }
+
+        /* Table */
+        .table-title {
+          font-size: 16px;
+          font-weight: 700;
+          color: #1a1a2e;
+          margin-bottom: 12px;
+          padding-bottom: 8px;
+          border-bottom: 2px solid #e5e7eb;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 13px;
+        }
+        thead th {
+          background: #0d9488;
+          color: #fff;
+          padding: 10px 12px;
+          font-weight: 600;
+          text-align: center;
+          font-size: 13px;
+        }
+        thead th:first-child { border-radius: 0 8px 0 0; }
+        thead th:last-child { border-radius: 8px 0 0 0; }
+        tbody td {
+          padding: 9px 12px;
+          border-bottom: 1px solid #e5e7eb;
+          text-align: center;
+        }
+        tbody tr:nth-child(even) { background: #f9fafb; }
+        tbody tr:hover { background: #f0fdfa; }
+        .partner-first { color: #059669; font-weight: 600; }
+        .partner-second { color: #ea580c; font-weight: 600; }
+        .amount-cell { font-weight: 700; font-family: 'Tajawal', monospace; }
+        .payment-cash { 
+          background: #dcfce7; color: #166534; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; 
+        }
+        .payment-deferred { 
+          background: #fef3c7; color: #92400e; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; 
+        }
+
+        /* Footer */
+        .report-footer {
+          margin-top: 28px;
+          padding-top: 12px;
+          border-top: 1px solid #e5e7eb;
+          text-align: center;
+          font-size: 11px;
+          color: #9ca3af;
+        }
+
+        /* Print settings */
+        @media print {
+          body { padding: 20px 30px; }
+          .summary-grid { gap: 12px; }
+          .summary-card .value { font-size: 22px; }
+          table { font-size: 12px; }
+          thead th { padding: 8px 10px; }
+          tbody td { padding: 7px 10px; }
+        }
+
+        /* No-print button */
+        .no-print {
+          display: flex;
+          justify-content: center;
+          gap: 12px;
+          margin-bottom: 20px;
+        }
+        .no-print button {
+          padding: 10px 28px;
+          border: none;
+          border-radius: 8px;
+          font-size: 15px;
+          font-weight: 700;
+          cursor: pointer;
+          font-family: 'Tajawal', sans-serif;
+        }
+        .btn-print {
+          background: #0d9488;
+          color: #fff;
+        }
+        .btn-close {
+          background: #e5e7eb;
+          color: #374151;
+        }
+
+        @media print {
+          .no-print { display: none !important; }
+        }
+      </style>
+    </head>
+    <body>
+      <!-- Print/Close Buttons -->
+      <div class="no-print">
+        <button class="btn-print" onclick="window.print()">🖨️ طباعة التقرير</button>
+        <button class="btn-close" onclick="window.close()">✕ إغلاق</button>
+      </div>
+
+      <!-- Report Header -->
+      <div class="report-header">
+        <h1>الراضي للصرافة والحوالات</h1>
+        <div class="vehicle-name">🚛 ${vehicleName}</div>
+        <div class="date">تاريخ الطباعة: ${new Date().toLocaleDateString('ar-SY', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+      </div>
+
+      <!-- Summary Cards -->
+      <div class="summary-grid">
+        <div class="summary-card first">
+          <div class="label">مساهمة ${firstPartnerName}</div>
+          <div class="value">${toEnglishNumbers(firstPartnerTotal)}</div>
+          <div class="currency">دولار أمريكي</div>
+        </div>
+        <div class="summary-card second">
+          <div class="label">مساهمة ${secondPartnerName}</div>
+          <div class="value">${toEnglishNumbers(secondPartnerTotal)}</div>
+          <div class="currency">دولار أمريكي</div>
+        </div>
+        <div class="summary-card total">
+          <div class="label">تكلفة المركبة (الإجمالي)</div>
+          <div class="value">${toEnglishNumbers(totalCostValue)}</div>
+          <div class="currency">دولار أمريكي</div>
+        </div>
+      </div>
+
+      <!-- Transactions Table -->
+      <div class="table-title">تفاصيل البنود (${toEnglishNumbers(sortedTransactions.length)} بند)</div>
+      ${sortedTransactions.length > 0 ? `
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>التاريخ</th>
+            <th>الشريك</th>
+            <th>المبلغ</th>
+            <th>نوع العملية</th>
+            <th>ملاحظات</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${sortedTransactions.map((tx, i) => `
+            <tr>
+              <td>${i + 1}</td>
+              <td>${formatDateForPrint(tx.date)}</td>
+              <td class="${tx.partner === 'first' ? 'partner-first' : 'partner-second'}">
+                ${tx.partner === 'first' ? firstPartnerName : secondPartnerName}
+              </td>
+              <td class="amount-cell">${toEnglishNumbers(tx.amount)}</td>
+              <td>
+                <span class="${tx.paymentType === 'cash' ? 'payment-cash' : 'payment-deferred'}">
+                  ${tx.paymentType === 'cash' ? 'كاش' : 'آجل'}
+                </span>
+              </td>
+              <td>${tx.description || '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+      ` : `
+      <div style="text-align: center; padding: 40px; color: #9ca3af; font-size: 15px;">
+        لا توجد بنود مسجلة لهذه المركبة
+      </div>
+      `}
+
+      <!-- Footer -->
+      <div class="report-footer">
+        الراضي للصرافة والحوالات — تقرير مركبة: ${vehicleName}
+      </div>
+    </body>
+    </html>
+  `;
+
+  const printWindow = window.open('', '_blank', 'width=900,height=700');
+  if (printWindow) {
+    printWindow.document.write(printContent);
+    printWindow.document.close();
+  }
 }
 
 // Vehicle type for local state
@@ -1053,6 +1357,26 @@ export function VehiclesPage() {
                     {/* Action Buttons */}
                     {editingVehicleId !== vehicle.id && (
                       <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 w-7 p-0 text-cyan-600 hover:text-cyan-700 hover:bg-cyan-50"
+                          title="طباعة التقرير"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            printVehicleReport(
+                              vehicle.name,
+                              firstPartnerName,
+                              secondPartnerName,
+                              vehicle.firstPartnerTotal,
+                              vehicle.secondPartnerTotal,
+                              vehicle.totalCost,
+                              vehicle.transactions
+                            );
+                          }}
+                        >
+                          <Printer className="w-3.5 h-3.5" />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="sm"

@@ -6,6 +6,7 @@ import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, AlertCircle, CreditCard, Trash2, ArrowUpRight, ArrowDownRight, Banknote, Clock, ChevronLeft, AlertTriangle, CheckCircle, List, X } from 'lucide-react';
 import { DebtModal } from './DebtModal';
+import { MultiCurrencyPaymentModal } from './MultiCurrencyPaymentModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -30,7 +31,7 @@ import { formatNumber, formatDate } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import type { Debt, DebtPayment } from '@/lib/supabaseDb';
-import { getAccountDebtSummary, deleteTransaction, type AccountDebtSummary } from '@/lib/supabaseDb';
+import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary } from '@/lib/supabaseDb';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
 interface UnifiedMovement {
@@ -1228,101 +1229,31 @@ export function DebtsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Payment Modal */}
-      <Dialog open={showPaymentModal} onOpenChange={setShowPaymentModal}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>إضافة دفعة سداد</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label>المبلغ ($)</Label>
-              <Input
-                type="number"
-                value={paymentAmount}
-                onChange={(e) => setPaymentAmount(e.target.value)}
-                placeholder="أدخل المبلغ"
-                className="mt-1"
-              />
-              {selectedAccountSummary && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  الرصيد التراكمي: {formatNumber(Math.abs(selectedAccountSummary.netCashBalance))} $
-                  {selectedAccountSummary.netCashBalance >= 0 ? ' (لنا)' : ' (علينا)'}
-                </p>
-              )}
-            </div>
-
-            <div>
-              <Label>نوع التسديد</Label>
-              <div className="flex gap-2 mt-2">
-                <Button
-                  type="button"
-                  variant={paymentType === 'CASH' ? 'default' : 'outline'}
-                  onClick={() => setPaymentType('CASH')}
-                  className={cn(
-                    'flex-1',
-                    paymentType === 'CASH' ? 'bg-teal-500 hover:bg-teal-600' : ''
-                  )}
-                >
-                  <Banknote className="w-4 h-4 ml-2" />
-                  كاش
-                </Button>
-                <Button
-                  type="button"
-                  variant={paymentType === 'DEFERRED' ? 'default' : 'outline'}
-                  onClick={() => setPaymentType('DEFERRED')}
-                  className={cn(
-                    'flex-1',
-                    paymentType === 'DEFERRED' ? 'bg-purple-500 hover:bg-purple-600' : ''
-                  )}
-                >
-                  <Clock className="w-4 h-4 ml-2" />
-                  آجل
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                {paymentType === 'CASH' 
-                  ? '⚠️ الدفعة النقدية ستؤثر على الصندوق الفرعي والرئيسي'
-                  : 'ℹ️ الدفعة الآجلة لا تؤثر على أي صندوق'
-                }
-              </p>
-            </div>
-
-            <div>
-              <Label>التاريخ</Label>
-              <Input
-                type="date"
-                value={paymentDate}
-                onChange={(e) => setPaymentDate(e.target.value)}
-                className="mt-1"
-              />
-            </div>
-
-            <div>
-              <Label>ملاحظة (اختياري)</Label>
-              <Textarea
-                value={paymentDescription}
-                onChange={(e) => setPaymentDescription(e.target.value)}
-                placeholder="أضف ملاحظة..."
-                className="mt-1"
-                rows={2}
-              />
-            </div>
-          </div>
-          <div className="flex gap-2 mt-4">
-            <Button variant="outline" onClick={() => setShowPaymentModal(false)} className="flex-1">
-              إلغاء
-            </Button>
-            <Button
-              onClick={handleAddCumulativePayment}
-              disabled={!paymentAmount || parseFloat(paymentAmount) <= 0 || isSubmitting}
-              className="flex-1 bg-teal-500 hover:bg-teal-600"
-            >
-              {isSubmitting ? 'جاري الحفظ...' : 'إضافة الدفعة'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Multi-Currency Payment Modal */}
+      <MultiCurrencyPaymentModal
+        isOpen={showPaymentModal}
+        onClose={() => setShowPaymentModal(false)}
+        accountSummary={selectedAccountSummary}
+        currencies={currencies}
+        debtPayments={debtPayments}
+        onAddDebtPayment={async (params) => { const result = await addDebtPayment(params); return { id: result.id }; }}
+        onAddTransaction={addTransaction}
+        onUpdateDebtPayment={async (id, data) => { await updateDebtPayment(id, data); }}
+        onPaymentComplete={async () => {
+          if (selectedAccountSummary) {
+            const updatedSummary = await getAccountDebtSummary(selectedAccountSummary.accountId);
+            if (updatedSummary.debts.length === 0) {
+              setSelectedAccountSummary(null);
+              setShowAllMovementsModal(false);
+            } else {
+              setSelectedAccountSummary(calculateCumulativeSummary(updatedSummary));
+            }
+          }
+          await refreshData();
+        }}
+        getRemainingForDebt={getRemainingForDebt}
+        getPaidAmountForDebt={getPaidAmountForDebt}
+      />
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>

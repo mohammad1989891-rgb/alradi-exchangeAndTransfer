@@ -896,8 +896,8 @@ export function MultiCurrencyPaymentModal({
                               {/* Exchange Rate (only for cross-currency) - ❗ MANUAL ENTRY ONLY */}
                               {!isSameCurrency && (
                                 <div className="space-y-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <Label className="text-xs min-w-[70px]">سعر الصرف</Label>
+                                  <Label className="text-xs">سعر الصرف</Label>
+                                  <div className="flex items-center gap-1.5" dir="ltr">
                                     <Input
                                       type="text"
                                       inputMode="decimal"
@@ -922,10 +922,10 @@ export function MultiCurrencyPaymentModal({
                                         setRateCalcInput('');
                                       }}
                                       className={cn(
-                                        'w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold border transition-all shrink-0',
+                                        'w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold border-2 transition-all shrink-0 cursor-pointer',
                                         rateCalcPopup?.currencyId === currency.id && rateCalcPopup?.operation === 'multiply'
                                           ? 'bg-teal-500 text-white border-teal-500'
-                                          : 'bg-muted/80 text-muted-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-300 dark:hover:bg-teal-950/30 dark:hover:text-teal-400 dark:hover:border-teal-700'
+                                          : 'bg-muted text-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-400 dark:hover:bg-teal-950/40 dark:hover:text-teal-400 dark:hover:border-teal-600'
                                       )}
                                       title="ضرب"
                                     >
@@ -942,10 +942,10 @@ export function MultiCurrencyPaymentModal({
                                         setRateCalcInput('');
                                       }}
                                       className={cn(
-                                        'w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold border transition-all shrink-0',
+                                        'w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold border-2 transition-all shrink-0 cursor-pointer',
                                         rateCalcPopup?.currencyId === currency.id && rateCalcPopup?.operation === 'divide'
                                           ? 'bg-teal-500 text-white border-teal-500'
-                                          : 'bg-muted/80 text-muted-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-300 dark:hover:bg-teal-950/30 dark:hover:text-teal-400 dark:hover:border-teal-700'
+                                          : 'bg-muted text-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-400 dark:hover:bg-teal-950/40 dark:hover:text-teal-400 dark:hover:border-teal-600'
                                       )}
                                       title="قسمة"
                                     >
@@ -954,7 +954,7 @@ export function MultiCurrencyPaymentModal({
                                   </div>
                                   {/* Rate Calculator Popup */}
                                   {rateCalcPopup?.currencyId === currency.id && (
-                                    <div className="flex items-center gap-1.5 pr-[70px]">
+                                    <div className="flex items-center gap-1.5" dir="ltr">
                                       <span className="text-xs text-muted-foreground shrink-0">
                                         {rateCalcPopup.operation === 'multiply' ? 'ضرب في' : 'قسمة على'}
                                       </span>
@@ -979,28 +979,26 @@ export function MultiCurrencyPaymentModal({
                                       <button
                                         type="button"
                                         onClick={applyRateCalcOperation}
-                                        className="h-7 px-2 rounded-md text-xs font-medium bg-teal-500 text-white hover:bg-teal-600 transition-colors shrink-0"
+                                        className="h-7 px-2 rounded-md text-xs font-medium bg-teal-500 text-white hover:bg-teal-600 transition-colors shrink-0 cursor-pointer"
                                       >
                                         ✓
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() => { setRateCalcPopup(null); setRateCalcInput(''); }}
-                                        className="h-7 px-2 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors shrink-0"
+                                        className="h-7 px-2 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors shrink-0 cursor-pointer"
                                       >
                                         ✕
                                       </button>
                                     </div>
                                   )}
                                   {/* Exchange rate description */}
-                                  <div className="pr-[70px]">
-                                    <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                      1 {paymentCurrency?.code} = {allocation.exchangeRate > 0 ? formatNumber(allocation.exchangeRate) : '?'} {currency.code}
-                                    </span>
-                                  </div>
+                                  <span className="text-xs text-muted-foreground">
+                                    1 {paymentCurrency?.code} = {allocation.exchangeRate > 0 ? formatNumber(allocation.exchangeRate) : '?'} {currency.code}
+                                  </span>
                                   {/* Validation: warn if exchange rate is missing */}
                                   {allocation.selected && (!allocation.exchangeRate || allocation.exchangeRate <= 0) && (
-                                    <div className="flex items-center gap-1.5 pr-[70px]">
+                                    <div className="flex items-center gap-1.5">
                                       <AlertTriangle className="w-3 h-3 text-red-500" />
                                       <span className="text-[10px] text-red-500">يجب إدخال سعر الصرف</span>
                                     </div>

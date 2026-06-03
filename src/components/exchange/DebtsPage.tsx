@@ -32,7 +32,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import type { Debt, DebtPayment } from '@/lib/supabaseDb';
 import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary } from '@/lib/supabaseDb';
-import { groupByMonthGeneric } from '@/lib/monthlyGrouping';
+import { groupByMonth } from '@/lib/monthlyGrouping';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
 interface UnifiedMovement {
@@ -98,7 +98,7 @@ function DebtMonthGroup({
           <span className="text-sm font-semibold text-foreground">{label}</span>
         </div>
         <span className="text-xs text-muted-foreground">
-          {count} حركة{count !== 1 ? 'ات' : ''}
+          عدد العمليات: {count}
         </span>
       </button>
       <AnimatePresence initial={false}>
@@ -1180,7 +1180,7 @@ export function DebtsPage() {
                 : String(m.date),
               movement: m,
             }));
-            const groups = groupByMonthGeneric(itemsForGrouping);
+            const groups = groupByMonth(itemsForGrouping);
 
             return (
               <div className="space-y-3 mt-4">

@@ -9,6 +9,7 @@ import { TransactionCard } from './TransactionCard';
 import { TransactionModal } from './TransactionModal';
 import { MonthCard } from './MonthCard';
 import { groupByMonth } from '@/lib/monthlyGrouping';
+import type { SimpleMonthGroup } from '@/lib/monthlyGrouping';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {

@@ -9,6 +9,7 @@ interface SimpleMonthGroup {
   key: string;
   label: string;
   items: unknown[];
+  count: number;
 }
 
 interface MonthCardProps<T> {
@@ -26,8 +27,7 @@ export function MonthCard<T>({ group, renderItem, defaultExpanded = false, maxVi
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [visibleCount, setVisibleCount] = useState(maxVisibleItems);
 
-  const { label, items } = group;
-  const count = items.length;
+  const { label, items, count } = group;
 
   // When expanding, reset visible count
   const handleToggle = () => {
@@ -73,7 +73,7 @@ export function MonthCard<T>({ group, renderItem, defaultExpanded = false, maxVi
         </div>
 
         <span className="text-xs text-muted-foreground">
-          {count} {count === 1 ? 'حركة' : count === 2 ? 'حركتين' : count <= 10 ? 'حركات' : 'حركة'}
+          عدد العمليات: {count}
         </span>
       </button>
 

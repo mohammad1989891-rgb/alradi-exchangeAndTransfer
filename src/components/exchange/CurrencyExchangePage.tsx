@@ -27,7 +27,7 @@ import {
 } from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
-import { groupByMonthGeneric } from '@/lib/monthlyGrouping';
+import { groupByMonth } from '@/lib/monthlyGrouping';
 
 // مكون مجموعة شهرية لعمليات الصرف (تجميع بسيط بدون حسابات مالية)
 function ExchangeMonthGroup({
@@ -57,7 +57,7 @@ function ExchangeMonthGroup({
           <span className="text-sm font-semibold text-foreground">{label}</span>
         </div>
         <span className="text-xs text-muted-foreground">
-          {count} عملية{count !== 1 ? '' : ''}
+          عدد العمليات: {count}
         </span>
       </button>
       <AnimatePresence initial={false}>
@@ -216,7 +216,7 @@ export function CurrencyExchangePage() {
       ...e,
       dateStr: typeof e.date === 'string' ? e.date : new Date(e.date).toISOString().split('T')[0],
     }));
-    const groups = groupByMonthGeneric(withStrDate.map(e => ({ ...e, date: e.dateStr })));
+    const groups = groupByMonth(withStrDate.map(e => ({ ...e, date: e.dateStr })));
     // نعيد العناصر الأصلية (CurrencyExchange) داخل كل مجموعة
     return groups.map(g => ({
       ...g,

@@ -32,13 +32,13 @@ import {
   getDebtPayments,
   addDebtPayment,
   deleteDebtPayment,
-  getTotalDebtRemaining,
   getCurrencyExchanges,
   addCurrencyExchange,
   deleteCurrencyExchange,
   getExchangeStats,
 } from '@/lib/supabaseDb';
 import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange } from '@/lib/supabaseDb';
+import { calcDebtRemaining, calcTotalBalanceUSD, EMPTY_DEBT_REMAINING } from '@/lib/cachedCalculations';
 
 // ============================================
 // Retry Constants
@@ -78,31 +78,7 @@ interface DebtRemaining {
   cashPayableRemaining: number;
 }
 
-const EMPTY_DEBT_REMAINING: DebtRemaining = {
-  totalDebts: 0,
-  totalPaid: 0,
-  totalRemaining: 0,
-  unpaidDebtsCount: 0,
-  paidDebtsCount: 0,
-  totalReceivable: 0,
-  totalPayable: 0,
-  totalReceivablePaid: 0,
-  totalPayablePaid: 0,
-  totalReceivableRemaining: 0,
-  totalPayableRemaining: 0,
-  deferredReceivable: 0,
-  deferredPayable: 0,
-  deferredReceivablePaid: 0,
-  deferredPayablePaid: 0,
-  deferredReceivableRemaining: 0,
-  deferredPayableRemaining: 0,
-  cashReceivable: 0,
-  cashPayable: 0,
-  cashReceivablePaid: 0,
-  cashPayablePaid: 0,
-  cashReceivableRemaining: 0,
-  cashPayableRemaining: 0,
-};
+// EMPTY_DEBT_REMAINING is imported from cachedCalculations.ts
 
 // ============================================
 // Helper: Retry with exponential backoff
@@ -147,7 +123,7 @@ export function useSupabaseData() {
   const [debtPayments, setDebtPayments] = useState<DebtPayment[]>([]);
   const [currencyExchanges, setCurrencyExchanges] = useState<CurrencyExchange[]>([]);
   const [totalBalanceUSD, setTotalBalanceUSD] = useState(0);
-  const [debtRemaining, setDebtRemaining] = useState<DebtRemaining>(EMPTY_DEBT_REMAINING);
+  const [debtRemaining, setDebtRemaining] = useState<DebtRemaining>(EMPTY_DEBT_REMAINING as DebtRemaining);
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
@@ -189,7 +165,7 @@ export function useSupabaseData() {
     lastRefreshTimeRef.current = Date.now();
 
     try {
-      const [allCur, activeCur, vaultsData, accountsData, txData, debtData, debtPaymentsData, totalUSD, debtRemainingData, exchangeData] = await Promise.all([
+      const [allCur, activeCur, vaultsData, accountsData, txData, debtData, debtPaymentsData, totalUSD, exchangeData] = await Promise.all([
         getAllAvailableCurrencies(),
         getActiveCurrencies(),
         getVaults(),
@@ -198,7 +174,6 @@ export function useSupabaseData() {
         getDebts({ includeArchived: true }), // Always load ALL data for calculations
         getDebtPayments(undefined, { includeArchived: true }), // Always load ALL data
         getTotalBalanceInUSD(),
-        getTotalDebtRemaining(),
         getCurrencyExchanges({ includeArchived: true }), // Always load ALL data
       ]);
 
@@ -212,7 +187,7 @@ export function useSupabaseData() {
       setDebts(debtData);
       setDebtPayments(debtPaymentsData);
       setTotalBalanceUSD(totalUSD);
-      setDebtRemaining(debtRemainingData);
+      // debtRemaining is now computed client-side via useMemo (computedDebtRemaining)
       setCurrencyExchanges(exchangeData);
       setInitError(null);
 
@@ -277,15 +252,14 @@ export function useSupabaseData() {
 
   const refreshDebts = useCallback(async () => {
     try {
-      const [debtData, debtPaymentsData, debtRemainingData] = await Promise.all([
+      const [debtData, debtPaymentsData] = await Promise.all([
         getDebts({ includeArchived: true }),
         getDebtPayments(undefined, { includeArchived: true }),
-        getTotalDebtRemaining(),
       ]);
       if (!mountedRef.current) return;
       setDebts(debtData);
       setDebtPayments(debtPaymentsData);
-      setDebtRemaining(debtRemainingData);
+      // debtRemaining is now computed client-side via useMemo
     } catch (error) {
       console.error('Error refreshing debts:', error);
     }
@@ -293,13 +267,10 @@ export function useSupabaseData() {
 
   const refreshDebtPayments = useCallback(async () => {
     try {
-      const [debtPaymentsData, debtRemainingData] = await Promise.all([
-        getDebtPayments(undefined, { includeArchived: true }),
-        getTotalDebtRemaining(),
-      ]);
+      const debtPaymentsData = await getDebtPayments(undefined, { includeArchived: true });
       if (!mountedRef.current) return;
       setDebtPayments(debtPaymentsData);
-      setDebtRemaining(debtRemainingData);
+      // debtRemaining is now computed client-side via useMemo
     } catch (error) {
       console.error('Error refreshing debt payments:', error);
     }
@@ -634,23 +605,20 @@ export function useSupabaseData() {
 
   // ============================================
   // Calculate total balance dynamically from vaults + currencies
-  // (same logic as useLocalData)
-  // Uses useMemo for performance — only recalculates when dependencies change
+  // Uses cached calculation for performance
   // ============================================
   const actualTotalBalance = useMemo(() => {
-    let total = 0;
-    for (const vault of vaults) {
-      const currency = currencies.find(c => c.id === vault.currencyId);
-      if (currency && currency.isActive) {
-        if (currency.conversionMethod === 'DIVIDE') {
-          total += vault.balance / currency.exchangeRate;
-        } else {
-          total += vault.balance * currency.exchangeRate;
-        }
-      }
-    }
-    return total;
+    return calcTotalBalanceUSD(vaults, currencies);
   }, [vaults, currencies]);
+
+  // ============================================
+  // Calculate debt remaining client-side using useMemo
+  // Avoids an extra Supabase query — uses data already loaded
+  // Includes BOTH active and archived data for accurate calculations
+  // ============================================
+  const computedDebtRemaining = useMemo(() => {
+    return calcDebtRemaining(debts, debtPayments);
+  }, [debts, debtPayments]);
 
   // ============================================
   // Display-filtered data (based on showArchived)
@@ -779,7 +747,7 @@ export function useSupabaseData() {
     debtPayments,
     currencyExchanges,
     totalBalanceUSD: actualTotalBalance,
-    debtRemaining,
+    debtRemaining: computedDebtRemaining,
     isLoading,
     isInitialized,
     initError,

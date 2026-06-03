@@ -50,3 +50,28 @@ Stage Summary:
 - Local test shows Supabase connection is working (anon key + service role both succeed)
 - The most likely cause for "no data on other devices" is missing NEXT_PUBLIC_ env vars on deployment platform
 - User needs to: (1) Set env vars on Vercel, (2) Run fix-rls.sql in Supabase SQL Editor, (3) Redeploy
+
+---
+Task ID: 1
+Agent: main
+Task: Fix debt payment modal issues - amount reset to 0 and exchange rate visibility
+
+Work Log:
+- Analyzed MultiCurrencyPaymentModal.tsx (918 lines) to understand the payment dialog logic
+- Identified root cause: useEffect on line 208-234 had too many dependencies (currenciesWithDebt, getCurrencyRemainingDebt) causing it to re-run and reset form state on every data change
+- Fixed amount reset: Changed useEffect to only run when isOpen changes, using useRef (prevIsOpenRef) to detect modal open/close transitions
+- Added separate useEffect for updating remaining debt in allocations without resetting user inputs
+- Fixed exchange rate visibility: Added reactive effect that updates exchange rates when payment currency changes, using prevPaymentCurrencyIdRef to detect actual currency changes vs re-renders
+- Added display maps (allocationDisplayMap, exchangeRateDisplayMap) to preserve user typing state (e.g., "100." without losing the decimal point)
+- Added input validation: prevent non-numeric input, prevent multiple decimal points
+- Never overwrite user-entered values with calculated values
+- Browser verification confirmed: amount stays when typed, exchange rate field appears when currency differs, cross-rate auto-calculates correctly
+
+Stage Summary:
+- All 5 user-reported issues fixed:
+  1. ✅ Amount no longer resets to 0 - separated input state from calculated state
+  2. ✅ Exchange rate field appears when payment currency differs from debt currency
+  3. ✅ Reactive UI updates when currency changes
+  4. ✅ No calculation conflicts - user input never overwritten
+  5. ✅ Input validation prevents empty/text input
+- Pushed to GitHub (commit f40c6ab)

@@ -127,16 +127,6 @@ function parseFormattedNumber(str: string): number {
   return parseFloat(str.replace(/,/g, '')) || 0;
 }
 
-// Convert amount using conversion method
-function convertAmount(amount: number, rate: number, method: string): number {
-  if (!rate || rate === 0) return 0;
-  if (method === 'MULTIPLY') {
-    return amount * rate;
-  } else {
-    return amount / rate;
-  }
-}
-
 // ============================================
 // Component
 // ============================================
@@ -229,13 +219,15 @@ export function MultiCurrencyPaymentModal({
       prevPaymentCurrencyIdRef.current = defaultCurrencyId;
 
       // Initialize allocations for each currency with unpaid debts
+      // ❗ Exchange rate is 0 for cross-currency (requires manual entry), 1 for same currency
       const initialAllocations: CurrencyAllocation[] = [];
       for (const currency of currenciesWithDebt) {
         const remaining = getCurrencyRemainingDebt(currency.id);
+        const isSameCurrency = currency.id === defaultCurrencyId;
         initialAllocations.push({
           currencyId: currency.id,
           selected: false,
-          exchangeRate: currency.exchangeRate || 1,
+          exchangeRate: isSameCurrency ? 1 : 0, // ❗ 0 = empty, user must enter manually
           allocatedAmount: 0,
           remainingDebt: remaining,
         });
@@ -265,13 +257,15 @@ export function MultiCurrencyPaymentModal({
       const existingIds = new Set(updated.map(a => a.currencyId));
 
       // Add any new currencies that have debts
+      // ❗ Exchange rate is 0 for cross-currency (requires manual entry)
       for (const currency of currenciesWithDebt) {
         if (!existingIds.has(currency.id)) {
           const remaining = getCurrencyRemainingDebt(currency.id);
+          const isSameCurrency = currency.id === paymentCurrencyId;
           updated.push({
             currencyId: currency.id,
             selected: false,
-            exchangeRate: currency.exchangeRate || 1,
+            exchangeRate: isSameCurrency ? 1 : 0,
             allocatedAmount: 0,
             remainingDebt: remaining,
           });
@@ -295,8 +289,8 @@ export function MultiCurrencyPaymentModal({
     return currencies.find(c => c.id === paymentCurrencyId);
   }, [currencies, paymentCurrencyId]);
 
-  // Reactive: When payment currency changes, update exchange rates for cross-currency allocations
-  // ❗ Only updates when paymentCurrencyId ACTUALLY changes (not when user edits exchange rate)
+  // Reactive: When payment currency changes, reset exchange rates for cross-currency allocations
+  // ❗ Exchange rate is NOT auto-calculated - user must enter it manually
   useEffect(() => {
     if (!paymentCurrencyId || allocations.length === 0) return;
 
@@ -305,72 +299,41 @@ export function MultiCurrencyPaymentModal({
                             prevPaymentCurrencyIdRef.current !== paymentCurrencyId;
     prevPaymentCurrencyIdRef.current = paymentCurrencyId;
 
-    // Only update exchange rates when currency actually changed
+    // Only update when currency actually changed
     if (!currencyChanged) return;
 
-    // Build new display map for exchange rates
-    const newRateDisplayMap: Record<string, string> = {};
+    // Clear display map for exchange rates so user must re-enter
+    setExchangeRateDisplayMap({});
 
     setAllocations(prev => prev.map(a => {
-      // If same currency, no exchange rate needed
+      // If same currency, auto-set rate to 1 (no conversion needed)
       if (a.currencyId === paymentCurrencyId) {
         return { ...a, exchangeRate: 1 };
       }
-
-      // For cross-currency: calculate the exchange rate between payment currency and debt currency
-      const debtCurrency = currencies.find(c => c.id === a.currencyId);
-      if (!debtCurrency || !paymentCurrency) return a;
-
-      // Calculate cross rate: how many debt currency units per 1 payment currency unit
-      // Step 1: Convert 1 payment currency to USD
-      let onePaymentInUsd = 1;
-      if (paymentCurrency.conversionMethod === 'DIVIDE') {
-        onePaymentInUsd = 1 / paymentCurrency.exchangeRate;
-      } else {
-        onePaymentInUsd = paymentCurrency.exchangeRate;
-      }
-
-      // Step 2: Convert USD to debt currency
-      let crossRate = onePaymentInUsd;
-      if (debtCurrency.conversionMethod === 'DIVIDE') {
-        crossRate = onePaymentInUsd / debtCurrency.exchangeRate;
-      } else {
-        crossRate = onePaymentInUsd * debtCurrency.exchangeRate;
-      }
-
-      // Update display map for this rate
-      newRateDisplayMap[a.currencyId] = formatInputNumber(crossRate);
-
-      return { ...a, exchangeRate: crossRate };
+      // For cross-currency: reset to 0 (empty) - user must enter manually
+      return { ...a, exchangeRate: 0 };
     }));
-
-    // Update the display map with new rates
-    setExchangeRateDisplayMap(prev => ({ ...prev, ...newRateDisplayMap }));
-  }, [paymentCurrencyId, paymentCurrency, currencies, allocations.length]);
+  }, [paymentCurrencyId, allocations.length]);
 
   // Payment amount (parsed from display string - Input State)
   const paymentAmount = parseFormattedNumber(paymentAmountDisplay);
 
-  // Calculate equivalent value for an allocation
+  // Calculate equivalent value for an allocation using the USER-ENTERED exchange rate
   const getEquivalentValue = useCallback((allocation: CurrencyAllocation): number => {
-    if (!paymentCurrency || !allocation.allocatedAmount) return 0;
+    if (!allocation.allocatedAmount) return 0;
 
     // If paying in the same currency as the debt, no conversion needed
     if (allocation.currencyId === paymentCurrencyId) {
       return allocation.allocatedAmount;
     }
 
-    // Convert allocated amount from payment currency to USD equivalent
-    // First convert payment amount to USD
-    let amountInUsd = allocation.allocatedAmount;
-    if (paymentCurrency.conversionMethod === 'DIVIDE') {
-      amountInUsd = allocation.allocatedAmount / paymentCurrency.exchangeRate;
-    } else {
-      amountInUsd = allocation.allocatedAmount * paymentCurrency.exchangeRate;
-    }
+    // ❗ Use the user-entered exchange rate from allocation
+    // exchangeRate means: 1 payment currency = exchangeRate debt currency units
+    // So: equivalent in debt currency = allocatedAmount * exchangeRate
+    if (!allocation.exchangeRate || allocation.exchangeRate <= 0) return 0;
 
-    return amountInUsd;
-  }, [paymentCurrency, paymentCurrencyId]);
+    return allocation.allocatedAmount * allocation.exchangeRate;
+  }, [paymentCurrencyId]);
 
   // Calculate total distributed amount (in payment currency)
   const totalDistributed = useMemo(() => {
@@ -388,9 +351,14 @@ export function MultiCurrencyPaymentModal({
   // Validation
   const hasPaymentAmount = paymentAmount > 0;
   const hasSelectedCurrencies = allocations.some(a => a.selected);
+  // ❗ Validate exchange rate for cross-currency allocations specifically
   const allSelectedHaveExchangeRate = allocations
-    .filter(a => a.selected)
+    .filter(a => a.selected && a.currencyId !== paymentCurrencyId)
     .every(a => a.exchangeRate > 0);
+  // Also ensure no zero/negative exchange rate
+  const noInvalidExchangeRate = allocations
+    .filter(a => a.selected && a.currencyId !== paymentCurrencyId)
+    .every(a => a.exchangeRate !== null && a.exchangeRate !== undefined && a.exchangeRate > 0);
   const noOverAllocation = allocations
     .filter(a => a.selected)
     .every(a => a.allocatedAmount <= a.remainingDebt || a.currencyId !== paymentCurrencyId);
@@ -399,7 +367,7 @@ export function MultiCurrencyPaymentModal({
   // For cross-currency: we allow total to be ≤ payment amount
   const isWithinBudget = totalDistributed <= paymentAmount + 0.01;
 
-  const canSubmit = hasPaymentAmount && hasSelectedCurrencies && allSelectedHaveExchangeRate && isWithinBudget && noOverAllocation;
+  const canSubmit = hasPaymentAmount && hasSelectedCurrencies && allSelectedHaveExchangeRate && noInvalidExchangeRate && isWithinBudget && noOverAllocation;
 
   // Handle allocation change
   const updateAllocation = (currencyId: string, field: keyof CurrencyAllocation, value: unknown) => {
@@ -462,6 +430,7 @@ export function MultiCurrencyPaymentModal({
   };
 
   // Quick fill: set allocated amount to remaining debt for a currency
+  // ❗ Uses the user-entered exchange rate for cross-currency conversion
   const quickFillCurrency = (currencyId: string) => {
     const allocation = allocations.find(a => a.currencyId === currencyId);
     if (!allocation) return;
@@ -472,31 +441,18 @@ export function MultiCurrencyPaymentModal({
     if (currencyId === paymentCurrencyId) {
       fillAmount = allocation.remainingDebt;
     } else {
-      // If different currency, convert remaining debt from debt currency to payment currency
-      const debtCurrency = currencies.find(c => c.id === currencyId);
-      if (!debtCurrency) return;
-
-      // Remaining debt is already in debt currency's finalBalance units
-      // We need to convert to payment currency
-      // Step 1: Convert remaining debt to USD
-      let debtInUsd = allocation.remainingDebt;
-      if (debtCurrency.conversionMethod === 'DIVIDE') {
-        debtInUsd = allocation.remainingDebt / debtCurrency.exchangeRate;
-      } else {
-        debtInUsd = allocation.remainingDebt * debtCurrency.exchangeRate;
+      // If different currency, use the USER-ENTERED exchange rate
+      // exchangeRate means: 1 payment currency = exchangeRate debt currency units
+      // So: to pay remainingDebt in debt currency, we need: remainingDebt / exchangeRate in payment currency
+      if (!allocation.exchangeRate || allocation.exchangeRate <= 0) {
+        toast({
+          title: 'سعر الصرف مطلوب',
+          description: 'الرجاء إدخال سعر الصرف أولاً قبل التعبئة التلقائية',
+          variant: 'destructive',
+        });
+        return;
       }
-
-      // Step 2: Convert USD to payment currency
-      let amountInPaymentCurrency = debtInUsd;
-      if (paymentCurrency) {
-        if (paymentCurrency.conversionMethod === 'DIVIDE') {
-          amountInPaymentCurrency = debtInUsd / paymentCurrency.exchangeRate;
-        } else {
-          amountInPaymentCurrency = debtInUsd * paymentCurrency.exchangeRate;
-        }
-      }
-
-      fillAmount = amountInPaymentCurrency;
+      fillAmount = allocation.remainingDebt / allocation.exchangeRate;
     }
 
     // Update both the allocation and the display map
@@ -535,28 +491,12 @@ export function MultiCurrencyPaymentModal({
             // Same currency: pay up to the remaining allocation or debt remaining
             payAmount = Math.min(remainingAllocation, debtRemaining);
           } else {
-            // Cross-currency: convert allocation from payment currency to debt currency
-            const debtCurrency = currencies.find(c => c.id === allocation.currencyId);
-            if (!debtCurrency) continue;
+            // Cross-currency: use the USER-ENTERED exchange rate
+            // exchangeRate means: 1 payment currency = exchangeRate debt currency units
+            // So: allocatedAmount (payment currency) * exchangeRate = equivalent in debt currency
+            if (!allocation.exchangeRate || allocation.exchangeRate <= 0) continue;
 
-            // Convert remaining allocation (in payment currency) to USD
-            let allocInUsd = remainingAllocation;
-            if (paymentCurrency) {
-              if (paymentCurrency.conversionMethod === 'DIVIDE') {
-                allocInUsd = remainingAllocation / paymentCurrency.exchangeRate;
-              } else {
-                allocInUsd = remainingAllocation * paymentCurrency.exchangeRate;
-              }
-            }
-
-            // Convert USD to debt currency
-            let allocInDebtCurrency = allocInUsd;
-            if (debtCurrency.conversionMethod === 'DIVIDE') {
-              allocInDebtCurrency = allocInUsd / debtCurrency.exchangeRate;
-            } else {
-              allocInDebtCurrency = allocInUsd * debtCurrency.exchangeRate;
-            }
-
+            const allocInDebtCurrency = remainingAllocation * allocation.exchangeRate;
             payAmount = Math.min(allocInDebtCurrency, debtRemaining);
           }
 
@@ -583,24 +523,11 @@ export function MultiCurrencyPaymentModal({
             if (allocation.currencyId === paymentCurrencyId) {
               remainingAllocation -= payAmount;
             } else {
-              // Recalculate how much of the allocation was used
-              const debtCurrency = currencies.find(c => c.id === allocation.currencyId);
-              if (debtCurrency) {
-                let payInUsd = payAmount;
-                if (debtCurrency.conversionMethod === 'DIVIDE') {
-                  payInUsd = payAmount / debtCurrency.exchangeRate;
-                } else {
-                  payInUsd = payAmount * debtCurrency.exchangeRate;
-                }
-                let payInPaymentCurrency = payInUsd;
-                if (paymentCurrency) {
-                  if (paymentCurrency.conversionMethod === 'DIVIDE') {
-                    payInPaymentCurrency = payInUsd / paymentCurrency.exchangeRate;
-                  } else {
-                    payInPaymentCurrency = payInUsd * paymentCurrency.exchangeRate;
-                  }
-                }
-                remainingAllocation -= payInPaymentCurrency;
+              // Cross-currency: use the USER-ENTERED exchange rate to calculate used amount
+              // payAmount is in debt currency, convert back to payment currency
+              // payAmount / exchangeRate = amount in payment currency
+              if (allocation.exchangeRate && allocation.exchangeRate > 0) {
+                remainingAllocation -= payAmount / allocation.exchangeRate;
               }
             }
           }
@@ -869,11 +796,6 @@ export function MultiCurrencyPaymentModal({
                                 )}>
                                   {formatNumber(allocation.remainingDebt)} {currency.symbol}
                                 </span>
-                                {!isSameCurrency && currency.id !== 'cur_usd' && (
-                                  <span className="text-[10px] text-muted-foreground">
-                                    (≈ {formatNumber(convertAmount(allocation.remainingDebt, currency.exchangeRate, currency.conversionMethod))} $)
-                                  </span>
-                                )}
                               </div>
                             </div>
                             {allocation.selected && isSameCurrency && (
@@ -906,22 +828,34 @@ export function MultiCurrencyPaymentModal({
                               exit={{ opacity: 0, height: 0 }}
                               className="space-y-2"
                             >
-                              {/* Exchange Rate (only for cross-currency) */}
+                              {/* Exchange Rate (only for cross-currency) - ❗ MANUAL ENTRY ONLY */}
                               {!isSameCurrency && (
-                                <div className="flex items-center gap-2">
-                                  <Label className="text-xs min-w-[70px]">سعر الصرف</Label>
-                                  <Input
-                                    type="text"
-                                    inputMode="decimal"
-                                    value={exchangeRateDisplayMap[currency.id] ?? formatInputNumber(allocation.exchangeRate)}
-                                    onChange={(e) => handleExchangeRateChange(currency.id, e.target.value)}
-                                    className="h-8 text-sm text-left font-mono"
-                                    dir="ltr"
-                                    placeholder="0"
-                                  />
-                                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                                    1 {paymentCurrency?.code} = ? {currency.code}
-                                  </span>
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-2">
+                                    <Label className="text-xs min-w-[70px]">سعر الصرف</Label>
+                                    <Input
+                                      type="text"
+                                      inputMode="decimal"
+                                      value={exchangeRateDisplayMap[currency.id] ?? (allocation.exchangeRate > 0 ? formatInputNumber(allocation.exchangeRate) : '')}
+                                      onChange={(e) => handleExchangeRateChange(currency.id, e.target.value)}
+                                      className={cn(
+                                        "h-8 text-sm text-left font-mono",
+                                        allocation.selected && (!allocation.exchangeRate || allocation.exchangeRate <= 0) && "border-red-500 focus-visible:ring-red-500"
+                                      )}
+                                      dir="ltr"
+                                      placeholder="أدخل السعر"
+                                    />
+                                    <span className="text-xs text-muted-foreground whitespace-nowrap">
+                                      1 {paymentCurrency?.code} = {allocation.exchangeRate > 0 ? formatNumber(allocation.exchangeRate) : '?'} {currency.code}
+                                    </span>
+                                  </div>
+                                  {/* Validation: warn if exchange rate is missing */}
+                                  {allocation.selected && (!allocation.exchangeRate || allocation.exchangeRate <= 0) && (
+                                    <div className="flex items-center gap-1.5 pr-[70px]">
+                                      <AlertTriangle className="w-3 h-3 text-red-500" />
+                                      <span className="text-[10px] text-red-500">يجب إدخال سعر الصرف</span>
+                                    </div>
+                                  )}
                                 </div>
                               )}
 
@@ -945,12 +879,12 @@ export function MultiCurrencyPaymentModal({
                                 </span>
                               </div>
 
-                              {/* Equivalent Value (for cross-currency) */}
-                              {!isSameCurrency && allocation.allocatedAmount > 0 && (
+                              {/* Equivalent Value (for cross-currency using USER-ENTERED rate) */}
+                              {!isSameCurrency && allocation.allocatedAmount > 0 && allocation.exchangeRate > 0 && (
                                 <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-100/50 dark:bg-amber-900/20">
                                   <Info className="w-3.5 h-3.5 text-amber-500" />
                                   <span className="text-xs text-amber-700 dark:text-amber-300">
-                                    المكافئ: {formatNumber(equivalentValue)} $ ≈ {isSameCurrency ? '' : formatNumber(allocation.allocatedAmount)} {paymentCurrency?.symbol}
+                                    المكافئ: {formatNumber(equivalentValue)} {currency.symbol} ({formatNumber(allocation.allocatedAmount)} {paymentCurrency?.symbol} × {formatNumber(allocation.exchangeRate)})
                                   </span>
                                 </div>
                               )}

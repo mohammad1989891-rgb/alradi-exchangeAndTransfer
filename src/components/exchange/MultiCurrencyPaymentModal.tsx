@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   CreditCard,
@@ -156,7 +156,7 @@ export function MultiCurrencyPaymentModal({
 }: MultiCurrencyPaymentModalProps) {
   const { toast } = useToast();
 
-  // Form state
+  // Form state - Input State (only updated by user actions)
   const [paymentCurrencyId, setPaymentCurrencyId] = useState<string>('');
   const [paymentAmountDisplay, setPaymentAmountDisplay] = useState('');
   const [paymentType, setPaymentType] = useState<'CASH' | 'DEFERRED'>('CASH');
@@ -164,8 +164,18 @@ export function MultiCurrencyPaymentModal({
   const [paymentDescription, setPaymentDescription] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Currency allocations
+  // Track if modal was open previously to detect open transitions
+  const prevIsOpenRef = useRef(false);
+  // Track previous payment currency to detect actual currency changes
+  const prevPaymentCurrencyIdRef = useRef<string>('');
+
+  // Currency allocations - Input State (only updated by user actions)
   const [allocations, setAllocations] = useState<CurrencyAllocation[]>([]);
+
+  // Display strings for allocation inputs (to preserve user typing like "100." without losing decimal)
+  const [allocationDisplayMap, setAllocationDisplayMap] = useState<Record<string, string>>({});
+  // Display strings for exchange rate inputs
+  const [exchangeRateDisplayMap, setExchangeRateDisplayMap] = useState<Record<string, string>>({});
 
   // Get unpaid debts grouped by currency
   const unpaidDebtsByCurrency = useMemo(() => {
@@ -204,12 +214,19 @@ export function MultiCurrencyPaymentModal({
     return debts.reduce((sum, d) => sum + getRemainingForDebt(d), 0);
   }, [unpaidDebtsByCurrency, getRemainingForDebt]);
 
-  // Initialize allocations when modal opens or data changes
+  // Initialize allocations ONLY when modal opens (transitions from closed to open)
+  // ❌ Never reset form state on data changes - only on modal open
   useEffect(() => {
-    if (isOpen && accountSummary) {
+    const justOpened = isOpen && !prevIsOpenRef.current;
+    prevIsOpenRef.current = isOpen;
+
+    if (justOpened && accountSummary) {
       // Set default payment currency to USD
       const usdCurrency = currencies.find(c => c.isDefault || c.code === 'USD');
-      setPaymentCurrencyId(usdCurrency?.id || currencies[0]?.id || '');
+      const defaultCurrencyId = usdCurrency?.id || currencies[0]?.id || '';
+      setPaymentCurrencyId(defaultCurrencyId);
+      // Set the ref so the reactive effect knows the initial currency
+      prevPaymentCurrencyIdRef.current = defaultCurrencyId;
 
       // Initialize allocations for each currency with unpaid debts
       const initialAllocations: CurrencyAllocation[] = [];
@@ -225,20 +242,113 @@ export function MultiCurrencyPaymentModal({
       }
       setAllocations(initialAllocations);
 
-      // Reset form
+      // Reset form ONLY on modal open
       setPaymentAmountDisplay('');
       setPaymentType('CASH');
       setPaymentDate(new Date().toISOString().split('T')[0]);
       setPaymentDescription('');
+      setAllocationDisplayMap({});
+      setExchangeRateDisplayMap({});
     }
-  }, [isOpen, accountSummary, currencies, currenciesWithDebt, getCurrencyRemainingDebt]);
+  }, [isOpen]);
+
+  // Update remaining debt in allocations when data changes (without resetting user inputs)
+  useEffect(() => {
+    if (!isOpen || !accountSummary) return;
+
+    setAllocations(prev => {
+      // If no allocations exist yet, don't create new ones (handled by open effect)
+      if (prev.length === 0) return prev;
+
+      // Update remaining debt and add new currencies, but preserve user inputs
+      const updated = [...prev];
+      const existingIds = new Set(updated.map(a => a.currencyId));
+
+      // Add any new currencies that have debts
+      for (const currency of currenciesWithDebt) {
+        if (!existingIds.has(currency.id)) {
+          const remaining = getCurrencyRemainingDebt(currency.id);
+          updated.push({
+            currencyId: currency.id,
+            selected: false,
+            exchangeRate: currency.exchangeRate || 1,
+            allocatedAmount: 0,
+            remainingDebt: remaining,
+          });
+        }
+      }
+
+      // Update remaining debt for existing allocations
+      return updated.map(a => {
+        const newRemaining = getCurrencyRemainingDebt(a.currencyId);
+        // Only update remainingDebt, preserve all user inputs (selected, exchangeRate, allocatedAmount)
+        if (newRemaining !== a.remainingDebt) {
+          return { ...a, remainingDebt: newRemaining };
+        }
+        return a;
+      });
+    });
+  }, [isOpen, accountSummary, currenciesWithDebt, getCurrencyRemainingDebt]);
 
   // Get selected payment currency
   const paymentCurrency = useMemo(() => {
     return currencies.find(c => c.id === paymentCurrencyId);
   }, [currencies, paymentCurrencyId]);
 
-  // Payment amount (parsed)
+  // Reactive: When payment currency changes, update exchange rates for cross-currency allocations
+  // ❗ Only updates when paymentCurrencyId ACTUALLY changes (not when user edits exchange rate)
+  useEffect(() => {
+    if (!paymentCurrencyId || allocations.length === 0) return;
+
+    // Detect actual currency change vs re-render
+    const currencyChanged = prevPaymentCurrencyIdRef.current !== '' && 
+                            prevPaymentCurrencyIdRef.current !== paymentCurrencyId;
+    prevPaymentCurrencyIdRef.current = paymentCurrencyId;
+
+    // Only update exchange rates when currency actually changed
+    if (!currencyChanged) return;
+
+    // Build new display map for exchange rates
+    const newRateDisplayMap: Record<string, string> = {};
+
+    setAllocations(prev => prev.map(a => {
+      // If same currency, no exchange rate needed
+      if (a.currencyId === paymentCurrencyId) {
+        return { ...a, exchangeRate: 1 };
+      }
+
+      // For cross-currency: calculate the exchange rate between payment currency and debt currency
+      const debtCurrency = currencies.find(c => c.id === a.currencyId);
+      if (!debtCurrency || !paymentCurrency) return a;
+
+      // Calculate cross rate: how many debt currency units per 1 payment currency unit
+      // Step 1: Convert 1 payment currency to USD
+      let onePaymentInUsd = 1;
+      if (paymentCurrency.conversionMethod === 'DIVIDE') {
+        onePaymentInUsd = 1 / paymentCurrency.exchangeRate;
+      } else {
+        onePaymentInUsd = paymentCurrency.exchangeRate;
+      }
+
+      // Step 2: Convert USD to debt currency
+      let crossRate = onePaymentInUsd;
+      if (debtCurrency.conversionMethod === 'DIVIDE') {
+        crossRate = onePaymentInUsd / debtCurrency.exchangeRate;
+      } else {
+        crossRate = onePaymentInUsd * debtCurrency.exchangeRate;
+      }
+
+      // Update display map for this rate
+      newRateDisplayMap[a.currencyId] = formatInputNumber(crossRate);
+
+      return { ...a, exchangeRate: crossRate };
+    }));
+
+    // Update the display map with new rates
+    setExchangeRateDisplayMap(prev => ({ ...prev, ...newRateDisplayMap }));
+  }, [paymentCurrencyId, paymentCurrency, currencies, allocations.length]);
+
+  // Payment amount (parsed from display string - Input State)
   const paymentAmount = parseFormattedNumber(paymentAmountDisplay);
 
   // Calculate equivalent value for an allocation
@@ -301,23 +411,43 @@ export function MultiCurrencyPaymentModal({
     );
   };
 
-  // Handle payment amount input with formatting
+  // Handle payment amount input with formatting and validation
   const handlePaymentAmountChange = (value: string) => {
+    // Only allow numbers, dots, and commas
     const cleanValue = value.replace(/[^0-9.,]/g, '');
+    // Prevent multiple dots
+    const parts = cleanValue.split('.');
+    if (parts.length > 2) {
+      return; // Don't allow multiple decimal points
+    }
+    // Directly set display value - never overwrite with calculated value
     setPaymentAmountDisplay(cleanValue);
   };
 
-  // Handle exchange rate input for allocation
+  // Handle exchange rate input for allocation (with validation)
   const handleExchangeRateChange = (currencyId: string, value: string) => {
+    // Only allow numbers, dots, and commas
     const cleanValue = value.replace(/[^0-9.,]/g, '');
+    // Prevent multiple dots
+    const parts = cleanValue.split('.');
+    if (parts.length > 2) return;
+    // Store display value for this field
+    setExchangeRateDisplayMap(prev => ({ ...prev, [currencyId]: cleanValue }));
     const numValue = parseFormattedNumber(cleanValue);
     updateAllocation(currencyId, 'exchangeRate', numValue || 0);
   };
 
-  // Handle allocated amount input for allocation
+  // Handle allocated amount input for allocation (with validation)
   const handleAllocatedAmountChange = (currencyId: string, value: string) => {
+    // Only allow numbers, dots, and commas
     const cleanValue = value.replace(/[^0-9.,]/g, '');
+    // Prevent multiple dots
+    const parts = cleanValue.split('.');
+    if (parts.length > 2) return;
+    // Store display value for this field
+    setAllocationDisplayMap(prev => ({ ...prev, [currencyId]: cleanValue }));
     const numValue = parseFormattedNumber(cleanValue);
+    // ❗ Never set allocatedAmount to 0 from user input - allow empty for typing
     updateAllocation(currencyId, 'allocatedAmount', numValue);
   };
 
@@ -336,37 +466,42 @@ export function MultiCurrencyPaymentModal({
     const allocation = allocations.find(a => a.currencyId === currencyId);
     if (!allocation) return;
 
+    let fillAmount: number;
+
     // If same currency as payment, just set to remaining
     if (currencyId === paymentCurrencyId) {
-      updateAllocation(currencyId, 'allocatedAmount', allocation.remainingDebt);
-      return;
-    }
-
-    // If different currency, convert remaining debt from debt currency to payment currency
-    const debtCurrency = currencies.find(c => c.id === currencyId);
-    if (!debtCurrency) return;
-
-    // Remaining debt is already in debt currency's finalBalance units
-    // We need to convert to payment currency
-    // Step 1: Convert remaining debt to USD
-    let debtInUsd = allocation.remainingDebt;
-    if (debtCurrency.conversionMethod === 'DIVIDE') {
-      debtInUsd = allocation.remainingDebt / debtCurrency.exchangeRate;
+      fillAmount = allocation.remainingDebt;
     } else {
-      debtInUsd = allocation.remainingDebt * debtCurrency.exchangeRate;
-    }
+      // If different currency, convert remaining debt from debt currency to payment currency
+      const debtCurrency = currencies.find(c => c.id === currencyId);
+      if (!debtCurrency) return;
 
-    // Step 2: Convert USD to payment currency
-    let amountInPaymentCurrency = debtInUsd;
-    if (paymentCurrency) {
-      if (paymentCurrency.conversionMethod === 'DIVIDE') {
-        amountInPaymentCurrency = debtInUsd / paymentCurrency.exchangeRate;
+      // Remaining debt is already in debt currency's finalBalance units
+      // We need to convert to payment currency
+      // Step 1: Convert remaining debt to USD
+      let debtInUsd = allocation.remainingDebt;
+      if (debtCurrency.conversionMethod === 'DIVIDE') {
+        debtInUsd = allocation.remainingDebt / debtCurrency.exchangeRate;
       } else {
-        amountInPaymentCurrency = debtInUsd * paymentCurrency.exchangeRate;
+        debtInUsd = allocation.remainingDebt * debtCurrency.exchangeRate;
       }
+
+      // Step 2: Convert USD to payment currency
+      let amountInPaymentCurrency = debtInUsd;
+      if (paymentCurrency) {
+        if (paymentCurrency.conversionMethod === 'DIVIDE') {
+          amountInPaymentCurrency = debtInUsd / paymentCurrency.exchangeRate;
+        } else {
+          amountInPaymentCurrency = debtInUsd * paymentCurrency.exchangeRate;
+        }
+      }
+
+      fillAmount = amountInPaymentCurrency;
     }
 
-    updateAllocation(currencyId, 'allocatedAmount', amountInPaymentCurrency);
+    // Update both the allocation and the display map
+    updateAllocation(currencyId, 'allocatedAmount', fillAmount);
+    setAllocationDisplayMap(prev => ({ ...prev, [currencyId]: formatInputNumber(fillAmount) }));
   };
 
   // Handle submit
@@ -538,6 +673,12 @@ export function MultiCurrencyPaymentModal({
     setPaymentDate(new Date().toISOString().split('T')[0]);
     setPaymentType('CASH');
     setAllocations([]);
+    setPaymentCurrencyId('');
+    setAllocationDisplayMap({});
+    setExchangeRateDisplayMap({});
+    // Reset the refs so next open will trigger initialization
+    prevIsOpenRef.current = false;
+    prevPaymentCurrencyIdRef.current = '';
     onClose();
   };
 
@@ -772,7 +913,7 @@ export function MultiCurrencyPaymentModal({
                                   <Input
                                     type="text"
                                     inputMode="decimal"
-                                    value={formatInputNumber(allocation.exchangeRate)}
+                                    value={exchangeRateDisplayMap[currency.id] ?? formatInputNumber(allocation.exchangeRate)}
                                     onChange={(e) => handleExchangeRateChange(currency.id, e.target.value)}
                                     className="h-8 text-sm text-left font-mono"
                                     dir="ltr"
@@ -790,7 +931,7 @@ export function MultiCurrencyPaymentModal({
                                 <Input
                                   type="text"
                                   inputMode="decimal"
-                                  value={allocation.allocatedAmount ? formatInputNumber(allocation.allocatedAmount) : ''}
+                                  value={allocationDisplayMap[currency.id] ?? (allocation.allocatedAmount ? formatInputNumber(allocation.allocatedAmount) : '')}
                                   onChange={(e) => handleAllocatedAmountChange(currency.id, e.target.value)}
                                   className={cn(
                                     "h-8 text-sm text-left font-mono",

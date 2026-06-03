@@ -69,6 +69,7 @@ interface CurrencyAllocation {
   currencyId: string;
   selected: boolean;
   exchangeRate: number;
+  conversionMethod: 'multiply' | 'divide'; // how to apply exchange rate
   allocatedAmount: number; // amount in payment currency
   remainingDebt: number;   // remaining debt in this currency (USD equivalent)
 }
@@ -167,9 +168,8 @@ export function MultiCurrencyPaymentModal({
   // Display strings for exchange rate inputs
   const [exchangeRateDisplayMap, setExchangeRateDisplayMap] = useState<Record<string, string>>({});
 
-  // Rate calculator popup state (× and ÷ buttons)
-  const [rateCalcPopup, setRateCalcPopup] = useState<{ currencyId: string; operation: 'multiply' | 'divide' } | null>(null);
-  const [rateCalcInput, setRateCalcInput] = useState('');
+  // Conversion method per currency allocation (× or ÷ toggle)
+  const [conversionMethodMap, setConversionMethodMap] = useState<Record<string, 'multiply' | 'divide'>>({});
 
   // Get unpaid debts grouped by currency
   const unpaidDebtsByCurrency = useMemo(() => {
@@ -232,6 +232,7 @@ export function MultiCurrencyPaymentModal({
           currencyId: currency.id,
           selected: false,
           exchangeRate: isSameCurrency ? 1 : 0, // ❗ 0 = empty, user must enter manually
+          conversionMethod: 'multiply', // default: multiply
           allocatedAmount: 0,
           remainingDebt: remaining,
         });
@@ -245,6 +246,7 @@ export function MultiCurrencyPaymentModal({
       setPaymentDescription('');
       setAllocationDisplayMap({});
       setExchangeRateDisplayMap({});
+      setConversionMethodMap({});
     }
   }, [isOpen]);
 
@@ -270,6 +272,7 @@ export function MultiCurrencyPaymentModal({
             currencyId: currency.id,
             selected: false,
             exchangeRate: isSameCurrency ? 1 : 0,
+            conversionMethod: 'multiply',
             allocatedAmount: 0,
             remainingDebt: remaining,
           });
@@ -308,6 +311,8 @@ export function MultiCurrencyPaymentModal({
 
     // Clear display map for exchange rates so user must re-enter
     setExchangeRateDisplayMap({});
+    // Reset conversion methods to default
+    setConversionMethodMap({});
 
     setAllocations(prev => prev.map(a => {
       // If same currency, auto-set rate to 1 (no conversion needed)
@@ -322,7 +327,7 @@ export function MultiCurrencyPaymentModal({
   // Payment amount (parsed from display string - Input State)
   const paymentAmount = parseFormattedNumber(paymentAmountDisplay);
 
-  // Calculate equivalent value for an allocation using the USER-ENTERED exchange rate
+  // Calculate equivalent value for an allocation using the USER-ENTERED exchange rate and conversion method
   const getEquivalentValue = useCallback((allocation: CurrencyAllocation): number => {
     if (!allocation.allocatedAmount) return 0;
 
@@ -332,12 +337,15 @@ export function MultiCurrencyPaymentModal({
     }
 
     // ❗ Use the user-entered exchange rate from allocation
-    // exchangeRate means: 1 payment currency = exchangeRate debt currency units
-    // So: equivalent in debt currency = allocatedAmount * exchangeRate
     if (!allocation.exchangeRate || allocation.exchangeRate <= 0) return 0;
 
+    // Apply the selected conversion method
+    const method = conversionMethodMap[allocation.currencyId] || allocation.conversionMethod || 'multiply';
+    if (method === 'divide') {
+      return allocation.allocatedAmount / allocation.exchangeRate;
+    }
     return allocation.allocatedAmount * allocation.exchangeRate;
-  }, [paymentCurrencyId]);
+  }, [paymentCurrencyId, conversionMethodMap]);
 
   // Calculate total distributed amount (in payment currency)
   const totalDistributed = useMemo(() => {
@@ -363,6 +371,16 @@ export function MultiCurrencyPaymentModal({
   const noInvalidExchangeRate = allocations
     .filter(a => a.selected && a.currencyId !== paymentCurrencyId)
     .every(a => a.exchangeRate !== null && a.exchangeRate !== undefined && a.exchangeRate > 0);
+  // ❗ Prevent division by zero for divide mode
+  const noDivisionByZero = allocations
+    .filter(a => a.selected && a.currencyId !== paymentCurrencyId)
+    .every(a => {
+      const method = conversionMethodMap[a.currencyId] || a.conversionMethod || 'multiply';
+      if (method === 'divide') {
+        return a.exchangeRate !== null && a.exchangeRate !== undefined && a.exchangeRate !== 0;
+      }
+      return true;
+    });
   const noOverAllocation = allocations
     .filter(a => a.selected)
     .every(a => a.allocatedAmount <= a.remainingDebt || a.currencyId !== paymentCurrencyId);
@@ -371,7 +389,7 @@ export function MultiCurrencyPaymentModal({
   // For cross-currency: we allow total to be ≤ payment amount
   const isWithinBudget = totalDistributed <= paymentAmount + 0.01;
 
-  const canSubmit = hasPaymentAmount && hasSelectedCurrencies && allSelectedHaveExchangeRate && noInvalidExchangeRate && isWithinBudget && noOverAllocation;
+  const canSubmit = hasPaymentAmount && hasSelectedCurrencies && allSelectedHaveExchangeRate && noInvalidExchangeRate && noDivisionByZero && isWithinBudget && noOverAllocation;
 
   // Handle allocation change
   const updateAllocation = (currencyId: string, field: keyof CurrencyAllocation, value: unknown) => {
@@ -409,63 +427,10 @@ export function MultiCurrencyPaymentModal({
     updateAllocation(currencyId, 'exchangeRate', numValue || 0);
   };
 
-  // Apply rate calculator operation (× or ÷)
-  const applyRateCalcOperation = () => {
-    if (!rateCalcPopup) return;
-
-    const operand = parseFormattedNumber(rateCalcInput);
-
-    // Validation: operand must be a positive number
-    if (!operand || operand <= 0 || isNaN(operand)) {
-      toast({
-        title: 'قيمة غير صالحة',
-        description: 'الرجاء إدخال رقم موجب',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    // Validation: prevent division by zero (operand > 0 already checked above)
-    if (rateCalcPopup.operation === 'divide' && operand === 0) {
-      toast({
-        title: 'خطأ',
-        description: 'لا يمكن القسمة على صفر',
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    const allocation = allocations.find(a => a.currencyId === rateCalcPopup.currencyId);
-    if (!allocation || !allocation.exchangeRate || allocation.exchangeRate <= 0) {
-      toast({
-        title: 'سعر الصرف مطلوب',
-        description: 'الرجاء إدخال سعر الصرف أولاً قبل استخدام العمليات الحسابية',
-        variant: 'destructive',
-      });
-      setRateCalcPopup(null);
-      setRateCalcInput('');
-      return;
-    }
-
-    const currentRate = allocation.exchangeRate;
-    let newRate: number;
-
-    if (rateCalcPopup.operation === 'multiply') {
-      newRate = currentRate * operand;
-    } else {
-      newRate = currentRate / operand;
-    }
-
-    // Round to avoid floating point issues
-    newRate = Math.round(newRate * 10000) / 10000;
-
-    // Update the allocation and display map
-    updateAllocation(rateCalcPopup.currencyId, 'exchangeRate', newRate);
-    setExchangeRateDisplayMap(prev => ({ ...prev, [rateCalcPopup.currencyId]: formatInputNumber(newRate) }));
-
-    // Close popup
-    setRateCalcPopup(null);
-    setRateCalcInput('');
+  // Toggle conversion method for a currency allocation (× or ÷)
+  const toggleConversionMethod = (currencyId: string, method: 'multiply' | 'divide') => {
+    setConversionMethodMap(prev => ({ ...prev, [currencyId]: method }));
+    updateAllocation(currencyId, 'conversionMethod', method);
   };
 
   // Handle allocated amount input for allocation (with validation)
@@ -504,9 +469,7 @@ export function MultiCurrencyPaymentModal({
     if (currencyId === paymentCurrencyId) {
       fillAmount = allocation.remainingDebt;
     } else {
-      // If different currency, use the USER-ENTERED exchange rate
-      // exchangeRate means: 1 payment currency = exchangeRate debt currency units
-      // So: to pay remainingDebt in debt currency, we need: remainingDebt / exchangeRate in payment currency
+      // If different currency, use the USER-ENTERED exchange rate and conversion method
       if (!allocation.exchangeRate || allocation.exchangeRate <= 0) {
         toast({
           title: 'سعر الصرف مطلوب',
@@ -515,7 +478,14 @@ export function MultiCurrencyPaymentModal({
         });
         return;
       }
-      fillAmount = allocation.remainingDebt / allocation.exchangeRate;
+      const method = conversionMethodMap[allocation.currencyId] || allocation.conversionMethod || 'multiply';
+      if (method === 'divide') {
+        // divide: equivalent = amount / rate → amount = equivalent * rate
+        fillAmount = allocation.remainingDebt * allocation.exchangeRate;
+      } else {
+        // multiply: equivalent = amount * rate → amount = equivalent / rate
+        fillAmount = allocation.remainingDebt / allocation.exchangeRate;
+      }
     }
 
     // Update both the allocation and the display map
@@ -554,12 +524,16 @@ export function MultiCurrencyPaymentModal({
             // Same currency: pay up to the remaining allocation or debt remaining
             payAmount = Math.min(remainingAllocation, debtRemaining);
           } else {
-            // Cross-currency: use the USER-ENTERED exchange rate
-            // exchangeRate means: 1 payment currency = exchangeRate debt currency units
-            // So: allocatedAmount (payment currency) * exchangeRate = equivalent in debt currency
+            // Cross-currency: use the USER-ENTERED exchange rate and conversion method
             if (!allocation.exchangeRate || allocation.exchangeRate <= 0) continue;
 
-            const allocInDebtCurrency = remainingAllocation * allocation.exchangeRate;
+            const method = conversionMethodMap[allocation.currencyId] || allocation.conversionMethod || 'multiply';
+            let allocInDebtCurrency: number;
+            if (method === 'divide') {
+              allocInDebtCurrency = remainingAllocation / allocation.exchangeRate;
+            } else {
+              allocInDebtCurrency = remainingAllocation * allocation.exchangeRate;
+            }
             payAmount = Math.min(allocInDebtCurrency, debtRemaining);
           }
 
@@ -586,11 +560,16 @@ export function MultiCurrencyPaymentModal({
             if (allocation.currencyId === paymentCurrencyId) {
               remainingAllocation -= payAmount;
             } else {
-              // Cross-currency: use the USER-ENTERED exchange rate to calculate used amount
-              // payAmount is in debt currency, convert back to payment currency
-              // payAmount / exchangeRate = amount in payment currency
+              // Cross-currency: convert payAmount back to payment currency
               if (allocation.exchangeRate && allocation.exchangeRate > 0) {
-                remainingAllocation -= payAmount / allocation.exchangeRate;
+                const method = conversionMethodMap[allocation.currencyId] || allocation.conversionMethod || 'multiply';
+                if (method === 'divide') {
+                  // divide: equivalent = amount / rate → amount = equivalent * rate
+                  remainingAllocation -= payAmount * allocation.exchangeRate;
+                } else {
+                  // multiply: equivalent = amount * rate → amount = equivalent / rate
+                  remainingAllocation -= payAmount / allocation.exchangeRate;
+                }
               }
             }
           }
@@ -666,8 +645,7 @@ export function MultiCurrencyPaymentModal({
     setPaymentCurrencyId('');
     setAllocationDisplayMap({});
     setExchangeRateDisplayMap({});
-    setRateCalcPopup(null);
-    setRateCalcInput('');
+    setConversionMethodMap({});
     // Reset the refs so next open will trigger initialization
     prevIsOpenRef.current = false;
     prevPaymentCurrencyIdRef.current = '';
@@ -910,20 +888,13 @@ export function MultiCurrencyPaymentModal({
                                       dir="ltr"
                                       placeholder="أدخل السعر"
                                     />
-                                    {/* × and ÷ Buttons */}
+                                    {/* × (multiply) toggle button */}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        if (!allocation.exchangeRate || allocation.exchangeRate <= 0) {
-                                          toast({ title: 'سعر الصرف مطلوب', description: 'أدخل سعر الصرف أولاً', variant: 'destructive' });
-                                          return;
-                                        }
-                                        setRateCalcPopup({ currencyId: currency.id, operation: 'multiply' });
-                                        setRateCalcInput('');
-                                      }}
+                                      onClick={() => toggleConversionMethod(currency.id, 'multiply')}
                                       className={cn(
                                         'w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold border-2 transition-all shrink-0 cursor-pointer',
-                                        rateCalcPopup?.currencyId === currency.id && rateCalcPopup?.operation === 'multiply'
+                                        (conversionMethodMap[currency.id] || allocation.conversionMethod || 'multiply') === 'multiply'
                                           ? 'bg-teal-500 text-white border-teal-500'
                                           : 'bg-muted text-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-400 dark:hover:bg-teal-950/40 dark:hover:text-teal-400 dark:hover:border-teal-600'
                                       )}
@@ -931,19 +902,13 @@ export function MultiCurrencyPaymentModal({
                                     >
                                       ×
                                     </button>
+                                    {/* ÷ (divide) toggle button */}
                                     <button
                                       type="button"
-                                      onClick={() => {
-                                        if (!allocation.exchangeRate || allocation.exchangeRate <= 0) {
-                                          toast({ title: 'سعر الصرف مطلوب', description: 'أدخل سعر الصرف أولاً', variant: 'destructive' });
-                                          return;
-                                        }
-                                        setRateCalcPopup({ currencyId: currency.id, operation: 'divide' });
-                                        setRateCalcInput('');
-                                      }}
+                                      onClick={() => toggleConversionMethod(currency.id, 'divide')}
                                       className={cn(
                                         'w-8 h-8 rounded-md flex items-center justify-center text-sm font-bold border-2 transition-all shrink-0 cursor-pointer',
-                                        rateCalcPopup?.currencyId === currency.id && rateCalcPopup?.operation === 'divide'
+                                        (conversionMethodMap[currency.id] || allocation.conversionMethod || 'multiply') === 'divide'
                                           ? 'bg-teal-500 text-white border-teal-500'
                                           : 'bg-muted text-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-400 dark:hover:bg-teal-950/40 dark:hover:text-teal-400 dark:hover:border-teal-600'
                                       )}
@@ -952,46 +917,6 @@ export function MultiCurrencyPaymentModal({
                                       ÷
                                     </button>
                                   </div>
-                                  {/* Rate Calculator Popup */}
-                                  {rateCalcPopup?.currencyId === currency.id && (
-                                    <div className="flex items-center gap-1.5" dir="ltr">
-                                      <span className="text-xs text-muted-foreground shrink-0">
-                                        {rateCalcPopup.operation === 'multiply' ? 'ضرب في' : 'قسمة على'}
-                                      </span>
-                                      <Input
-                                        type="text"
-                                        inputMode="decimal"
-                                        value={rateCalcInput}
-                                        onChange={(e) => {
-                                          const val = e.target.value.replace(/[^0-9.,]/g, '');
-                                          const parts = val.split('.');
-                                          if (parts.length <= 2) setRateCalcInput(val);
-                                        }}
-                                        onKeyDown={(e) => {
-                                          if (e.key === 'Enter') applyRateCalcOperation();
-                                          if (e.key === 'Escape') { setRateCalcPopup(null); setRateCalcInput(''); }
-                                        }}
-                                        className="h-7 text-xs text-left font-mono w-20"
-                                        dir="ltr"
-                                        placeholder="0"
-                                        autoFocus
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={applyRateCalcOperation}
-                                        className="h-7 px-2 rounded-md text-xs font-medium bg-teal-500 text-white hover:bg-teal-600 transition-colors shrink-0 cursor-pointer"
-                                      >
-                                        ✓
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => { setRateCalcPopup(null); setRateCalcInput(''); }}
-                                        className="h-7 px-2 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors shrink-0 cursor-pointer"
-                                      >
-                                        ✕
-                                      </button>
-                                    </div>
-                                  )}
                                   {/* Exchange rate description */}
                                   <span className="text-xs text-muted-foreground">
                                     1 {paymentCurrency?.code} = {allocation.exchangeRate > 0 ? formatNumber(allocation.exchangeRate) : '?'} {currency.code}
@@ -1031,7 +956,7 @@ export function MultiCurrencyPaymentModal({
                                 <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-100/50 dark:bg-amber-900/20">
                                   <Info className="w-3.5 h-3.5 text-amber-500" />
                                   <span className="text-xs text-amber-700 dark:text-amber-300">
-                                    المكافئ: {formatNumber(equivalentValue)} {currency.symbol} ({formatNumber(allocation.allocatedAmount)} {paymentCurrency?.symbol} × {formatNumber(allocation.exchangeRate)})
+                                    المكافئ: {formatNumber(equivalentValue)} {currency.symbol} ({formatNumber(allocation.allocatedAmount)} {paymentCurrency?.symbol} {(conversionMethodMap[currency.id] || allocation.conversionMethod || 'multiply') === 'divide' ? '÷' : '×'} {formatNumber(allocation.exchangeRate)})
                                   </span>
                                 </div>
                               )}

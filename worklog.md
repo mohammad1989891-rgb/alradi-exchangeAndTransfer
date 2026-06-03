@@ -75,3 +75,36 @@ Stage Summary:
   4. ✅ No calculation conflicts - user input never overwritten
   5. ✅ Input validation prevents empty/text input
 - Pushed to GitHub (commit f40c6ab)
+
+---
+Task ID: 2
+Agent: main
+Task: Refactor exchange rate logic to manual entry in debt payment modal
+
+Work Log:
+- Removed auto-calculation of exchange rates from currency settings
+- Changed exchange rate initialization to 0 (empty) for cross-currency allocations
+- Removed the reactive effect that auto-calculated cross-rates from currency settings
+- Replaced with a reactive effect that resets exchange rates to 0 when payment currency changes
+- Updated getEquivalentValue to use user-entered exchange rate: amount * rate
+- Updated submit logic to use user-entered rate for cross-currency conversions
+- Updated quick fill to use user-entered rate: remainingDebt / exchangeRate
+- Added validation: red border + warning text when exchange rate is missing for selected cross-currency
+- Added validation: prevent zero/negative exchange rates (noInvalidExchangeRate check)
+- Updated exchange rate field: placeholder "أدخل السعر", empty by default
+- Updated label to show actual rate when entered: "1 AED = 3.50 USD"
+- Updated equivalent value display to show calculation: "350.00 $ (100.00 د.إ × 3.50)"
+- Removed display of currency-settings-based conversion in currency header
+- Removed unused convertAmount helper function
+- Browser verified: exchange rate empty by default, manual entry works, calculations correct, warnings appear
+
+Stage Summary:
+- All 7 user requirements implemented:
+  1. ✅ Auto-calculation removed - no rate fetched from currency settings
+  2. ✅ Manual entry - exchange rate field appears for cross-currency
+  3. ✅ Field behavior - empty by default, never auto-changed after entry
+  4. ✅ Calculation linkage - user-entered rate used for equivalent value and distribution
+  5. ✅ Validation - prevents empty/zero/negative exchange rates
+  6. ✅ Reactive updates - equivalent value updates when rate or amount changes
+  7. ✅ Same currency - rate field hidden, auto-set to 1
+- Pushed to GitHub (commit c6d221c)

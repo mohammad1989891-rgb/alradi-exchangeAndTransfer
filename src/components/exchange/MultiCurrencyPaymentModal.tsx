@@ -167,6 +167,10 @@ export function MultiCurrencyPaymentModal({
   // Display strings for exchange rate inputs
   const [exchangeRateDisplayMap, setExchangeRateDisplayMap] = useState<Record<string, string>>({});
 
+  // Rate calculator popup state (× and ÷ buttons)
+  const [rateCalcPopup, setRateCalcPopup] = useState<{ currencyId: string; operation: 'multiply' | 'divide' } | null>(null);
+  const [rateCalcInput, setRateCalcInput] = useState('');
+
   // Get unpaid debts grouped by currency
   const unpaidDebtsByCurrency = useMemo(() => {
     if (!accountSummary) return new Map<string, Debt[]>();
@@ -405,6 +409,65 @@ export function MultiCurrencyPaymentModal({
     updateAllocation(currencyId, 'exchangeRate', numValue || 0);
   };
 
+  // Apply rate calculator operation (× or ÷)
+  const applyRateCalcOperation = () => {
+    if (!rateCalcPopup) return;
+
+    const operand = parseFormattedNumber(rateCalcInput);
+
+    // Validation: operand must be a positive number
+    if (!operand || operand <= 0 || isNaN(operand)) {
+      toast({
+        title: 'قيمة غير صالحة',
+        description: 'الرجاء إدخال رقم موجب',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Validation: prevent division by zero (operand > 0 already checked above)
+    if (rateCalcPopup.operation === 'divide' && operand === 0) {
+      toast({
+        title: 'خطأ',
+        description: 'لا يمكن القسمة على صفر',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const allocation = allocations.find(a => a.currencyId === rateCalcPopup.currencyId);
+    if (!allocation || !allocation.exchangeRate || allocation.exchangeRate <= 0) {
+      toast({
+        title: 'سعر الصرف مطلوب',
+        description: 'الرجاء إدخال سعر الصرف أولاً قبل استخدام العمليات الحسابية',
+        variant: 'destructive',
+      });
+      setRateCalcPopup(null);
+      setRateCalcInput('');
+      return;
+    }
+
+    const currentRate = allocation.exchangeRate;
+    let newRate: number;
+
+    if (rateCalcPopup.operation === 'multiply') {
+      newRate = currentRate * operand;
+    } else {
+      newRate = currentRate / operand;
+    }
+
+    // Round to avoid floating point issues
+    newRate = Math.round(newRate * 10000) / 10000;
+
+    // Update the allocation and display map
+    updateAllocation(rateCalcPopup.currencyId, 'exchangeRate', newRate);
+    setExchangeRateDisplayMap(prev => ({ ...prev, [rateCalcPopup.currencyId]: formatInputNumber(newRate) }));
+
+    // Close popup
+    setRateCalcPopup(null);
+    setRateCalcInput('');
+  };
+
   // Handle allocated amount input for allocation (with validation)
   const handleAllocatedAmountChange = (currencyId: string, value: string) => {
     // Only allow numbers, dots, and commas
@@ -603,6 +666,8 @@ export function MultiCurrencyPaymentModal({
     setPaymentCurrencyId('');
     setAllocationDisplayMap({});
     setExchangeRateDisplayMap({});
+    setRateCalcPopup(null);
+    setRateCalcInput('');
     // Reset the refs so next open will trigger initialization
     prevIsOpenRef.current = false;
     prevPaymentCurrencyIdRef.current = '';
@@ -831,7 +896,7 @@ export function MultiCurrencyPaymentModal({
                               {/* Exchange Rate (only for cross-currency) - ❗ MANUAL ENTRY ONLY */}
                               {!isSameCurrency && (
                                 <div className="space-y-1">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-1.5">
                                     <Label className="text-xs min-w-[70px]">سعر الصرف</Label>
                                     <Input
                                       type="text"
@@ -839,12 +904,96 @@ export function MultiCurrencyPaymentModal({
                                       value={exchangeRateDisplayMap[currency.id] ?? (allocation.exchangeRate > 0 ? formatInputNumber(allocation.exchangeRate) : '')}
                                       onChange={(e) => handleExchangeRateChange(currency.id, e.target.value)}
                                       className={cn(
-                                        "h-8 text-sm text-left font-mono",
+                                        "h-8 text-sm text-left font-mono flex-1 min-w-0",
                                         allocation.selected && (!allocation.exchangeRate || allocation.exchangeRate <= 0) && "border-red-500 focus-visible:ring-red-500"
                                       )}
                                       dir="ltr"
                                       placeholder="أدخل السعر"
                                     />
+                                    {/* × and ÷ Buttons */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!allocation.exchangeRate || allocation.exchangeRate <= 0) {
+                                          toast({ title: 'سعر الصرف مطلوب', description: 'أدخل سعر الصرف أولاً', variant: 'destructive' });
+                                          return;
+                                        }
+                                        setRateCalcPopup({ currencyId: currency.id, operation: 'multiply' });
+                                        setRateCalcInput('');
+                                      }}
+                                      className={cn(
+                                        'w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold border transition-all shrink-0',
+                                        rateCalcPopup?.currencyId === currency.id && rateCalcPopup?.operation === 'multiply'
+                                          ? 'bg-teal-500 text-white border-teal-500'
+                                          : 'bg-muted/80 text-muted-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-300 dark:hover:bg-teal-950/30 dark:hover:text-teal-400 dark:hover:border-teal-700'
+                                      )}
+                                      title="ضرب"
+                                    >
+                                      ×
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (!allocation.exchangeRate || allocation.exchangeRate <= 0) {
+                                          toast({ title: 'سعر الصرف مطلوب', description: 'أدخل سعر الصرف أولاً', variant: 'destructive' });
+                                          return;
+                                        }
+                                        setRateCalcPopup({ currencyId: currency.id, operation: 'divide' });
+                                        setRateCalcInput('');
+                                      }}
+                                      className={cn(
+                                        'w-7 h-7 rounded-md flex items-center justify-center text-xs font-bold border transition-all shrink-0',
+                                        rateCalcPopup?.currencyId === currency.id && rateCalcPopup?.operation === 'divide'
+                                          ? 'bg-teal-500 text-white border-teal-500'
+                                          : 'bg-muted/80 text-muted-foreground border-border hover:bg-teal-100 hover:text-teal-700 hover:border-teal-300 dark:hover:bg-teal-950/30 dark:hover:text-teal-400 dark:hover:border-teal-700'
+                                      )}
+                                      title="قسمة"
+                                    >
+                                      ÷
+                                    </button>
+                                  </div>
+                                  {/* Rate Calculator Popup */}
+                                  {rateCalcPopup?.currencyId === currency.id && (
+                                    <div className="flex items-center gap-1.5 pr-[70px]">
+                                      <span className="text-xs text-muted-foreground shrink-0">
+                                        {rateCalcPopup.operation === 'multiply' ? 'ضرب في' : 'قسمة على'}
+                                      </span>
+                                      <Input
+                                        type="text"
+                                        inputMode="decimal"
+                                        value={rateCalcInput}
+                                        onChange={(e) => {
+                                          const val = e.target.value.replace(/[^0-9.,]/g, '');
+                                          const parts = val.split('.');
+                                          if (parts.length <= 2) setRateCalcInput(val);
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') applyRateCalcOperation();
+                                          if (e.key === 'Escape') { setRateCalcPopup(null); setRateCalcInput(''); }
+                                        }}
+                                        className="h-7 text-xs text-left font-mono w-20"
+                                        dir="ltr"
+                                        placeholder="0"
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={applyRateCalcOperation}
+                                        className="h-7 px-2 rounded-md text-xs font-medium bg-teal-500 text-white hover:bg-teal-600 transition-colors shrink-0"
+                                      >
+                                        ✓
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => { setRateCalcPopup(null); setRateCalcInput(''); }}
+                                        className="h-7 px-2 rounded-md text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors shrink-0"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  )}
+                                  {/* Exchange rate description */}
+                                  <div className="pr-[70px]">
                                     <span className="text-xs text-muted-foreground whitespace-nowrap">
                                       1 {paymentCurrency?.code} = {allocation.exchangeRate > 0 ? formatNumber(allocation.exchangeRate) : '?'} {currency.code}
                                     </span>

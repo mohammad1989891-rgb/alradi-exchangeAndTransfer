@@ -1073,10 +1073,10 @@ export async function deleteAccount(id: string): Promise<void> {
 // Transaction Functions
 // ============================================
 
-export async function getTransactions(limit = 100): Promise<Transaction[]> {
+export async function getTransactions(): Promise<Transaction[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false }).limit(limit);
+  const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false });
   if (error) {
     console.error('[Supabase] ❌ getTransactions error:', error.message, error.code);
     throw new Error(error.message);
@@ -1322,10 +1322,10 @@ export async function deleteTransaction(id: string): Promise<void> {
 // Debt Functions
 // ============================================
 
-export async function getDebts(limit = 100): Promise<Debt[]> {
+export async function getDebts(): Promise<Debt[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('debts').select('*').order('date', { ascending: false }).limit(limit);
+  const { data, error } = await supabase.from('debts').select('*').order('date', { ascending: false });
   if (error) throw new Error(error.message);
   return (data || []).map(rowToDebt);
 }
@@ -2171,7 +2171,7 @@ function calculateUsdValue(
   }
 }
 
-export async function getCurrencyExchanges(limit = 100): Promise<CurrencyExchange[]> {
+export async function getCurrencyExchanges(): Promise<CurrencyExchange[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
   const { data, error } = await supabase.from('currency_exchanges').select('*');
@@ -2183,8 +2183,7 @@ export async function getCurrencyExchanges(limit = 100): Promise<CurrencyExchang
       const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
       if (dateDiff !== 0) return dateDiff;
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    })
-    .slice(0, limit);
+    });
 }
 
 export async function getCurrencyExchangeById(id: string): Promise<CurrencyExchange | undefined> {

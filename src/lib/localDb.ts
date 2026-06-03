@@ -691,9 +691,9 @@ export async function deleteAccount(id: string): Promise<void> {
 }
 
 // Transaction functions
-export async function getTransactions(limit = 100): Promise<Transaction[]> {
+export async function getTransactions(): Promise<Transaction[]> {
   await initializeDatabase();
-  return db.table<Transaction>('transactions').orderBy('date').reverse().limit(limit).toArray();
+  return db.table<Transaction>('transactions').orderBy('date').reverse().toArray();
 }
 
 export async function addTransaction(data: {
@@ -915,9 +915,9 @@ export async function deleteTransaction(id: string): Promise<void> {
 }
 
 // Debt functions
-export async function getDebts(limit = 100): Promise<Debt[]> {
+export async function getDebts(): Promise<Debt[]> {
   await initializeDatabase();
-  return db.table<Debt>('debts').orderBy('date').reverse().limit(limit).toArray();
+  return db.table<Debt>('debts').orderBy('date').reverse().toArray();
 }
 
 export async function addDebt(data: { 
@@ -1853,7 +1853,7 @@ function calculateUsdValue(
 /**
  * جلب جميع عمليات الصرف
  */
-export async function getCurrencyExchanges(limit = 100): Promise<CurrencyExchange[]> {
+export async function getCurrencyExchanges(): Promise<CurrencyExchange[]> {
   await initializeDatabase();
   const all = await db.table<CurrencyExchange>('currencyExchanges').toArray();
   return all
@@ -1863,8 +1863,7 @@ export async function getCurrencyExchanges(limit = 100): Promise<CurrencyExchang
       if (dateDiff !== 0) return dateDiff;
       // ترتيب ثانوي: الأحدث إنشاءً أولاً عند تساوي التاريخ
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-    })
-    .slice(0, limit);
+    });
 }
 
 /**

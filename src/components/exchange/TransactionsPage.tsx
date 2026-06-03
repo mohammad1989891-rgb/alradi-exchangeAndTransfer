@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, Search, ArrowLeftRight, Filter, Edit, Trash2, Calendar, X, Clock, CheckCircle2 } from 'lucide-react';
 import { TransactionCard } from './TransactionCard';
 import { TransactionModal } from './TransactionModal';
+import { MonthCard } from './MonthCard';
+import { groupByMonth } from '@/lib/monthlyGrouping';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -102,6 +104,11 @@ export function TransactionsPage() {
 
     return result;
   }, [transactions, searchQuery, filterType, filterPaymentType, fromDate, toDate]);
+
+  // Group filtered transactions by month
+  const monthlyGroups = useMemo(() => {
+    return groupByMonth(filteredTransactions);
+  }, [filteredTransactions]);
 
   const handleEdit = (transaction: Transaction) => {
     setSelectedTransaction(null);
@@ -243,7 +250,7 @@ export function TransactionsPage() {
         </div>
       </div>
       
-      {/* 🔸 الحركات غير المكتملة - تظهر مع باقي الحركات في نفس القائمة */}
+      {/* Monthly grouped transactions */}
       {filteredTransactions.length === 0 ? (
         <div className="text-center py-12 rounded-2xl bg-muted/30">
           <ArrowLeftRight className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
@@ -261,12 +268,19 @@ export function TransactionsPage() {
       ) : (
         <div className="space-y-3">
           <AnimatePresence mode="popLayout">
-            {filteredTransactions.map((transaction, index) => (
-              <TransactionCard
-                key={transaction.id}
-                transaction={transaction}
-                index={index}
-                onClick={() => setSelectedTransaction(transaction)}
+            {monthlyGroups.map((group) => (
+              <MonthCard
+                key={group.key}
+                group={group}
+                defaultExpanded={monthlyGroups.length === 1}
+                renderItem={(transaction, index) => (
+                  <TransactionCard
+                    key={transaction.id}
+                    transaction={transaction}
+                    index={index}
+                    onClick={() => setSelectedTransaction(transaction)}
+                  />
+                )}
               />
             ))}
           </AnimatePresence>

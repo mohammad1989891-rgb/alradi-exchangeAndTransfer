@@ -14,6 +14,7 @@ import {
   Calculator,
   DollarSign,
   X,
+  ChevronDown,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
@@ -26,6 +27,57 @@ import {
 } from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
+import { groupByMonthGeneric } from '@/lib/monthlyGrouping';
+
+// مكون مجموعة شهرية لعمليات الصرف (تجميع بسيط بدون حسابات مالية)
+function ExchangeMonthGroup({
+  label,
+  count,
+  defaultExpanded = false,
+  children,
+}: {
+  label: string;
+  count: number;
+  defaultExpanded?: boolean;
+  children: React.ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  return (
+    <div className="rounded-xl border bg-card overflow-hidden transition-all duration-200 border-l-[3px] border-l-blue-500 dark:border-l-blue-400">
+      <button
+        type="button"
+        onClick={() => setExpanded(prev => !prev)}
+        className="w-full text-right p-3 flex items-center justify-between transition-colors duration-150 hover:bg-muted/40 active:bg-muted/60"
+      >
+        <div className="flex items-center gap-2">
+          <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }} className="text-muted-foreground">
+            <ChevronDown className="w-4 h-4" />
+          </motion.span>
+          <span className="text-sm font-semibold text-foreground">{label}</span>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {count} عملية{count !== 1 ? '' : ''}
+        </span>
+      </button>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="px-2 pb-2 space-y-1.5">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
 
 export function CurrencyExchangePage() {
   const { openExchangeModal } = useAppStore();
@@ -57,7 +109,7 @@ export function CurrencyExchangePage() {
     setIsLoading(true);
     try {
       const [exchangeData, statsData] = await Promise.all([
-        getCurrencyExchanges(200),
+        getCurrencyExchanges(),
         getExchangeStats(),
       ]);
       setExchanges(exchangeData);
@@ -155,6 +207,22 @@ export function CurrencyExchangePage() {
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [filteredExchanges]);
+
+  // تجميع العمليات حسب الشهر
+  // CurrencyExchange.date هو Date، لكن groupByMonthGeneric يتطلب date: string
+  // لذلك نحوّل التاريخ إلى نص ISO قبل التجميع
+  const monthlyGroups = useMemo(() => {
+    const withStrDate = sortedExchanges.map(e => ({
+      ...e,
+      dateStr: typeof e.date === 'string' ? e.date : new Date(e.date).toISOString().split('T')[0],
+    }));
+    const groups = groupByMonthGeneric(withStrDate.map(e => ({ ...e, date: e.dateStr })));
+    // نعيد العناصر الأصلية (CurrencyExchange) داخل كل مجموعة
+    return groups.map(g => ({
+      ...g,
+      items: g.items.map(item => sortedExchanges.find(e => e.id === item.id)!),
+    }));
+  }, [sortedExchanges]);
 
   return (
     <div className="space-y-4">
@@ -265,7 +333,7 @@ export function CurrencyExchangePage() {
         )}
       </div>
 
-      {/* Exchange List */}
+      {/* Exchange List - Monthly Grouped */}
       {isLoading ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
@@ -324,13 +392,22 @@ export function CurrencyExchangePage() {
             </Button>
           </div>
           <AnimatePresence mode="popLayout">
-            {sortedExchanges.map((exchange) => (
-              <CurrencyExchangeCard
-                key={exchange.id}
-                exchange={exchange}
-                currencies={currencies}
-                onDelete={handleDeleteExchange}
-              />
+            {monthlyGroups.map((group, index) => (
+              <ExchangeMonthGroup
+                key={group.key}
+                label={group.label}
+                count={group.items.length}
+                defaultExpanded={index === 0}
+              >
+                {group.items.map((exchange) => (
+                  <CurrencyExchangeCard
+                    key={exchange.id}
+                    exchange={exchange}
+                    currencies={currencies}
+                    onDelete={handleDeleteExchange}
+                  />
+                ))}
+              </ExchangeMonthGroup>
             ))}
           </AnimatePresence>
         </div>

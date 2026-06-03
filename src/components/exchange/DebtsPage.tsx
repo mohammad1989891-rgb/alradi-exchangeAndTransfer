@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, AlertCircle, CreditCard, Trash2, ArrowUpRight, ArrowDownRight, Banknote, Clock, ChevronLeft, AlertTriangle, CheckCircle, List, X } from 'lucide-react';
+import { Plus, Search, AlertCircle, CreditCard, Trash2, ArrowUpRight, ArrowDownRight, Banknote, Clock, ChevronLeft, AlertTriangle, CheckCircle, List, X, ChevronDown } from 'lucide-react';
 import { DebtModal } from './DebtModal';
 import { MultiCurrencyPaymentModal } from './MultiCurrencyPaymentModal';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import type { Debt, DebtPayment } from '@/lib/supabaseDb';
 import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary } from '@/lib/supabaseDb';
+import { groupByMonthGeneric } from '@/lib/monthlyGrouping';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
 interface UnifiedMovement {
@@ -61,6 +62,62 @@ interface CumulativeAccountSummary extends AccountDebtSummary {
   netCashBalance: number;              // صافي النقدية = (لنا - علينا) - مدفوع
   // معلومات إضافية لمعالجة الدفعات الزائدة
   primaryDebtMode: 'CASH' | 'DEFERRED';  // نوع الدين الأساسي
+}
+
+// واجهة مساعدة للتجميع الشهري للحركات
+interface MovementForGrouping {
+  date: string;
+  movement: UnifiedMovement;
+}
+
+// مكون مجموعة شهرية للديون (تجميع بسيط بدون حسابات مالية)
+function DebtMonthGroup({
+  label,
+  count,
+  defaultExpanded = false,
+  children,
+}: {
+  label: string;
+  count: number;
+  defaultExpanded?: boolean;
+  children: React.ReactNode;
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
+  return (
+    <div className="rounded-xl border bg-card overflow-hidden transition-all duration-200 border-l-[3px] border-l-amber-500 dark:border-l-amber-400">
+      <button
+        type="button"
+        onClick={() => setExpanded(prev => !prev)}
+        className="w-full text-right p-3 flex items-center justify-between transition-colors duration-150 hover:bg-muted/40 active:bg-muted/60"
+      >
+        <div className="flex items-center gap-2">
+          <motion.span animate={{ rotate: expanded ? 180 : 0 }} transition={{ duration: 0.2 }} className="text-muted-foreground">
+            <ChevronDown className="w-4 h-4" />
+          </motion.span>
+          <span className="text-sm font-semibold text-foreground">{label}</span>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {count} حركة{count !== 1 ? 'ات' : ''}
+        </span>
+      </button>
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="px-2 pb-2 space-y-1.5">
+              {children}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
 }
 
 export function DebtsPage() {
@@ -1103,129 +1160,155 @@ export function DebtsPage() {
             </DialogTitle>
           </DialogHeader>
           
-          {selectedAccountSummary && (
-            <div className="space-y-2 mt-4">
-              {getUnifiedMovements(selectedAccountSummary, fromDate, toDate).length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  لا توجد حركات
+          {selectedAccountSummary && (() => {
+            const movements = getUnifiedMovements(selectedAccountSummary, fromDate, toDate);
+            
+            if (movements.length === 0) {
+              return (
+                <div className="space-y-2 mt-4">
+                  <div className="text-center py-8 text-muted-foreground">
+                    لا توجد حركات
+                  </div>
                 </div>
-              ) : (
-                getUnifiedMovements(selectedAccountSummary, fromDate, toDate).map(movement => {
-                  const isReceivable = movement.direction === 'RECEIVABLE';
-                  const isCash = movement.mode === 'CASH';
-                  const isOverflow = movement.type === 'PAYMENT' && movement.overflowTransactionId;
+              );
+            }
 
-                  return (
-                    <div
-                      key={`${movement.type}-${movement.id}`}
-                      className={cn(
-                        'p-3 rounded-xl border',
-                        isOverflow
-                          ? 'bg-gray-50/50 dark:bg-gray-950/20 border-gray-200/50' // لون محايد للفائض
-                          : movement.type === 'PAYMENT'
-                            ? 'bg-teal-50/50 dark:bg-teal-950/20 border-teal-200/50'
-                            : isReceivable
-                              ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50'
-                              : 'bg-red-50/50 dark:bg-red-950/20 border-red-200/50'
-                      )}
-                    >
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex items-center gap-2">
-                          <span className={cn(
-                            'p-1 rounded-full',
+            // تحويل الحركات إلى عناصر بتاريخ نصي للتجميع الشهري
+            const itemsForGrouping: MovementForGrouping[] = movements.map(m => ({
+              date: m.date instanceof Date
+                ? `${m.date.getFullYear()}-${String(m.date.getMonth() + 1).padStart(2, '0')}-${String(m.date.getDate()).padStart(2, '0')}`
+                : String(m.date),
+              movement: m,
+            }));
+            const groups = groupByMonthGeneric(itemsForGrouping);
+
+            return (
+              <div className="space-y-3 mt-4">
+                {groups.map((group, groupIndex) => (
+                  <DebtMonthGroup
+                    key={group.key}
+                    label={group.label}
+                    count={group.items.length}
+                    defaultExpanded={groupIndex === 0}
+                  >
+                    {group.items.map(({ movement }) => {
+                      const isReceivable = movement.direction === 'RECEIVABLE';
+                      const isCash = movement.mode === 'CASH';
+                      const isOverflow = movement.type === 'PAYMENT' && movement.overflowTransactionId;
+
+                      return (
+                        <div
+                          key={`${movement.type}-${movement.id}`}
+                          className={cn(
+                            'p-3 rounded-xl border',
                             isOverflow
-                              ? 'bg-gray-100 text-gray-600'
+                              ? 'bg-gray-50/50 dark:bg-gray-950/20 border-gray-200/50' // لون محايد للفائض
                               : movement.type === 'PAYMENT'
-                                ? 'bg-teal-100 text-teal-600'
-                                : isReceivable 
-                                  ? 'bg-emerald-100 text-emerald-600' 
-                                  : 'bg-red-100 text-red-600'
-                          )}>
-                            {movement.type === 'PAYMENT' ? (
-                              <CheckCircle className="w-4 h-4" />
-                            ) : isReceivable ? (
-                              <ArrowUpRight className="w-4 h-4" />
-                            ) : (
-                              <ArrowDownRight className="w-4 h-4" />
-                            )}
-                          </span>
-                          <div>
-                            <p className="text-xs text-muted-foreground">{formatDate(movement.date)}</p>
-                            <div className="flex gap-1 flex-wrap">
+                                ? 'bg-teal-50/50 dark:bg-teal-950/20 border-teal-200/50'
+                                : isReceivable
+                                  ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50'
+                                  : 'bg-red-50/50 dark:bg-red-950/20 border-red-200/50'
+                          )}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex items-center gap-2">
                               <span className={cn(
-                                'text-[10px] px-1.5 py-0.5 rounded',
-                                movement.type === 'PAYMENT'
-                                  ? 'bg-teal-100 text-teal-700'
-                                  : isReceivable 
-                                    ? 'bg-emerald-100 text-emerald-700'
-                                    : 'bg-red-100 text-red-700'
+                                'p-1 rounded-full',
+                                isOverflow
+                                  ? 'bg-gray-100 text-gray-600'
+                                  : movement.type === 'PAYMENT'
+                                    ? 'bg-teal-100 text-teal-600'
+                                    : isReceivable 
+                                      ? 'bg-emerald-100 text-emerald-600' 
+                                      : 'bg-red-100 text-red-600'
                               )}>
-                                {movement.type === 'PAYMENT' ? 'دفعة' : isReceivable ? 'لنا' : 'علينا'}
+                                {movement.type === 'PAYMENT' ? (
+                                  <CheckCircle className="w-4 h-4" />
+                                ) : isReceivable ? (
+                                  <ArrowUpRight className="w-4 h-4" />
+                                ) : (
+                                  <ArrowDownRight className="w-4 h-4" />
+                                )}
                               </span>
-                              <span className={cn(
-                                'text-[10px] px-1.5 py-0.5 rounded',
-                                isCash 
-                                  ? 'bg-blue-100 text-blue-700'
-                                  : 'bg-purple-100 text-purple-700'
+                              <div>
+                                <p className="text-xs text-muted-foreground">{formatDate(movement.date)}</p>
+                                <div className="flex gap-1 flex-wrap">
+                                  <span className={cn(
+                                    'text-[10px] px-1.5 py-0.5 rounded',
+                                    movement.type === 'PAYMENT'
+                                      ? 'bg-teal-100 text-teal-700'
+                                      : isReceivable 
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-red-100 text-red-700'
+                                  )}>
+                                    {movement.type === 'PAYMENT' ? 'دفعة' : isReceivable ? 'لنا' : 'علينا'}
+                                  </span>
+                                  <span className={cn(
+                                    'text-[10px] px-1.5 py-0.5 rounded',
+                                    isCash 
+                                      ? 'bg-blue-100 text-blue-700'
+                                      : 'bg-purple-100 text-purple-700'
+                                  )}>
+                                    {isCash ? 'نقدي' : 'آجل'}
+                                  </span>
+                                  {isOverflow && (
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
+                                      مع فائض
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-left">
+                              <p className={cn(
+                                'font-bold text-sm',
+                                isOverflow
+                                  ? 'text-gray-600'
+                                  : movement.type === 'PAYMENT'
+                                    ? 'text-teal-600'
+                                    : isReceivable 
+                                      ? 'text-emerald-600' 
+                                      : 'text-red-600'
                               )}>
-                                {isCash ? 'نقدي' : 'آجل'}
-                              </span>
-                              {isOverflow && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">
-                                  مع فائض
-                                </span>
+                                {formatNumber(movement.amount)} $
+                              </p>
+                              {movement.type === 'DEBT' && movement.remaining !== undefined && (
+                                <p className="text-xs text-muted-foreground">
+                                  متبقي: {formatNumber(movement.remaining)} $
+                                </p>
                               )}
                             </div>
                           </div>
-                        </div>
-                        <div className="text-left">
-                          <p className={cn(
-                            'font-bold text-sm',
-                            isOverflow
-                              ? 'text-gray-600'
-                              : movement.type === 'PAYMENT'
-                                ? 'text-teal-600'
-                                : isReceivable 
-                                  ? 'text-emerald-600' 
-                                  : 'text-red-600'
-                          )}>
-                            {formatNumber(movement.amount)} $
-                          </p>
-                          {movement.type === 'DEBT' && movement.remaining !== undefined && (
-                            <p className="text-xs text-muted-foreground">
-                              متبقي: {formatNumber(movement.remaining)} $
-                            </p>
+                          
+                          {movement.description && (
+                            <p className="text-xs text-muted-foreground mb-2">{movement.description}</p>
                           )}
-                        </div>
-                      </div>
-                      
-                      {movement.description && (
-                        <p className="text-xs text-muted-foreground mb-2">{movement.description}</p>
-                      )}
 
-                      <div className="flex gap-2 mt-2">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => {
-                            if (movement.type === 'DEBT') {
-                              handleDeleteDebtClick(movement.originalData as Debt);
-                            } else {
-                              handleDeletePaymentClick(movement.originalData as DebtPayment);
-                            }
-                          }}
-                          className="text-xs h-7"
-                        >
-                          <Trash2 className="w-3 h-3 ml-1" />
-                          حذف
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          )}
+                          <div className="flex gap-2 mt-2">
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => {
+                                if (movement.type === 'DEBT') {
+                                  handleDeleteDebtClick(movement.originalData as Debt);
+                                } else {
+                                  handleDeletePaymentClick(movement.originalData as DebtPayment);
+                                }
+                              }}
+                              className="text-xs h-7"
+                            >
+                              <Trash2 className="w-3 h-3 ml-1" />
+                              حذف
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </DebtMonthGroup>
+                ))}
+              </div>
+            );
+          })()}
         </DialogContent>
       </Dialog>
 

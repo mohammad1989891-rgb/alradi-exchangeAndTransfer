@@ -25,6 +25,8 @@ import {
   User,
   Eye,
   EyeOff,
+  Archive,
+  Loader2,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,7 +65,7 @@ import type { Currency as CurrencyType } from '@/types';
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { currencies, setCurrencies, vaults, accounts, transactions, debts } = useAppStore();
-  const { refreshData: refreshLocalData } = useSupabaseData();
+  const { refreshData: refreshLocalData, autoArchiveOldRecords } = useSupabaseData();
   const { toast } = useToast();
   
   const [expandedSection, setExpandedSection] = useState<string | null>('appearance');
@@ -90,6 +92,12 @@ export function SettingsPage() {
   const [currentUsername, setCurrentUsername] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [isChangingUsername, setIsChangingUsername] = useState(false);
+
+  // Archive
+  const [archiveMonths, setArchiveMonths] = useState(6);
+  const [isArchiving, setIsArchiving] = useState(false);
+  const [isSettingUp, setIsSettingUp] = useState(false);
+  const [archiveSetupResult, setArchiveSetupResult] = useState<{ success: boolean; message: string } | null>(null);
 
   // Load current username on mount
   useEffect(() => {
@@ -392,6 +400,53 @@ export function SettingsPage() {
       });
     } finally {
       setIsChangingUsername(false);
+    }
+  };
+
+  // Auto Archive
+  const handleAutoArchive = async () => {
+    setIsArchiving(true);
+    try {
+      const result = await autoArchiveOldRecords(archiveMonths);
+      await refreshLocalData();
+      const total = result.archived.transactions + result.archived.debts + result.archived.debtPayments + result.archived.currencyExchanges;
+      toast({
+        title: total > 0 ? 'تمت الأرشفة' : 'لا توجد حركات للأرشفة',
+        description: total > 0
+          ? `تم أرشفة ${result.archived.transactions} حركة، ${result.archived.debts} دين، ${result.archived.debtPayments} دفعة، ${result.archived.currencyExchanges} عملية صرافة`
+          : 'جميع الحركات حديثة',
+      });
+    } catch (error) {
+      console.error('Error auto-archiving:', error);
+      toast({
+        title: 'خطأ',
+        description: 'حدث خطأ أثناء الأرشفة',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsArchiving(false);
+    }
+  };
+
+  // Setup Archive Database
+  const handleSetupArchive = async () => {
+    setIsSettingUp(true);
+    setArchiveSetupResult(null);
+    try {
+      const response = await fetch('/api/archive/setup?XTransformPort=3000', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓' });
+      } else {
+        setArchiveSetupResult({
+          success: false,
+          message: data.note || data.error || 'يجب تشغيل SQL يدوياً في Supabase SQL Editor',
+        });
+      }
+    } catch (error) {
+      setArchiveSetupResult({ success: false, message: 'خطأ في الاتصال بالخادم' });
+    } finally {
+      setIsSettingUp(false);
     }
   };
 
@@ -745,6 +800,79 @@ export function SettingsPage() {
               <p className="text-2xl font-bold text-primary">{stats.debts}</p>
               <p className="text-xs text-muted-foreground">دين</p>
             </div>
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'archive',
+      title: 'الأرشفة والأداء',
+      icon: Archive,
+      content: (
+        <div className="space-y-4">
+          {/* Auto Archive */}
+          <div className="p-4 rounded-xl bg-muted/50">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                <Archive className="w-5 h-5 text-amber-500" />
+              </div>
+              <div>
+                <p className="font-medium">أرشفة تلقائية</p>
+                <p className="text-xs text-muted-foreground">نقل الحركات القديمة إلى الأرشيف لتحسين الأداء</p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex gap-2">
+                <Select value={String(archiveMonths)} onValueChange={(v) => setArchiveMonths(Number(v))}>
+                  <SelectTrigger className="flex-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="3">3 أشهر</SelectItem>
+                    <SelectItem value="6">6 أشهر</SelectItem>
+                    <SelectItem value="12">سنة</SelectItem>
+                    <SelectItem value="24">سنتين</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={handleAutoArchive}
+                  disabled={isArchiving}
+                  className="bg-amber-500 hover:bg-amber-600"
+                >
+                  {isArchiving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'أرشفة'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                سيتم أرشفة الحركات الأقدم من {archiveMonths} شهر (الديون المؤرشفة يجب أن تكون مدفوعة)
+              </p>
+            </div>
+          </div>
+
+          {/* Setup Database */}
+          <div className="p-4 rounded-xl bg-muted/50">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                <Database className="w-5 h-5 text-blue-500" />
+              </div>
+              <div>
+                <p className="font-medium">إعداد قاعدة البيانات</p>
+                <p className="text-xs text-muted-foreground">إضافة عمود الأرشفة والفهارس لتحسين الأداء</p>
+              </div>
+            </div>
+            <Button
+              onClick={handleSetupArchive}
+              disabled={isSettingUp}
+              variant="outline"
+              className="w-full"
+            >
+              {isSettingUp ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+              {isSettingUp ? 'جاري الإعداد...' : 'إعداد نظام الأرشفة'}
+            </Button>
+            {archiveSetupResult && (
+              <p className={cn('text-xs mt-2', archiveSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
+                {archiveSetupResult.message}
+              </p>
+            )}
           </div>
         </div>
       ),

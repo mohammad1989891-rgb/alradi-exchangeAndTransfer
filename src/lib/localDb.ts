@@ -58,6 +58,7 @@ export interface Transaction {
   relatedPaymentId?: string | null;
   // حالة الاكتمال: true = مكتملة (تؤثر على الصندوق), false = غير مكتملة (لا تؤثر)
   isComplete: boolean;
+  isArchived?: boolean;
   createdAt: Date;
   updatedAt: Date;
   // خصائص إضافية للتوافق مع المكونات
@@ -79,6 +80,7 @@ export interface Debt {
   debtMode: 'CASH' | 'DEFERRED';       // CASH = نقدي (يؤثر على الصندوق), DEFERRED = آجل (لا يؤثر على الصندوق)
   isPaid: boolean;
   paidAt?: Date | null;
+  isArchived?: boolean;
   date: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -100,6 +102,7 @@ export interface DebtPayment {
   paymentDirection?: 'RECEIVABLE' | 'PAYABLE';
   // ربط الدفعة بحركة الفائض إن وجدت
   overflowTransactionId?: string | null;
+  isArchived?: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -146,6 +149,7 @@ export interface CurrencyExchange {
   
   // علامة الحذف الناعم
   isDeleted?: boolean;             // للحذف الناعم بدلاً من الحذف الفعلي
+  isArchived?: boolean;            // للأرشفة
 }
 
 // Database setup

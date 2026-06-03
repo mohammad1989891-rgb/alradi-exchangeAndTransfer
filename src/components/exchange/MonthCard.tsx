@@ -1,59 +1,67 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatNumber } from '@/lib/format';
-import type { MonthGroup } from '@/lib/monthlyGrouping';
 
-interface MonthCardProps<T> {
-  group: MonthGroup<T>;
-  renderItem: (item: T, index: number) => React.ReactNode;
-  defaultExpanded?: boolean;
+interface SimpleMonthGroup {
+  key: string;
+  label: string;
+  items: unknown[];
 }
 
-export function MonthCard<T>({ group, renderItem, defaultExpanded = false }: MonthCardProps<T>) {
-  const [expanded, setExpanded] = useState(defaultExpanded);
+interface MonthCardProps<T> {
+  group: SimpleMonthGroup & { items: T[] };
+  renderItem: (item: T, index: number) => React.ReactNode;
+  defaultExpanded?: boolean;
+  /** Maximum items to show initially when expanded; 0 = show all */
+  maxVisibleItems?: number;
+}
 
-  const { label, items, totalIncome, totalExpense, netBalance } = group;
+const INITIAL_VISIBLE = 50;
+const LOAD_MORE_COUNT = 50;
+
+export function MonthCard<T>({ group, renderItem, defaultExpanded = false, maxVisibleItems = INITIAL_VISIBLE }: MonthCardProps<T>) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const [visibleCount, setVisibleCount] = useState(maxVisibleItems);
+
+  const { label, items } = group;
   const count = items.length;
 
-  const borderColor =
-    netBalance > 0
-      ? 'border-l-emerald-500 dark:border-l-emerald-400'
-      : netBalance < 0
-        ? 'border-l-red-500 dark:border-l-red-400'
-        : 'border-l-gray-400 dark:border-l-gray-500';
+  // When expanding, reset visible count
+  const handleToggle = () => {
+    const willExpand = !expanded;
+    if (willExpand) {
+      setVisibleCount(maxVisibleItems || count);
+    }
+    setExpanded(willExpand);
+  };
 
-  const netColor =
-    netBalance > 0
-      ? 'text-emerald-600 dark:text-emerald-400'
-      : netBalance < 0
-        ? 'text-red-600 dark:text-red-400'
-        : 'text-muted-foreground';
+  const visibleItems = useMemo(() => {
+    if (maxVisibleItems === 0) return items; // 0 means show all
+    return items.slice(0, visibleCount);
+  }, [items, visibleCount, maxVisibleItems]);
 
-  const NetIcon = netBalance > 0 ? TrendingUp : netBalance < 0 ? TrendingDown : Minus;
+  const hasMore = maxVisibleItems > 0 && visibleCount < count;
 
   return (
     <div
       className={cn(
         'rounded-xl border bg-card overflow-hidden transition-all duration-200',
-        'border-l-[3px]',
-        borderColor
+        'border-l-[3px] border-l-muted-foreground/30'
       )}
     >
       {/* Header — clickable */}
       <button
         type="button"
-        onClick={() => setExpanded((prev) => !prev)}
+        onClick={handleToggle}
         className={cn(
-          'w-full text-right p-3 flex flex-col gap-1.5 transition-colors duration-150',
+          'w-full text-right p-3 flex items-center justify-between transition-colors duration-150',
           'hover:bg-muted/40 active:bg-muted/60'
         )}
       >
-        {/* Top row: label + chevron */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
           <motion.span
             animate={{ rotate: expanded ? 180 : 0 }}
             transition={{ duration: 0.2 }}
@@ -61,38 +69,12 @@ export function MonthCard<T>({ group, renderItem, defaultExpanded = false }: Mon
           >
             <ChevronDown className="w-4 h-4" />
           </motion.span>
-
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold text-foreground">{label}</span>
-          </div>
+          <span className="text-sm font-semibold text-foreground">{label}</span>
         </div>
 
-        {/* Bottom row: stats */}
-        <div className="flex items-center justify-between text-xs">
-          {/* Item count */}
-          <span className="text-muted-foreground">
-            {count} {count === 1 ? 'حركة' : count === 2 ? 'حركتين' : count <= 10 ? 'حركات' : 'حركة'}
-          </span>
-
-          {/* Financial summary */}
-          <div className="flex items-center gap-3">
-            {/* Net balance */}
-            <span className={cn('flex items-center gap-0.5 font-medium', netColor)}>
-              <NetIcon className="w-3 h-3" />
-              الصافي {formatNumber(netBalance)}
-            </span>
-
-            {/* Expense */}
-            <span className="text-red-600 dark:text-red-400">
-              علينا {formatNumber(totalExpense)}
-            </span>
-
-            {/* Income */}
-            <span className="text-emerald-600 dark:text-emerald-400">
-              لنا {formatNumber(totalIncome)}
-            </span>
-          </div>
-        </div>
+        <span className="text-xs text-muted-foreground">
+          {count} {count === 1 ? 'حركة' : count === 2 ? 'حركتين' : count <= 10 ? 'حركات' : 'حركة'}
+        </span>
       </button>
 
       {/* Collapsible items */}
@@ -106,7 +88,19 @@ export function MonthCard<T>({ group, renderItem, defaultExpanded = false }: Mon
             className="overflow-hidden"
           >
             <div className="px-2 pb-2 space-y-1.5">
-              {items.map((item, index) => renderItem(item, index))}
+              {visibleItems.map((item, index) => renderItem(item, index))}
+              {hasMore && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setVisibleCount(prev => Math.min(prev + LOAD_MORE_COUNT, count));
+                  }}
+                  className="w-full py-2 text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  عرض المزيد ({count - visibleCount} متبقي)
+                </button>
+              )}
             </div>
           </motion.div>
         )}

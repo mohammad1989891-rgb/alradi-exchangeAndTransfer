@@ -23,7 +23,7 @@ import { SplashScreen } from '@/components/exchange/SplashScreen';
 import { LoginPage } from '@/components/exchange/LoginPage';
 import { SupabaseSetup } from '@/components/exchange/SupabaseSetup';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, Search, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw } from 'lucide-react';
+import { Menu, Search, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -146,18 +146,20 @@ export default function Home() {
       c: localData.currencies.length,
       v: localData.vaults.length,
       a: localData.accounts.length,
-      t: localData.transactions.length,
-      d: localData.debts.length,
-      e: localData.currencyExchanges.length,
+      t: localData.displayTransactions.length,
+      d: localData.displayDebts.length,
+      e: localData.displayCurrencyExchanges.length,
+      sa: localData.showArchived,
     });
   }, [
     localData.isInitialized,
     localData.currencies.length,
     localData.vaults.length,
     localData.accounts.length,
-    localData.transactions.length,
-    localData.debts.length,
-    localData.currencyExchanges.length,
+    localData.displayTransactions.length,
+    localData.displayDebts.length,
+    localData.displayCurrencyExchanges.length,
+    localData.showArchived,
   ]);
 
   useEffect(() => {
@@ -166,20 +168,21 @@ export default function Home() {
       setCurrencies(localData.currencies);
       setVaults(localData.vaults);
       setAccounts(localData.accounts);
-      const enrichedTransactions = localData.transactions.map(t => ({
+      // Use display data (filtered by archive status) for UI
+      const enrichedTransactions = localData.displayTransactions.map(t => ({
         ...t,
         account: localData.accounts.find(a => a.id === t.accountId),
         currency: localData.currencies.find(c => c.id === t.currencyId),
         baseCurrency: localData.currencies.find(c => c.id === t.baseCurrencyId),
       }));
       setTransactions(enrichedTransactions);
-      const enrichedDebts = localData.debts.map(d => ({
+      const enrichedDebts = localData.displayDebts.map(d => ({
         ...d,
         account: localData.accounts.find(a => a.id === d.accountId),
         currency: localData.currencies.find(c => c.id === d.currencyId),
       }));
       setDebts(enrichedDebts);
-      setCurrencyExchanges(localData.currencyExchanges);
+      setCurrencyExchanges(localData.displayCurrencyExchanges);
       setIsLoading(false);
       setIsInitialized(true);
     }
@@ -189,9 +192,9 @@ export default function Home() {
     localData.currencies,
     localData.vaults,
     localData.accounts,
-    localData.transactions,
-    localData.debts,
-    localData.currencyExchanges,
+    localData.displayTransactions,
+    localData.displayDebts,
+    localData.displayCurrencyExchanges,
     setCurrencies,
     setVaults,
     setAccounts,
@@ -461,6 +464,16 @@ export default function Home() {
             {/* Supabase Connection Status Indicator + Sync Button */}
             {localData.isInitialized && !localData.isLoading && (
               <div className="flex items-center gap-1">
+                {/* Archive Toggle */}
+                <Button
+                  variant={localData.showArchived ? 'default' : 'ghost'}
+                  size="icon"
+                  className="rounded-full h-8 w-8"
+                  onClick={() => localData.setShowArchived(!localData.showArchived)}
+                  title={localData.showArchived ? 'إخفاء الأرشيف' : 'عرض الأرشيف'}
+                >
+                  <Archive className="w-4 h-4" />
+                </Button>
                 <Button
                   variant="ghost"
                   size="icon"

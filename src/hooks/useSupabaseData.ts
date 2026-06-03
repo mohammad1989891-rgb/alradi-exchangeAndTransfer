@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import {
   initializeDatabase,
@@ -152,6 +152,7 @@ export function useSupabaseData() {
   const [isInitialized, setIsInitialized] = useState(false);
   const [initError, setInitError] = useState<string | null>(null);
   const [tablesMissing, setTablesMissing] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   // ---- Refs ----
   const isRefreshingRef = useRef(false);
@@ -193,12 +194,12 @@ export function useSupabaseData() {
         getActiveCurrencies(),
         getVaults(),
         getAccounts(),
-        getTransactions(),
-        getDebts(),
-        getDebtPayments(),
+        getTransactions({ includeArchived: true }), // Always load ALL data for calculations
+        getDebts({ includeArchived: true }), // Always load ALL data for calculations
+        getDebtPayments(undefined, { includeArchived: true }), // Always load ALL data
         getTotalBalanceInUSD(),
         getTotalDebtRemaining(),
-        getCurrencyExchanges(),
+        getCurrencyExchanges({ includeArchived: true }), // Always load ALL data
       ]);
 
       if (!mountedRef.current) return;
@@ -266,7 +267,7 @@ export function useSupabaseData() {
 
   const refreshTransactions = useCallback(async () => {
     try {
-      const txData = await getTransactions();
+      const txData = await getTransactions({ includeArchived: true });
       if (!mountedRef.current) return;
       setTransactions(txData);
     } catch (error) {
@@ -277,8 +278,8 @@ export function useSupabaseData() {
   const refreshDebts = useCallback(async () => {
     try {
       const [debtData, debtPaymentsData, debtRemainingData] = await Promise.all([
-        getDebts(),
-        getDebtPayments(),
+        getDebts({ includeArchived: true }),
+        getDebtPayments(undefined, { includeArchived: true }),
         getTotalDebtRemaining(),
       ]);
       if (!mountedRef.current) return;
@@ -293,7 +294,7 @@ export function useSupabaseData() {
   const refreshDebtPayments = useCallback(async () => {
     try {
       const [debtPaymentsData, debtRemainingData] = await Promise.all([
-        getDebtPayments(),
+        getDebtPayments(undefined, { includeArchived: true }),
         getTotalDebtRemaining(),
       ]);
       if (!mountedRef.current) return;
@@ -306,7 +307,7 @@ export function useSupabaseData() {
 
   const refreshCurrencyExchanges = useCallback(async () => {
     try {
-      const exchangeData = await getCurrencyExchanges();
+      const exchangeData = await getCurrencyExchanges({ includeArchived: true });
       if (!mountedRef.current) return;
       setCurrencyExchanges(exchangeData);
     } catch (error) {
@@ -634,8 +635,9 @@ export function useSupabaseData() {
   // ============================================
   // Calculate total balance dynamically from vaults + currencies
   // (same logic as useLocalData)
+  // Uses useMemo for performance — only recalculates when dependencies change
   // ============================================
-  const calculateTotalBalanceFromVaults = useCallback(() => {
+  const actualTotalBalance = useMemo(() => {
     let total = 0;
     for (const vault of vaults) {
       const currency = currencies.find(c => c.id === vault.currencyId);
@@ -650,7 +652,29 @@ export function useSupabaseData() {
     return total;
   }, [vaults, currencies]);
 
-  const actualTotalBalance = calculateTotalBalanceFromVaults();
+  // ============================================
+  // Display-filtered data (based on showArchived)
+  // Calculations always use ALL data
+  // ============================================
+  const displayTransactions = useMemo(() => {
+    if (showArchived) return transactions;
+    return transactions.filter(t => !t.isArchived);
+  }, [transactions, showArchived]);
+
+  const displayDebts = useMemo(() => {
+    if (showArchived) return debts;
+    return debts.filter(d => !d.isArchived);
+  }, [debts, showArchived]);
+
+  const displayDebtPayments = useMemo(() => {
+    if (showArchived) return debtPayments;
+    return debtPayments.filter(p => !p.isArchived);
+  }, [debtPayments, showArchived]);
+
+  const displayCurrencyExchanges = useMemo(() => {
+    if (showArchived) return currencyExchanges;
+    return currencyExchanges.filter(e => !e.isArchived);
+  }, [currencyExchanges, showArchived]);
 
   // ============================================
   // Manual retry function
@@ -761,6 +785,16 @@ export function useSupabaseData() {
     initError,
     tablesMissing,
     realtimeConnected: realtimeConnectedRef.current,
+
+    // Display data (filtered by archive status)
+    displayTransactions,
+    displayDebts,
+    displayDebtPayments,
+    displayCurrencyExchanges,
+
+    // Archive controls
+    showArchived,
+    setShowArchived,
 
     // Actions
     refreshData,
@@ -959,6 +993,28 @@ export function useSupabaseData() {
         console.error('Error deleting exchange:', error);
         throw error;
       }
+    },
+
+    // Archive actions
+    archiveRecords: async (table: 'transactions' | 'debts' | 'debt_payments' | 'currency_exchanges', ids: string[]) => {
+      const { archiveRecords } = await import('@/lib/supabaseDb');
+      await archiveRecords(table, ids);
+      await refreshData(false, true);
+    },
+    unarchiveRecords: async (table: 'transactions' | 'debts' | 'debt_payments' | 'currency_exchanges', ids: string[]) => {
+      const { unarchiveRecords } = await import('@/lib/supabaseDb');
+      await unarchiveRecords(table, ids);
+      await refreshData(false, true);
+    },
+    autoArchiveOldRecords: async (monthsThreshold: number = 6) => {
+      const { autoArchiveOldRecords } = await import('@/lib/supabaseDb');
+      const result = await autoArchiveOldRecords(monthsThreshold);
+      await refreshData(false, true);
+      return result;
+    },
+    getArchivedCounts: async () => {
+      const { getArchivedCounts } = await import('@/lib/supabaseDb');
+      return await getArchivedCounts();
     },
   };
 }

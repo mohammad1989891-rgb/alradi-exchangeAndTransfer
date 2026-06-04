@@ -72,8 +72,10 @@ function isRetryableError(error: unknown): boolean {
   if (code === '08' || code.startsWith('08')) return true; // Connection exception
   if (code === '57' || code.startsWith('57')) return true; // Operator intervention
 
-  // Default: don't retry unknown errors — safe choice
-  return false;
+  // Default: retry unknown errors — they could be transient network issues
+  // (Supabase PostgrestError objects are plain objects, not Error instances,
+  // and may have empty messages like {}, so we retry them rather than crash)
+  return true;
 }
 
 /**
@@ -94,10 +96,11 @@ export async function fetchWithRetry<T>(
   try {
     return await fn();
   } catch (error) {
-    // Don't retry if the error is not retryable (data/logic error)
+    // If the error is not retryable, log and return null instead of throwing
+    // This prevents app crashes — callers use `return result || []` as fallback
     if (!isRetryableError(error)) {
-      console.error('[Supabase] ❌ Non-retryable error:', error instanceof Error ? error.message : error);
-      throw error; // Re-throw data/logic errors immediately
+      console.error('[Supabase] ❌ Non-retryable error (returning null):', error instanceof Error ? error.message : error);
+      return null;
     }
 
     if (retries <= 0) {

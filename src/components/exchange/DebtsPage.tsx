@@ -247,8 +247,15 @@ export function DebtsPage() {
       });
     });
     
-    // ترتيب حسب التاريخ (الأحدث أولاً)
-    return movements.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // ترتيب حسب التاريخ (الأحدث أولاً)، ثم بوقت الإنشاء كعامل ثانوي
+    return movements.sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      // ترتيب ثانوي: الأحدث إنشاءً أولاً عند تساوي التاريخ
+      const aCreated = new Date(a.originalData.createdAt).getTime();
+      const bCreated = new Date(b.originalData.createdAt).getTime();
+      return bCreated - aCreated;
+    });
   }, [debtPayments]);
 
   // حساب الملخص التراكمي للحساب

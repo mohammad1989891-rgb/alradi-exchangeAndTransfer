@@ -100,8 +100,13 @@ export function TransactionsPage() {
       return matchesSearch && matchesType && matchesPaymentType && matchesDate;
     });
 
-    // ترتيب من الأحدث إلى الأقدم
-    result.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // ترتيب من الأحدث إلى الأقدم: أولاً بالتاريخ، ثم بوقت الإنشاء كعامل ثانوي
+    result.sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff !== 0) return dateDiff;
+      // ترتيب ثانوي: الأحدث إنشاءً أولاً عند تساوي التاريخ
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
 
     return result;
   }, [transactions, searchQuery, filterType, filterPaymentType, fromDate, toDate]);

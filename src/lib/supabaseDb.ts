@@ -1246,12 +1246,14 @@ export async function addTransaction(data: {
   isOverflowTransaction?: boolean;
   relatedPaymentId?: string | null;
   isComplete?: boolean;
+  finalBalance?: number;  // 🔸 تجاوز الرصيد النهائي المحسوب
 }): Promise<Transaction> {
   await initializeDatabase();
   const now = new Date();
   
   const effectiveFactor = data.conversionFactor ?? 1;
-  const finalBalance = calculateFinalBalance(
+  // 🔸 إذا تم تمرير finalBalance يدويًا، نستخدمه مباشرة (للحركات غير المكتملة)
+  const calculatedFinal = calculateFinalBalance(
     data.amount || 0,
     effectiveFactor,
     data.conversionMethod || 'MULTIPLY',
@@ -1260,11 +1262,10 @@ export async function addTransaction(data: {
     data.feesDirection || 'INCOME',
     data.type
   );
+  const finalBalance = data.finalBalance !== undefined ? data.finalBalance : calculatedFinal;
   
-  const isDataComplete = !!(effectiveFactor && effectiveFactor !== 0
-    && data.amount && data.amount !== 0
-    && finalBalance && finalBalance !== 0);
-  const isComplete = data.isComplete !== undefined ? data.isComplete : isDataComplete;
+  // 🔸 Check Box هو المصدر الوحيد لحالة الاكتمال
+  const isComplete = data.isComplete !== undefined ? data.isComplete : true;
   
   // Check balance for complete cash income transactions
   if (isComplete && data.paymentType === 'CASH' && data.type === 'INCOME') {
@@ -1356,7 +1357,8 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     }
   }
   
-  const finalBalance = calculateFinalBalance(
+  // 🔸 إذا تم تمرير finalBalance يدويًا، نستخدمه مباشرة (للحركات غير المكتملة)
+  const calculatedFinal = calculateFinalBalance(
     effectiveAmount,
     effectiveConversionFactor,
     effectiveConversionMethod,
@@ -1365,11 +1367,10 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     effectiveFeesDirection,
     effectiveType
   );
+  const finalBalance = data.finalBalance !== undefined ? data.finalBalance : calculatedFinal;
   
-  const isDataComplete = effectiveAmount > 0 && effectiveConversionFactor > 0 && finalBalance > 0;
-  const newIsComplete = data.isComplete !== undefined
-    ? (isDataComplete && data.isComplete)
-    : isDataComplete;
+  // 🔸 Check Box هو المصدر الوحيد لحالة الاكتمال
+  const newIsComplete = data.isComplete !== undefined ? data.isComplete : true;
   
   // Clean data - remove undefined fields
   const cleanData: Record<string, unknown> = {};

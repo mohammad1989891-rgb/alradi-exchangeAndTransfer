@@ -50,6 +50,7 @@ export type TransactionFormData = {
   description?: string;
   date: string | Date;
   isComplete?: boolean;
+  finalBalance?: number;  // 🔸 تجاوز الرصيد النهائي المحسوب (للحركات غير المكتملة)
 };
 
 export type DebtFormData = {

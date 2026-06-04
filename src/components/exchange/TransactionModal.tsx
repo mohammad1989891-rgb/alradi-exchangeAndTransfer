@@ -24,6 +24,7 @@ import { cn } from '@/lib/utils';
 import { formatNumber, calculateFinalBalance } from '@/lib/format';
 import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import type { TransactionFormData } from '@/types';
+import { Checkbox } from '@/components/ui/checkbox';
 import { format } from 'date-fns';
 import { 
   ArrowUpRight, ArrowDownRight, Calculator, RefreshCcw, 
@@ -91,6 +92,9 @@ export function TransactionModal() {
   const [inputMode, setInputMode] = useState<'FACTOR_TO_FINAL' | 'FINAL_TO_FACTOR'>('FACTOR_TO_FINAL');
   const [finalAmountDisplay, setFinalAmountDisplay] = useState('');
   
+  // 🔸 حالة الاكتمال - Check Box هو المصدر الوحيد (Single Source of Truth)
+  const [isCompleteChecked, setIsCompleteChecked] = useState(true);
+  
   // SYP version support - دائماً الإصدار القديم للمدخلات
   // (no conversion needed since OLD = stored value)
   
@@ -138,15 +142,24 @@ export function TransactionModal() {
         
         setFeesAmountDisplay(formatInputNumber(editingTransaction.feesAmount));
         
+        // 🔸 تحميل حالة الاكتمال من الحركة عند التعديل
+        setIsCompleteChecked(editingTransaction.isComplete !== false);
+        
         // 🔸 تهيئة المبلغ النهائي ووضع الإدخال عند تعديل حركة
-        // إذا كانت الحركة غير مكتملة ومعامل التحويل = 0، نضع وضع الإدخال على "نهائي ← معامل"
-        // ونعبّئ المبلغ النهائي من الرصيد النهائي الحالي إذا كان متوفراً
-        if (editingTransaction.isComplete === false && editingTransaction.conversionFactor === 0) {
+        if (editingTransaction.isComplete === false) {
+          // حركة غير مكتملة: نضع وضع الإدخال على يدوي
           setInputMode('FINAL_TO_FACTOR');
-          setFinalAmountDisplay('');
+          // نعبّئ الرصيد النهائي إذا كان متوفراً
+          if (editingTransaction.finalBalance && editingTransaction.finalBalance !== 0) {
+            setFinalAmountDisplay(formatInputNumber(editingTransaction.finalBalance));
+          } else {
+            setFinalAmountDisplay('');
+          }
         } else if (editingTransaction.finalBalance && editingTransaction.finalBalance !== 0) {
+          setInputMode('FACTOR_TO_FINAL');
           setFinalAmountDisplay(formatInputNumber(editingTransaction.finalBalance));
         } else {
+          setInputMode('FACTOR_TO_FINAL');
           setFinalAmountDisplay('');
         }
       } else {
@@ -160,6 +173,9 @@ export function TransactionModal() {
         setAmountDisplay('');
         setConversionFactorDisplay('1');
         setFeesAmountDisplay('');
+        setFinalAmountDisplay('');
+        setIsCompleteChecked(true);
+        setInputMode('FACTOR_TO_FINAL');
       }
     }
   }, [isTransactionModalOpen, editingTransaction, currencies]);
@@ -218,12 +234,12 @@ export function TransactionModal() {
     setCalculatedBalance(result.finalBalance);
     
     // 🔸 مزامنة المبلغ النهائي مع حقل الإدخال
-    // في وضع معامل ← نهائي: نحدّث finalAmountDisplay تلقائياً
-    // في وضع نهائي ← معامل: لا نكتب فوق إدخال المستخدم (حماية من التعارض)
-    if (inputMode === 'FACTOR_TO_FINAL' && result.finalBalance > 0) {
+    // فقط في وضع المكتملة + معامل ← نهائي: نحدّث finalAmountDisplay تلقائياً
+    // في وضع غير المكتملة: لا نكتب فوق إدخال المستخدم (Check Box هو المصدر الوحيد)
+    if (isCompleteChecked && inputMode === 'FACTOR_TO_FINAL' && result.finalBalance > 0) {
       setFinalAmountDisplay(formatInputNumber(result.finalBalance));
     }
-  }, [formData, isSameCurrency, inputMode]);
+  }, [formData, isSameCurrency, inputMode, isCompleteChecked]);
   
   // Handle amount input with formatting
   const handleAmountChange = (value: string) => {
@@ -253,7 +269,7 @@ export function TransactionModal() {
     setFormData({ ...formData, feesAmount: numValue });
   };
   
-  // 🔸 معالجة إدخال المبلغ النهائي (وضع نهائي ← معامل)
+  // 🔸 معالجة إدخال المبلغ النهائي (وضع نهائي ← معامل) - في الحالة المكتملة
   const handleFinalAmountChange = (value: string) => {
     const cleanValue = value.replace(/[^0-9.,]/g, '');
     setFinalAmountDisplay(cleanValue);
@@ -269,13 +285,17 @@ export function TransactionModal() {
       setFormData(prev => ({ ...prev, conversionFactor: factor }));
       setConversionFactorDisplay(formatInputNumber(factor));
     } else if (cleanValue !== '' && finalAmount === 0 && formData.amount > 0) {
-      // 🔸 المستخدم أدخل 0 صراحةً (وليس حقل فارغ)
-      // نعيّن conversionFactor = 0 ليتم عرض 0 في الرصيد النهائي
       setFormData(prev => ({ ...prev, conversionFactor: 0 }));
       setConversionFactorDisplay('0');
     }
-    // إذا كان الحقل فارغاً (cleanValue === '') لا نغيّر conversionFactor
-    // يتم منع الحفظ لاحقاً عبر التحقق من finalAmountDisplay
+  };
+  
+  // 🔸 معالجة إدخال الرصيد النهائي يدويًا - في الحالة غير المكتملة
+  // لا يتم حساب معامل التحويل - القيمة المدخلة فقط
+  const handleManualFinalBalanceChange = (value: string) => {
+    const cleanValue = value.replace(/[^0-9.,]/g, '');
+    setFinalAmountDisplay(cleanValue);
+    // لا نحسب معامل التحويل - القيمة المدخلة يدويًا فقط
   };
   
   // SYP version is always OLD - no toggle needed
@@ -286,27 +306,15 @@ export function TransactionModal() {
       return;
     }
     
-    // 🔸 التحقق من إدخال الرصيد النهائي في وضع الإدخال اليدوي
-    // منع الحفظ إذا كان الحقل فارغاً (وليس صفر)
-    if (!isSameCurrency && inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay === '') {
-      setErrorMessage('يرجى إدخال قيمة الرصيد النهائي');
-      return;
-    }
+    // 🔸 Check Box هو المصدر الوحيد لحالة الاكتمال
+    const submitIsComplete = isCompleteChecked;
     
-    // 🔸 تحديد حالة الاكتمال تلقائيًا
-    // الحركة غير مكتملة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0 أو فارغ
-    // 🔸 في وضع نهائي ← معامل: نستخدم المبلغ النهائي المدخل مباشرة (وليس الحساب العكسي)
-    // لتجنب أخطاء التقريب وفقدان الدقة
-    // 🔸 لنفس العملة: لا نحتاج معامل تحويل
-    const effectiveFinalBalance = inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay !== ''
-      ? parseFormattedNumber(finalAmountDisplay)
-      : calculatedBalance;
-    const isIncomplete = isSameCurrency
-      ? (!formData.amount || formData.amount === 0 || !effectiveFinalBalance || effectiveFinalBalance === 0)
-      : (!formData.conversionFactor || formData.conversionFactor === 0 
-          || !formData.amount || formData.amount === 0
-          || !effectiveFinalBalance || effectiveFinalBalance === 0);
-    const submitIsComplete = !isIncomplete;
+    // 🔸 حساب الرصيد النهائي للإرسال
+    let submitFinalBalance: number | undefined;
+    if (!isCompleteChecked && finalAmountDisplay !== '') {
+      // في الحالة غير المكتملة: نرسل القيمة المدخلة يدويًا
+      submitFinalBalance = parseFormattedNumber(finalAmountDisplay);
+    }
     
     setIsSubmitting(true);
     setErrorMessage(null);
@@ -330,6 +338,7 @@ export function TransactionModal() {
           description: formData.description,
           date: formData.date,
           isComplete: submitIsComplete,
+          ...(submitFinalBalance !== undefined ? { finalBalance: submitFinalBalance } : {}),
         });
         
         if (result.success) {
@@ -355,6 +364,7 @@ export function TransactionModal() {
           description: formData.description,
           date: formData.date,
           isComplete: submitIsComplete,
+          ...(submitFinalBalance !== undefined ? { finalBalance: submitFinalBalance } : {}),
         });
         
         if (result.success) {
@@ -407,21 +417,12 @@ export function TransactionModal() {
   
   const vaultEffect = getVaultEffectDescription();
   
-  // 🔸 المبلغ النهائي الفعّال: يُستخدم لتحديد حالة الاكتمال وعرض الزر
-  // في وضع نهائي ← معامل: نستخدم المبلغ النهائي المدخل مباشرة (وليس الحساب العكسي)
-  // في وضع معامل ← نهائي: نستخدم الرصيد المحسوب
-  const effectiveFinalBalance = inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay !== ''
-    ? parseFormattedNumber(finalAmountDisplay)
-    : calculatedBalance;
-  
-  // 🔸 هل الحركة غير مكتملة؟ (محسوبة تفاعلياً)
-  // لنفس العملة: لا نحتاج معامل تحويل، نتحقق فقط من المبلغ والرصيد النهائي
-  // لعملات مختلفة: نتحقق من المبلغ ومعامل التحويل والرصيد النهائي
-  const isIncompleteTransaction = isSameCurrency
-    ? (!formData.amount || formData.amount === 0 || !effectiveFinalBalance || effectiveFinalBalance === 0)
-    : (!formData.conversionFactor || formData.conversionFactor === 0 
-        || !formData.amount || formData.amount === 0
-        || !effectiveFinalBalance || effectiveFinalBalance === 0);
+  // 🔸 المبلغ النهائي المعروض: يعتمد على حالة الاكتمال
+  // مكتملة: نستخدم الرصيد المحسوب تلقائيًا
+  // غير مكتملة: نستخدم القيمة المدخلة يدويًا
+  const displayFinalBalance = isCompleteChecked
+    ? calculatedBalance
+    : parseFormattedNumber(finalAmountDisplay);
 
   return (
     <Dialog open={isTransactionModalOpen} onOpenChange={closeTransactionModal}>
@@ -524,9 +525,33 @@ export function TransactionModal() {
             </AnimatePresence>
           </div>
           
-          {/* Account Selection */}
+          {/* Account Selection + Completion Status */}
           <div className="space-y-2">
-            <Label>الحساب</Label>
+            <div className="flex items-center justify-between">
+              <Label>الحساب</Label>
+              {/* 🔸 Check Box لحالة الحركة - المصدر الوحيد للحالة */}
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={isCompleteChecked}
+                  onCheckedChange={(checked) => setIsCompleteChecked(checked === true)}
+                  id="isComplete"
+                  className={cn(
+                    isCompleteChecked
+                      ? 'border-emerald-500 data-[state=checked]:bg-emerald-500'
+                      : 'border-amber-500 data-[state=checked]:bg-amber-500'
+                  )}
+                />
+                <label
+                  htmlFor="isComplete"
+                  className={cn(
+                    'text-sm font-medium cursor-pointer select-none',
+                    isCompleteChecked ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+                  )}
+                >
+                  {isCompleteChecked ? 'مكتملة' : 'غير مكتملة'}
+                </label>
+              </div>
+            </div>
             <Select
               value={formData.accountId}
               onValueChange={(value) => setFormData({ ...formData, accountId: value })}
@@ -600,79 +625,83 @@ export function TransactionModal() {
                 exit={{ opacity: 0, height: 0 }}
                 className="space-y-3"
               >
-                {/* 🔸 Input Mode Toggle */}
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">طريقة الإدخال:</span>
-                  <button
-                    type="button"
-                    onClick={() => setInputMode('FACTOR_TO_FINAL')}
-                    className={cn(
-                      'px-2 py-1 rounded-lg text-xs font-medium transition-all',
-                      inputMode === 'FACTOR_TO_FINAL'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground'
-                    )}
-                  >
-                    معامل → نهائي
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInputMode('FINAL_TO_FACTOR')}
-                    className={cn(
-                      'px-2 py-1 rounded-lg text-xs font-medium transition-all',
-                      inputMode === 'FINAL_TO_FACTOR'
-                        ? 'bg-primary text-primary-foreground'
-                        : 'bg-muted text-muted-foreground'
-                    )}
-                  >
-                    نهائي → معامل
-                  </button>
-                </div>
-                
-                {/* Conversion Factor */}
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 space-y-2">
-                    <Label>معامل التحويل</Label>
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      value={conversionFactorDisplay}
-                      onChange={(e) => handleConversionFactorChange(e.target.value)}
-                      className="text-left font-mono h-10"
-                      dir="ltr"
-                      readOnly={inputMode === 'FINAL_TO_FACTOR'}
-                    />
-                  </div>
-                  <div className="flex gap-1 mt-6">
+                {/* 🔸 Input Mode Toggle - فقط في الحالة المكتملة */}
+                {isCompleteChecked && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">طريقة الإدخال:</span>
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, conversionMethod: 'MULTIPLY' })}
+                      onClick={() => setInputMode('FACTOR_TO_FINAL')}
                       className={cn(
-                        'px-3 py-2 rounded-lg text-sm font-medium transition-all',
-                        formData.conversionMethod === 'MULTIPLY'
+                        'px-2 py-1 rounded-lg text-xs font-medium transition-all',
+                        inputMode === 'FACTOR_TO_FINAL'
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted text-muted-foreground'
                       )}
                     >
-                      ×
+                      معامل → نهائي
                     </button>
                     <button
                       type="button"
-                      onClick={() => setFormData({ ...formData, conversionMethod: 'DIVIDE' })}
+                      onClick={() => setInputMode('FINAL_TO_FACTOR')}
                       className={cn(
-                        'px-3 py-2 rounded-lg text-sm font-medium transition-all',
-                        formData.conversionMethod === 'DIVIDE'
+                        'px-2 py-1 rounded-lg text-xs font-medium transition-all',
+                        inputMode === 'FINAL_TO_FACTOR'
                           ? 'bg-primary text-primary-foreground'
                           : 'bg-muted text-muted-foreground'
                       )}
                     >
-                      ÷
+                      نهائي → معامل
                     </button>
                   </div>
-                </div>
+                )}
                 
-                {/* 🔸 Final Amount Input (only in FINAL_TO_FACTOR mode) */}
-                {inputMode === 'FINAL_TO_FACTOR' && (
+                {/* 🔸 Conversion Factor - فقط في الحالة المكتملة */}
+                {isCompleteChecked && (
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 space-y-2">
+                      <Label>معامل التحويل</Label>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={conversionFactorDisplay}
+                        onChange={(e) => handleConversionFactorChange(e.target.value)}
+                        className="text-left font-mono h-10"
+                        dir="ltr"
+                        readOnly={inputMode === 'FINAL_TO_FACTOR'}
+                      />
+                    </div>
+                    <div className="flex gap-1 mt-6">
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, conversionMethod: 'MULTIPLY' })}
+                        className={cn(
+                          'px-3 py-2 rounded-lg text-sm font-medium transition-all',
+                          formData.conversionMethod === 'MULTIPLY'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground'
+                        )}
+                      >
+                        ×
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, conversionMethod: 'DIVIDE' })}
+                        className={cn(
+                          'px-3 py-2 rounded-lg text-sm font-medium transition-all',
+                          formData.conversionMethod === 'DIVIDE'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted text-muted-foreground'
+                        )}
+                      >
+                        ÷
+                      </button>
+                    </div>
+                  </div>
+                )}
+                
+                {/* 🔸 Final Amount Input - في الحالة المكتملة (نهائي ← معامل) */}
+                {isCompleteChecked && inputMode === 'FINAL_TO_FACTOR' && (
                   <div className="space-y-2">
                     <Label>المبلغ النهائي ({targetCurrency?.symbol})</Label>
                     <Input
@@ -684,36 +713,39 @@ export function TransactionModal() {
                       className="text-left font-mono h-10"
                       dir="ltr"
                     />
-                    {/* 🔸 تنبيه عند عدم إدخال الرصيد النهائي */}
-                    {formData.accountId && (
-                      <>
-                        {finalAmountDisplay === '' && (
-                          <p className="text-xs text-red-500 dark:text-red-400 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            يرجى إدخال قيمة الرصيد النهائي
-                          </p>
-                        )}
-                        {finalAmountDisplay !== '' && parseFormattedNumber(finalAmountDisplay) === 0 && (
-                          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
-                            القيمة 0 ستجعل الحركة غير مكتملة
-                          </p>
-                        )}
-                      </>
-                    )}
                   </div>
                 )}
                 
-                {/* SYP Rate Note */}
-                {isSYPInvolved && (
+                {/* 🔸 الرصيد النهائي اليدوي - فقط في الحالة غير المكتملة */}
+                {!isCompleteChecked && (
+                  <div className="space-y-2">
+                    <Label>الرصيد النهائي ({targetCurrency?.symbol})</Label>
+                    <Input
+                      type="text"
+                      inputMode="decimal"
+                      value={finalAmountDisplay}
+                      onChange={(e) => handleManualFinalBalanceChange(e.target.value)}
+                      placeholder="أدخل الرصيد النهائي يدويًا"
+                      className="text-left font-mono h-10"
+                      dir="ltr"
+                    />
+                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      إدخال يدوي بدون حساب تلقائي
+                    </p>
+                  </div>
+                )}
+                
+                {/* SYP Rate Note - فقط في الحالة المكتملة */}
+                {isCompleteChecked && isSYPInvolved && (
                   <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
                     <Coins className="w-3 h-3" />
                     معامل التحويل بالإصدار القديم
                   </p>
                 )}
                 
-                {/* Conversion Preview */}
-                {conversionPreview && formData.conversionFactor !== 1 && (
+                {/* Conversion Preview - فقط في الحالة المكتملة */}
+                {isCompleteChecked && conversionPreview && formData.conversionFactor !== 1 && (
                   <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30">
                     <RefreshCcw className="w-3 h-3 text-blue-500" />
                     <span className="text-xs text-blue-700 dark:text-blue-300">
@@ -722,17 +754,39 @@ export function TransactionModal() {
                   </div>
                 )}
                 
-                {/* Converted Amount Preview */}
-                <div className="flex items-center justify-center gap-2 py-2">
-                  <span className="text-sm text-muted-foreground">
-                    {formatNumber(formData.amount)} {baseCurrency?.symbol}
-                  </span>
-                  <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-sm font-medium">
-                    {formatNumber(convertedAmount)} {targetCurrency?.symbol}
-                  </span>
-                </div>
+                {/* Converted Amount Preview - فقط في الحالة المكتملة */}
+                {isCompleteChecked && (
+                  <div className="flex items-center justify-center gap-2 py-2">
+                    <span className="text-sm text-muted-foreground">
+                      {formatNumber(formData.amount)} {baseCurrency?.symbol}
+                    </span>
+                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    <span className="text-sm font-medium">
+                      {formatNumber(convertedAmount)} {targetCurrency?.symbol}
+                    </span>
+                  </div>
+                )}
               </motion.div>
+            )}
+            
+            {/* 🔸 الرصيد النهائي اليدوي لنفس العملة - فقط في الحالة غير المكتملة */}
+            {isSameCurrency && !isCompleteChecked && (
+              <div className="space-y-2">
+                <Label>الرصيد النهائي ({targetCurrency?.symbol})</Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  value={finalAmountDisplay}
+                  onChange={(e) => handleManualFinalBalanceChange(e.target.value)}
+                  placeholder="أدخل الرصيد النهائي يدويًا"
+                  className="text-left font-mono h-10"
+                  dir="ltr"
+                />
+                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+                  <AlertCircle className="w-3 h-3" />
+                  إدخال يدوي بدون حساب تلقائي
+                </p>
+              </div>
             )}
             
             {/* Target Currency */}
@@ -875,14 +929,18 @@ export function TransactionModal() {
           {/* Final Balance Display */}
           <div className={cn(
             'rounded-xl p-5 border-2',
-            formData.type === 'INCOME' 
-              ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' 
-              : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
+            !isCompleteChecked
+              ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800'
+              : formData.type === 'INCOME' 
+                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' 
+                : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
           )}>
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm text-muted-foreground">الرصيد النهائي</p>
               <div className="flex items-center gap-1">
-                {formData.paymentType === 'DEFERRED' ? (
+                {!isCompleteChecked ? (
+                  <AlertCircle className="w-4 h-4 text-amber-500" />
+                ) : formData.paymentType === 'DEFERRED' ? (
                   <Clock className="w-4 h-4 text-amber-500" />
                 ) : (
                   <Banknote className={cn(
@@ -891,25 +949,27 @@ export function TransactionModal() {
                   )} />
                 )}
                 <span className="text-xs text-muted-foreground">
-                  {formData.paymentType === 'DEFERRED' ? 'آجل' : 'كاش'}
+                  {!isCompleteChecked ? 'غير مكتملة' : formData.paymentType === 'DEFERRED' ? 'آجل' : 'كاش'}
                 </span>
               </div>
             </div>
             <p className={cn(
               'text-3xl font-bold font-mono',
-              formData.type === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
+              !isCompleteChecked 
+                ? 'text-amber-600'
+                : formData.type === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
             )} dir="ltr">
-              {formatNumber(calculatedBalance)} {targetCurrency?.symbol}
+              {formatNumber(displayFinalBalance)} {targetCurrency?.symbol}
             </p>
             {isTargetSYP && (
-              <p className="text-[10px] text-muted-foreground mt-1">{formatSYPDualDisplay(calculatedBalance)}</p>
+              <p className="text-[10px] text-muted-foreground mt-1">{formatSYPDualDisplay(displayFinalBalance)}</p>
             )}
-            {!isSameCurrency && formData.amount > 0 && (
+            {!isSameCurrency && formData.amount > 0 && isCompleteChecked && (
               <p className="text-xs text-muted-foreground mt-2">
                 = {formatNumber(formData.amount)} {baseCurrency?.symbol}
               </p>
             )}
-            {isBaseSYP && !isSameCurrency && formData.amount > 0 && (
+            {isBaseSYP && !isSameCurrency && formData.amount > 0 && isCompleteChecked && (
               <p className="text-[10px] text-muted-foreground mt-0.5">{formatSYPDualDisplay(formData.amount)}</p>
             )}
           </div>
@@ -939,15 +999,12 @@ export function TransactionModal() {
           </AnimatePresence>
           
           {/* Submit Button */}
-          {/* 🔸 تحذير الحالة غير المكتملة */}
-          {isIncompleteTransaction && formData.accountId && (
+          {/* 🔸 تنبيه الحالة غير المكتملة */}
+          {!isCompleteChecked && (
             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
               <span className="text-sm text-amber-700 dark:text-amber-300">
-                {(!effectiveFinalBalance || effectiveFinalBalance === 0) && formData.amount > 0
-                  ? 'الحركة غير مكتملة بسبب عدم إدخال الرصيد النهائي'
-                  : 'سيتم حفظ الحركة كـ "غير مكتملة" حتى يتم استكمال البيانات'
-                }
+                سيتم حفظ الحركة كـ "غير مكتملة"
               </span>
             </div>
           )}
@@ -956,14 +1013,14 @@ export function TransactionModal() {
             disabled={isSubmitting || !formData.accountId}
             className={cn(
               "w-full h-14 text-base font-medium",
-              isIncompleteTransaction
+              !isCompleteChecked
                 ? 'bg-amber-500 hover:bg-amber-600'
                 : formData.type === 'INCOME' 
                   ? 'bg-emerald-500 hover:bg-emerald-600' 
                   : 'bg-red-500 hover:bg-red-600'
             )}
           >
-            {isSubmitting ? 'جاري الحفظ...' : isIncompleteTransaction ? 'حفظ كغير مكتملة' : 'حفظ الحركة'}
+            {isSubmitting ? 'جاري الحفظ...' : !isCompleteChecked ? 'حفظ كغير مكتملة' : 'حفظ'}
           </Button>
         </div>
       </DialogContent>

@@ -87,3 +87,65 @@ Stage Summary:
 - `effectiveFinalBalance` uses direct user input in FINAL_TO_FACTOR mode (no floating-point round-trip)
 - Reactive button/warning updates using computed `isIncompleteTransaction` variable
 - All changes additive-only — no deletion or modification of existing UI/UX
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Redesign transaction completion logic with CheckBox as single source of truth
+
+Work Log:
+- Read TransactionModal.tsx (972 lines) thoroughly to understand current state management
+- Read supabaseDb.ts addTransaction/updateTransaction functions for backend isComplete logic
+- Read types/index.ts for TransactionFormData type
+- Checked that Checkbox UI component exists at src/components/ui/checkbox.tsx
+
+Changes made:
+
+1. **types/index.ts**: Added `finalBalance?: number` to TransactionFormData for manual override
+
+2. **supabaseDb.ts - addTransaction()**:
+   - Added `finalBalance?: number` parameter
+   - Changed `finalBalance` calculation: uses `data.finalBalance` if provided, otherwise calculates
+   - Changed `isComplete` logic: uses `data.isComplete` directly if provided (no more isDataComplete AND check)
+
+3. **supabaseDb.ts - updateTransaction()**:
+   - Changed `finalBalance` calculation: uses `data.finalBalance` if provided, otherwise calculates
+   - Changed `newIsComplete` logic: uses `data.isComplete` directly if provided (was: `isDataComplete && data.isComplete`)
+
+4. **TransactionModal.tsx** - Major changes:
+   - Imported Checkbox component
+   - Added `isCompleteChecked` state (default: true)
+   - Added checkbox UI next to account name with "مكتملة" / "غير مكتملة" text
+   - When complete (checked): shows conversion factor, input mode toggle, auto-calculation
+   - When incomplete (unchecked): hides conversion factor, shows manual "الرصيد النهائي" input
+   - Added `handleManualFinalBalanceChange` for incomplete mode (no factor calculation)
+   - Updated calculation useEffect: only syncs finalAmountDisplay when isCompleteChecked
+   - Updated Final Balance Display: shows manual value when incomplete, calculated when complete
+   - Updated Final Balance Display: amber styling when incomplete, green/red when complete
+   - Updated save button: "حفظ" when complete, "حفظ كغير مكتملة" when incomplete (amber color)
+   - Updated submit handler: uses isCompleteChecked directly, sends finalBalance override when incomplete
+   - Updated reset useEffect: loads isCompleteChecked from editingTransaction.isComplete
+   - Added same-currency manual final balance input for incomplete mode
+   - Removed old isIncompleteTransaction auto-detection logic
+   - Removed old effectiveFinalBalance variable
+
+Verified with Agent Browser:
+- ✅ Checkbox appears next to account name, checked by default with "مكتملة"
+- ✅ Unchecking: text changes to "غير مكتملة", manual final balance input appears, conversion factor hidden
+- ✅ Re-checking: text changes back to "مكتملة", fields return to normal
+- ✅ Save button: "حفظ" (default color) when complete, "حفظ كغير مكتملة" (amber) when incomplete
+- ✅ Saving incomplete transaction works (dialog closes, no errors)
+- ✅ Incomplete transaction shows "غير مكتملة" badge in transaction list
+- ✅ Editing incomplete transaction: checkbox loads as unchecked, appropriate fields shown
+- ✅ Checking the checkbox when editing: switches to complete mode, shows conversion factor
+- ✅ No browser errors, no console errors, no dev server errors
+
+Stage Summary:
+- CheckBox is now the single source of truth for transaction completion status
+- Manual final balance input available in incomplete mode (no auto-calculation)
+- Conversion factor hidden in incomplete mode, shown in complete mode
+- Save button color and text change reactively based on checkbox state
+- Final balance display shows manual value (incomplete) or calculated value (complete)
+- Backend respects isComplete from frontend directly (no AND check with isDataComplete)
+- Backend supports finalBalance override for incomplete transactions
+- All changes are UI-behavior only - no design/layout changes (UI Freeze respected)

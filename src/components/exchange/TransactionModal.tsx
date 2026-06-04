@@ -137,6 +137,18 @@ export function TransactionModal() {
         }
         
         setFeesAmountDisplay(formatInputNumber(editingTransaction.feesAmount));
+        
+        // 🔸 تهيئة المبلغ النهائي ووضع الإدخال عند تعديل حركة
+        // إذا كانت الحركة غير مكتملة ومعامل التحويل = 0، نضع وضع الإدخال على "نهائي ← معامل"
+        // ونعبّئ المبلغ النهائي من الرصيد النهائي الحالي إذا كان متوفراً
+        if (editingTransaction.isComplete === false && editingTransaction.conversionFactor === 0) {
+          setInputMode('FINAL_TO_FACTOR');
+          setFinalAmountDisplay('');
+        } else if (editingTransaction.finalBalance && editingTransaction.finalBalance !== 0) {
+          setFinalAmountDisplay(formatInputNumber(editingTransaction.finalBalance));
+        } else {
+          setFinalAmountDisplay('');
+        }
       } else {
         const defaultCurrency = currencies.find(c => c.isDefault);
         setFormData({
@@ -159,6 +171,16 @@ export function TransactionModal() {
   const isBaseSYP = isSYPCurrency(formData.baseCurrencyId, baseCurrency?.code);
   const isTargetSYP = isSYPCurrency(formData.currencyId, targetCurrency?.code);
   const isSYPInvolved = isBaseSYP || isTargetSYP;
+  
+  // 🔸 إصلاح: لنفس العملة، معامل التحويل = 1 تلقائياً
+  // هذا يمنع مشكلة "حركة غير مكتملة" عندما تكون العملات متطابقة
+  // ومعامل التحويل = 0 من الحركة الأصلية
+  useEffect(() => {
+    if (isSameCurrency && formData.conversionFactor !== 1) {
+      setFormData(prev => ({ ...prev, conversionFactor: 1 }));
+      setConversionFactorDisplay('1');
+    }
+  }, [isSameCurrency, formData.conversionFactor]);
   
   // Calculate converted amount
   useEffect(() => {
@@ -195,9 +217,9 @@ export function TransactionModal() {
     setFeesValue(result.feesValue);
     setCalculatedBalance(result.finalBalance);
     
-    // 🔸 مزامنة المبلغ النهائي مع حقل الإدخال في وضع نهائي ← معامل
-    // عند تغيير أي قيمة في وضع معامل ← نهائي، نحدّث finalAmountDisplay
-    // حتى يكون جاهزاً إذا بدّل المستخدم الوضع
+    // 🔸 مزامنة المبلغ النهائي مع حقل الإدخال
+    // في وضع معامل ← نهائي: نحدّث finalAmountDisplay تلقائياً
+    // في وضع نهائي ← معامل: لا نكتب فوق إدخال المستخدم (حماية من التعارض)
     if (inputMode === 'FACTOR_TO_FINAL' && result.finalBalance > 0) {
       setFinalAmountDisplay(formatInputNumber(result.finalBalance));
     }
@@ -273,9 +295,17 @@ export function TransactionModal() {
     
     // 🔸 تحديد حالة الاكتمال تلقائيًا
     // الحركة غير مكتملة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0 أو فارغ
-    const isIncomplete = !formData.conversionFactor || formData.conversionFactor === 0 
-      || !formData.amount || formData.amount === 0
-      || !calculatedBalance || calculatedBalance === 0;
+    // 🔸 في وضع نهائي ← معامل: نستخدم المبلغ النهائي المدخل مباشرة (وليس الحساب العكسي)
+    // لتجنب أخطاء التقريب وفقدان الدقة
+    // 🔸 لنفس العملة: لا نحتاج معامل تحويل
+    const effectiveFinalBalance = inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay !== ''
+      ? parseFormattedNumber(finalAmountDisplay)
+      : calculatedBalance;
+    const isIncomplete = isSameCurrency
+      ? (!formData.amount || formData.amount === 0 || !effectiveFinalBalance || effectiveFinalBalance === 0)
+      : (!formData.conversionFactor || formData.conversionFactor === 0 
+          || !formData.amount || formData.amount === 0
+          || !effectiveFinalBalance || effectiveFinalBalance === 0);
     const submitIsComplete = !isIncomplete;
     
     setIsSubmitting(true);
@@ -376,6 +406,22 @@ export function TransactionModal() {
   };
   
   const vaultEffect = getVaultEffectDescription();
+  
+  // 🔸 المبلغ النهائي الفعّال: يُستخدم لتحديد حالة الاكتمال وعرض الزر
+  // في وضع نهائي ← معامل: نستخدم المبلغ النهائي المدخل مباشرة (وليس الحساب العكسي)
+  // في وضع معامل ← نهائي: نستخدم الرصيد المحسوب
+  const effectiveFinalBalance = inputMode === 'FINAL_TO_FACTOR' && finalAmountDisplay !== ''
+    ? parseFormattedNumber(finalAmountDisplay)
+    : calculatedBalance;
+  
+  // 🔸 هل الحركة غير مكتملة؟ (محسوبة تفاعلياً)
+  // لنفس العملة: لا نحتاج معامل تحويل، نتحقق فقط من المبلغ والرصيد النهائي
+  // لعملات مختلفة: نتحقق من المبلغ ومعامل التحويل والرصيد النهائي
+  const isIncompleteTransaction = isSameCurrency
+    ? (!formData.amount || formData.amount === 0 || !effectiveFinalBalance || effectiveFinalBalance === 0)
+    : (!formData.conversionFactor || formData.conversionFactor === 0 
+        || !formData.amount || formData.amount === 0
+        || !effectiveFinalBalance || effectiveFinalBalance === 0);
 
   return (
     <Dialog open={isTransactionModalOpen} onOpenChange={closeTransactionModal}>
@@ -894,11 +940,11 @@ export function TransactionModal() {
           
           {/* Submit Button */}
           {/* 🔸 تحذير الحالة غير المكتملة */}
-          {(!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0 || !calculatedBalance || calculatedBalance === 0) && formData.accountId && (
+          {isIncompleteTransaction && formData.accountId && (
             <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
               <span className="text-sm text-amber-700 dark:text-amber-300">
-                {(!calculatedBalance || calculatedBalance === 0) && formData.amount > 0
+                {(!effectiveFinalBalance || effectiveFinalBalance === 0) && formData.amount > 0
                   ? 'الحركة غير مكتملة بسبب عدم إدخال الرصيد النهائي'
                   : 'سيتم حفظ الحركة كـ "غير مكتملة" حتى يتم استكمال البيانات'
                 }
@@ -910,14 +956,14 @@ export function TransactionModal() {
             disabled={isSubmitting || !formData.accountId}
             className={cn(
               "w-full h-14 text-base font-medium",
-              (!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0 || !calculatedBalance || calculatedBalance === 0)
+              isIncompleteTransaction
                 ? 'bg-amber-500 hover:bg-amber-600'
                 : formData.type === 'INCOME' 
                   ? 'bg-emerald-500 hover:bg-emerald-600' 
                   : 'bg-red-500 hover:bg-red-600'
             )}
           >
-            {isSubmitting ? 'جاري الحفظ...' : (!formData.conversionFactor || formData.conversionFactor === 0 || !formData.amount || formData.amount === 0 || !calculatedBalance || calculatedBalance === 0) ? 'حفظ كغير مكتملة' : 'حفظ الحركة'}
+            {isSubmitting ? 'جاري الحفظ...' : isIncompleteTransaction ? 'حفظ كغير مكتملة' : 'حفظ الحركة'}
           </Button>
         </div>
       </DialogContent>

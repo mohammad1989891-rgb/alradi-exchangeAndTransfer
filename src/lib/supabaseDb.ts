@@ -1,6 +1,120 @@
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 
 // ============================================
+// 🔸 Smart Retry System for Supabase Queries
+// 🔸 Automatically retries on network/fetch errors
+// 🔸 Skips retry on data/logic errors (validation, not found, etc.)
+// 🔸 Exponential backoff: 500ms → 1000ms → 2000ms
+// ============================================
+
+/**
+ * Determines if an error is retryable (network/fetch related).
+ * Data/logic errors like "not found", "permission denied", or validation
+ * errors are NOT retryable — retrying won't fix them.
+ */
+function isRetryableError(error: unknown): boolean {
+  if (!error) return false;
+
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+
+  // Network / fetch errors — retryable
+  if (
+    msg.includes('failed to fetch') ||
+    msg.includes('networkerror') ||
+    msg.includes('network request failed') ||
+    msg.includes('net::err_') ||
+    msg.includes('fetch error') ||
+    msg.includes('timeout') ||
+    msg.includes('aborted') ||
+    msg.includes('connection') ||
+    msg.includes('econnrefused') ||
+    msg.includes('econnreset') ||
+    msg.includes('socket hang up') ||
+    msg.includes('load failed')
+  ) {
+    return true;
+  }
+
+  // TypeError in fetch context — usually network-related
+  if (error instanceof TypeError && (
+    msg.includes('fetch') ||
+    msg.includes('network') ||
+    msg.includes('load') ||
+    msg.includes('failed')
+  )) {
+    return true;
+  }
+
+  // NOT retryable: table doesn't exist, RLS, validation, business logic
+  if (
+    msg.includes('could not find') ||
+    msg.includes('does not exist') ||
+    msg.includes('schema cache') ||
+    msg.includes('relation') ||
+    msg.includes('policy') ||
+    msg.includes('permission') ||
+    msg.includes('jwt') ||
+    msg.includes('rls') ||
+    msg.includes('violates') ||
+    msg.includes('duplicate') ||
+    msg.includes('unique') ||
+    msg.includes('not null') ||
+    msg.includes('foreign key') ||
+    msg.includes('check constraint')
+  ) {
+    return false;
+  }
+
+  // For Supabase PostgrestError — check code
+  const anyErr = error as Record<string, unknown>;
+  const code = String(anyErr?.code || '');
+  // Network-related Supabase error codes
+  if (code === '08' || code.startsWith('08')) return true; // Connection exception
+  if (code === '57' || code.startsWith('57')) return true; // Operator intervention
+
+  // Default: don't retry unknown errors — safe choice
+  return false;
+}
+
+/**
+ * Execute an async function with automatic retry on network errors.
+ * Uses exponential backoff: 500ms → 1000ms → 2000ms.
+ * Only retries on network/fetch errors — data/logic errors fail immediately.
+ *
+ * @param fn - The async function to execute
+ * @param retries - Maximum number of retries (default: 3)
+ * @param delay - Initial delay in ms, doubles on each retry (default: 500)
+ * @returns The result of fn(), or null if all retries failed
+ */
+export async function fetchWithRetry<T>(
+  fn: () => Promise<T>,
+  retries: number = 3,
+  delay: number = 500,
+): Promise<T | null> {
+  try {
+    return await fn();
+  } catch (error) {
+    // Don't retry if the error is not retryable (data/logic error)
+    if (!isRetryableError(error)) {
+      console.error('[Supabase] ❌ Non-retryable error:', error instanceof Error ? error.message : error);
+      throw error; // Re-throw data/logic errors immediately
+    }
+
+    if (retries <= 0) {
+      console.error('[Supabase] ❌ All retries exhausted:', error instanceof Error ? error.message : error);
+      return null;
+    }
+
+    const attempt = 3 - retries + 1; // Human-readable attempt number
+    console.warn(`[Supabase] ⚠️ Network error (attempt ${attempt}/3), retrying in ${delay}ms...`, error instanceof Error ? error.message : error);
+
+    await new Promise(res => setTimeout(res, delay));
+
+    return fetchWithRetry(fn, retries - 1, delay * 2);
+  }
+}
+
+// ============================================
 // Types / Interfaces
 // ============================================
 
@@ -562,47 +676,48 @@ export async function checkTablesExist(): Promise<boolean> {
 
   try {
     console.log('[Supabase] 🔍 Checking if tables exist...');
-    const { data, error, status } = await supabase.from('currencies').select('id').limit(1);
+    const result = await fetchWithRetry(async () => {
+      const { data, error, status } = await supabase.from('currencies').select('id').limit(1);
+      if (error) throw error;
+      return { data, status };
+    });
 
-    if (error) {
-      const msg = (error.message || '').toLowerCase();
-      console.error('[Supabase] ❌ checkTablesExist error:', { message: error.message, code: error.code, status, hint: error.hint });
-
-      // These messages mean the table doesn't exist at all
-      if (
-        msg.includes('could not find') ||
-        msg.includes('does not exist') ||
-        msg.includes('schema cache') ||
-        msg.includes('relation')
-      ) {
-        console.error('[Supabase] 💡 Tables do NOT exist. Run the migration SQL in Supabase SQL Editor.');
-        tablesExist = false;
-        return false;
-      }
-
-      // RLS or auth errors mean tables exist but access is denied
-      // This is a different problem — don't mark tables as missing
-      if (msg.includes('policy') || msg.includes('permission') || msg.includes('jwt') || msg.includes('rls') || msg.includes('new row violates')) {
-        console.error('[Supabase] ⚠️ Tables EXIST but RLS blocks access — FIX: Run fix-rls.sql in Supabase SQL Editor');
-        console.error('[Supabase] 💡 fix-rls.sql is located in: supabase/fix-rls.sql');
-        tablesExist = true; // Tables exist, just can't access them
-        return true;
-      }
-
-      // For other errors (network, timeout, etc.) — assume tables might exist
-      // Don't block the app, let it retry
-      console.warn('[Supabase] ⚠️ Unknown error, assuming tables exist:', msg);
+    if (result === null) {
+      // All retries failed — likely network issue, assume tables exist and retry later
+      console.warn('[Supabase] ⚠️ checkTablesExist: network error after retries, assuming tables exist');
       tablesExist = true;
       return true;
     }
 
     // Success — tables exist
-    console.log('[Supabase] ✅ Tables exist, currencies count:', data?.length ?? 0);
+    console.log('[Supabase] ✅ Tables exist, currencies count:', result.data?.length ?? 0);
     tablesExist = true;
     return true;
   } catch (err) {
+    // fetchWithRetry re-throws non-retryable errors (e.g., table doesn't exist, RLS)
+    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+    
+    // Table doesn't exist
+    if (
+      msg.includes('could not find') ||
+      msg.includes('does not exist') ||
+      msg.includes('schema cache') ||
+      msg.includes('relation')
+    ) {
+      console.error('[Supabase] 💡 Tables do NOT exist. Run the migration SQL in Supabase SQL Editor.');
+      tablesExist = false;
+      return false;
+    }
+
+    // RLS or auth errors — tables exist but access denied
+    if (msg.includes('policy') || msg.includes('permission') || msg.includes('jwt') || msg.includes('rls') || msg.includes('new row violates')) {
+      console.error('[Supabase] ⚠️ Tables EXIST but RLS blocks access — FIX: Run fix-rls.sql in Supabase SQL Editor');
+      tablesExist = true;
+      return true;
+    }
+
+    // Other errors — don't block the app
     console.error('[Supabase] ❌ checkTablesExist exception:', err);
-    // Network errors shouldn't block the app — assume tables exist and retry later
     tablesExist = true;
     return true;
   }
@@ -764,24 +879,32 @@ export async function resetCurrenciesToDefault(): Promise<{ success: boolean; me
 export async function getAllAvailableCurrencies(): Promise<Currency[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('currencies').select('*');
-  if (error) {
-    console.error('[Supabase] ❌ getAllAvailableCurrencies error:', error.message, error.code);
-    throw new Error(error.message);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('currencies').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getAllAvailableCurrencies: failed after retries, returning []');
+    return [];
   }
-  console.log('[Supabase] 📊 Currencies loaded:', data?.length ?? 0);
-  return (data || []).map(rowToCurrency);
+  console.log('[Supabase] 📊 Currencies loaded:', result?.length ?? 0);
+  return (result || []).map(rowToCurrency);
 }
 
 export async function getActiveCurrencies(): Promise<Currency[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('currencies').select('*');
-  if (error) {
-    console.error('[Supabase] ❌ getActiveCurrencies error:', error.message, error.code);
-    throw new Error(error.message);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('currencies').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getActiveCurrencies: failed after retries, returning []');
+    return [];
   }
-  const active = (data || []).map(rowToCurrency).filter(c => c.isActive);
+  const active = (result || []).map(rowToCurrency).filter(c => c.isActive);
   console.log('[Supabase] 📊 Active currencies:', active.length);
   return active;
 }
@@ -951,13 +1074,17 @@ export async function deleteCurrencyFromDb(currencyId: string): Promise<void> {
 export async function getVaults(): Promise<Vault[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('vaults').select('*');
-  if (error) {
-    console.error('[Supabase] ❌ getVaults error:', error.message, error.code);
-    throw new Error(error.message);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('vaults').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getVaults: failed after retries, returning []');
+    return [];
   }
-  console.log('[Supabase] 📊 Vaults loaded:', data?.length ?? 0);
-  return (data || []).map(rowToVault);
+  console.log('[Supabase] 📊 Vaults loaded:', result?.length ?? 0);
+  return (result || []).map(rowToVault);
 }
 
 export async function updateVaultBalance(currencyId: string, balanceDelta: number): Promise<Vault | null> {
@@ -1026,12 +1153,16 @@ export async function getTotalBalanceInUSD(): Promise<number> {
 export async function getAccounts(): Promise<Account[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('accounts').select('*');
-  if (error) {
-    console.error('[Supabase] ❌ getAccounts error:', error.message, error.code);
-    throw new Error(error.message);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('accounts').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getAccounts: failed after retries, returning []');
+    return [];
   }
-  const active = (data || []).map(rowToAccount).filter(a => a.isActive);
+  const active = (result || []).map(rowToAccount).filter(a => a.isActive);
   console.log('[Supabase] 📊 Active accounts loaded:', active.length);
   return active;
 }
@@ -1082,13 +1213,17 @@ export async function getTransactions(_options?: { includeArchived?: boolean }):
   if (!tablesExist) return [];
   // Always load ALL data — archive filtering is done client-side
   // This avoids errors if is_archived column doesn't exist yet
-  const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false });
-  if (error) {
-    console.error('[Supabase] ❌ getTransactions error:', error.message, error.code);
-    throw new Error(error.message);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getTransactions: failed after retries, returning []');
+    return [];
   }
-  console.log('[Supabase] 📊 Transactions loaded:', data?.length ?? 0);
-  return (data || []).map(rowToTransaction);
+  console.log('[Supabase] 📊 Transactions loaded:', result?.length ?? 0);
+  return (result || []).map(rowToTransaction);
 }
 
 export async function addTransaction(data: {
@@ -1332,9 +1467,16 @@ export async function getDebts(_options?: { includeArchived?: boolean }): Promis
   await initializeDatabase();
   if (!tablesExist) return [];
   // Always load ALL data — archive filtering is done client-side
-  const { data, error } = await supabase.from('debts').select('*').order('date', { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToDebt);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('debts').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getDebts: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToDebt);
 }
 
 export async function addDebt(data: {
@@ -1518,13 +1660,27 @@ export async function getDebtPayments(debtId?: string, _options?: { includeArchi
   if (!tablesExist) return [];
   // Always load ALL data — archive filtering is done client-side
   if (debtId) {
-    const { data, error } = await supabase.from('debt_payments').select('*').eq('debt_id', debtId);
-    if (error) throw new Error(error.message);
-    return (data || []).map(rowToDebtPayment);
+    const result = await fetchWithRetry(async () => {
+      const { data, error } = await supabase.from('debt_payments').select('*').eq('debt_id', debtId);
+      if (error) throw error;
+      return data;
+    });
+    if (result === null) {
+      console.error('[Supabase] ❌ getDebtPayments: failed after retries, returning []');
+      return [];
+    }
+    return (result || []).map(rowToDebtPayment);
   }
-  const { data, error } = await supabase.from('debt_payments').select('*').order('date', { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToDebtPayment);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('debt_payments').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getDebtPayments: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToDebtPayment);
 }
 
 export async function updateDebtPayment(id: string, data: Partial<DebtPayment>): Promise<DebtPayment> {
@@ -2183,9 +2339,16 @@ export async function getCurrencyExchanges(_options?: { includeArchived?: boolea
   await initializeDatabase();
   if (!tablesExist) return [];
   // Always load ALL data — archive filtering is done client-side
-  const { data, error } = await supabase.from('currency_exchanges').select('*');
-  if (error) throw new Error(error.message);
-  return (data || [])
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('currency_exchanges').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getCurrencyExchanges: failed after retries, returning []');
+    return [];
+  }
+  return (result || [])
     .map(rowToCurrencyExchange)
     .filter(e => !e.isDeleted)
     .sort((a, b) => {
@@ -2198,9 +2361,13 @@ export async function getCurrencyExchanges(_options?: { includeArchived?: boolea
 export async function getCurrencyExchangeById(id: string): Promise<CurrencyExchange | undefined> {
   await initializeDatabase();
   if (!tablesExist) return undefined;
-  const { data, error } = await supabase.from('currency_exchanges').select('*').eq('id', id).single();
-  if (error || !data) return undefined;
-  return rowToCurrencyExchange(data);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('currency_exchanges').select('*').eq('id', id).single();
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) return undefined;
+  return result ? rowToCurrencyExchange(result) : undefined;
 }
 
 export async function addCurrencyExchange(data: {
@@ -2341,8 +2508,16 @@ export async function getExchangeStats(): Promise<{
     return { totalExchanges: 0, totalProfit: 0, totalOutgoingUsd: 0, totalIncomingUsd: 0, profitCount: 0, lossCount: 0 };
   }
   
-  const { data } = await supabase.from('currency_exchanges').select('*');
-  const exchanges = (data || []).map(rowToCurrencyExchange).filter(e => !e.isDeleted);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('currency_exchanges').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getExchangeStats: failed after retries, returning defaults');
+    return { totalExchanges: 0, totalProfit: 0, totalOutgoingUsd: 0, totalIncomingUsd: 0, profitCount: 0, lossCount: 0 };
+  }
+  const exchanges = (result || []).map(rowToCurrencyExchange).filter(e => !e.isDeleted);
   
   const totalProfit = exchanges.reduce((sum, e) => sum + e.profit, 0);
   const totalOutgoingUsd = exchanges.reduce((sum, e) => sum + e.outgoingUsd, 0);
@@ -2367,9 +2542,16 @@ export async function getExchangeStats(): Promise<{
 export async function getExchanges(): Promise<CurrencyExchange[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('currency_exchanges').select('*').order('date', { ascending: false });
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToCurrencyExchange).filter(e => !e.isDeleted);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('currency_exchanges').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getExchanges: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToCurrencyExchange).filter(e => !e.isDeleted);
 }
 
 export async function addExchange(data: {
@@ -2433,9 +2615,16 @@ export async function getUserByUsername(username: string): Promise<User | undefi
 export async function getUsers(): Promise<User[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('users').select('*');
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToUser);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('users').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getUsers: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToUser);
 }
 
 export async function loginUser(username: string, password: string): Promise<{ success: boolean; user?: User; message: string }> {
@@ -2515,9 +2704,16 @@ export async function updateUser(userId: string, data: { name?: string }): Promi
 export async function getVehicles(): Promise<Vehicle[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('vehicles').select('*');
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToVehicle).filter(v => v.isActive);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('vehicles').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getVehicles: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToVehicle).filter(v => v.isActive);
 }
 
 export async function addVehicle(data: {
@@ -2573,9 +2769,16 @@ export async function deleteVehicle(id: string): Promise<void> {
 export async function getVehicleTransactions(vehicleId: string): Promise<VehicleTransaction[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('vehicle_transactions').select('*').eq('vehicle_id', vehicleId);
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToVehicleTransaction);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('vehicle_transactions').select('*').eq('vehicle_id', vehicleId);
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getVehicleTransactions: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToVehicleTransaction);
 }
 
 export async function addVehicleTransaction(data: {
@@ -2630,9 +2833,16 @@ export async function deleteVehicleTransaction(id: string): Promise<void> {
 export async function getSharedTransactions(): Promise<SharedTransaction[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data, error } = await supabase.from('shared_transactions').select('*');
-  if (error) throw new Error(error.message);
-  return (data || []).map(rowToSharedTransaction);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('shared_transactions').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getSharedTransactions: failed after retries, returning []');
+    return [];
+  }
+  return (result || []).map(rowToSharedTransaction);
 }
 
 export async function addSharedTransaction(data: {
@@ -2685,9 +2895,16 @@ export async function deleteSharedTransaction(id: string): Promise<void> {
 export async function getVehiclesSettings(): Promise<VehiclesSettings | null> {
   await initializeDatabase();
   if (!tablesExist) return null;
-  const { data, error } = await supabase.from('vehicles_settings').select('*');
-  if (error) throw new Error(error.message);
-  const settings = (data || []).map(rowToVehiclesSettings);
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('vehicles_settings').select('*');
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getVehiclesSettings: failed after retries, returning null');
+    return null;
+  }
+  const settings = (result || []).map(rowToVehiclesSettings);
   return settings.length > 0 ? settings[0] : null;
 }
 
@@ -2750,14 +2967,30 @@ export async function addAccountDebtPayment(data: {
 export async function getAccountDebtPayments(accountId: string): Promise<DebtPayment[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  const { data: debtRows } = await supabase.from('debts').select('*').eq('account_id', accountId);
-  const accountDebts = (debtRows || []).map(rowToDebt);
+  const debtResult = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('debts').select('*').eq('account_id', accountId);
+    if (error) throw error;
+    return data;
+  });
+  if (debtResult === null) {
+    console.error('[Supabase] ❌ getAccountDebtPayments: failed to fetch debts, returning []');
+    return [];
+  }
+  const accountDebts = (debtResult || []).map(rowToDebt);
   const debtIds = accountDebts.map(d => d.id);
   
   if (debtIds.length === 0) return [];
   
-  const { data: paymentRows } = await supabase.from('debt_payments').select('*').in('debt_id', debtIds);
-  return (paymentRows || []).map(rowToDebtPayment);
+  const paymentResult = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('debt_payments').select('*').in('debt_id', debtIds);
+    if (error) throw error;
+    return data;
+  });
+  if (paymentResult === null) {
+    console.error('[Supabase] ❌ getAccountDebtPayments: failed to fetch payments, returning []');
+    return [];
+  }
+  return (paymentResult || []).map(rowToDebtPayment);
 }
 
 export async function updateCurrencyExchangeRateWithMethod(
@@ -2870,29 +3103,35 @@ export async function getDataStats(): Promise<{
   debtPayments: number;
   currencyExchanges: number;
 }> {
+  const defaultStats = { currencies: 0, vaults: 0, accounts: 0, transactions: 0, debts: 0, debtPayments: 0, currencyExchanges: 0 };
   await initializeDatabase();
-  if (!tablesExist) {
-    return { currencies: 0, vaults: 0, accounts: 0, transactions: 0, debts: 0, debtPayments: 0, currencyExchanges: 0 };
+  if (!tablesExist) return defaultStats;
+  
+  const result = await fetchWithRetry(async () => {
+    const [curRes, vRes, aRes, tRes, dRes, dpRes, ceRes] = await Promise.all([
+      supabase.from('currencies').select('id', { count: 'exact', head: true }),
+      supabase.from('vaults').select('id', { count: 'exact', head: true }),
+      supabase.from('accounts').select('id', { count: 'exact', head: true }),
+      supabase.from('transactions').select('id', { count: 'exact', head: true }),
+      supabase.from('debts').select('id', { count: 'exact', head: true }),
+      supabase.from('debt_payments').select('id', { count: 'exact', head: true }),
+      supabase.from('currency_exchanges').select('id', { count: 'exact', head: true }),
+    ]);
+    return { curRes, vRes, aRes, tRes, dRes, dpRes, ceRes };
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getDataStats: failed after retries, returning defaults');
+    return defaultStats;
   }
   
-  const [curRes, vRes, aRes, tRes, dRes, dpRes, ceRes] = await Promise.all([
-    supabase.from('currencies').select('id', { count: 'exact', head: true }),
-    supabase.from('vaults').select('id', { count: 'exact', head: true }),
-    supabase.from('accounts').select('id', { count: 'exact', head: true }),
-    supabase.from('transactions').select('id', { count: 'exact', head: true }),
-    supabase.from('debts').select('id', { count: 'exact', head: true }),
-    supabase.from('debt_payments').select('id', { count: 'exact', head: true }),
-    supabase.from('currency_exchanges').select('id', { count: 'exact', head: true }),
-  ]);
-  
   return {
-    currencies: curRes.count || 0,
-    vaults: vRes.count || 0,
-    accounts: aRes.count || 0,
-    transactions: tRes.count || 0,
-    debts: dRes.count || 0,
-    debtPayments: dpRes.count || 0,
-    currencyExchanges: ceRes.count || 0,
+    currencies: result.curRes.count || 0,
+    vaults: result.vRes.count || 0,
+    accounts: result.aRes.count || 0,
+    transactions: result.tRes.count || 0,
+    debts: result.dRes.count || 0,
+    debtPayments: result.dpRes.count || 0,
+    currencyExchanges: result.ceRes.count || 0,
   };
 }
 
@@ -2958,18 +3197,26 @@ export async function autoArchiveOldRecords(monthsThreshold: number = 6): Promis
 }
 
 export async function getArchivedCounts(): Promise<{ transactions: number; debts: number; debtPayments: number; currencyExchanges: number }> {
+  const defaultCounts = { transactions: 0, debts: 0, debtPayments: 0, currencyExchanges: 0 };
   await initializeDatabase();
-  const [txResult, debtResult, paymentResult, exchangeResult] = await Promise.all([
-    supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('is_archived', true),
-    supabase.from('debts').select('id', { count: 'exact', head: true }).eq('is_archived', true),
-    supabase.from('debt_payments').select('id', { count: 'exact', head: true }).eq('is_archived', true),
-    supabase.from('currency_exchanges').select('id', { count: 'exact', head: true }).eq('is_archived', true).eq('is_deleted', false),
-  ]);
+  const result = await fetchWithRetry(async () => {
+    const [txResult, debtResult, paymentResult, exchangeResult] = await Promise.all([
+      supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('is_archived', true),
+      supabase.from('debts').select('id', { count: 'exact', head: true }).eq('is_archived', true),
+      supabase.from('debt_payments').select('id', { count: 'exact', head: true }).eq('is_archived', true),
+      supabase.from('currency_exchanges').select('id', { count: 'exact', head: true }).eq('is_archived', true).eq('is_deleted', false),
+    ]);
+    return { txResult, debtResult, paymentResult, exchangeResult };
+  });
+  if (result === null) {
+    console.error('[Supabase] ❌ getArchivedCounts: failed after retries, returning defaults');
+    return defaultCounts;
+  }
   
   return {
-    transactions: txResult.count || 0,
-    debts: debtResult.count || 0,
-    debtPayments: paymentResult.count || 0,
-    currencyExchanges: exchangeResult.count || 0,
+    transactions: result.txResult.count || 0,
+    debts: result.debtResult.count || 0,
+    debtPayments: result.paymentResult.count || 0,
+    currencyExchanges: result.exchangeResult.count || 0,
   };
 }

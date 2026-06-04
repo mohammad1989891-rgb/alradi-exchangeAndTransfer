@@ -60,6 +60,20 @@ export function formatDateTime(date: string | Date): string {
 }
 
 /**
+ * Format time only (HH:MM AM/PM)
+ * @param date - Date string or Date object
+ * @returns Formatted time string (e.g., "2:35 PM")
+ */
+export function formatTime(date: string | Date): string {
+  const d = new Date(date);
+  return d.toLocaleTimeString('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+/**
  * Calculate fees based on type
  * @param amount - Base amount
  * @param feesType - Type of fees calculation

@@ -3,7 +3,7 @@
 import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight, Clock, Banknote, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatNumber, formatDate } from '@/lib/format';
+import { formatNumber, formatDate, formatTime } from '@/lib/format';
 import type { Transaction } from '@/types';
 
 interface TransactionCardProps {
@@ -127,6 +127,9 @@ export function TransactionCard({ transaction, index, onClick }: TransactionCard
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <span>{formatDate(transaction.date)}</span>
+            {transaction.createdAt && (
+              <span className="text-[10px] text-muted-foreground/70">{formatTime(transaction.createdAt)}</span>
+            )}
             {transaction.description && (
               <>
                 <span>•</span>

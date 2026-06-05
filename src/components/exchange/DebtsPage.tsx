@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, Search, AlertCircle, CreditCard, Trash2, ArrowUpRight, ArrowDownRight, Banknote, Clock, ChevronLeft, AlertTriangle, CheckCircle, List, X, ChevronDown } from 'lucide-react';
+import { Plus, Search, AlertCircle, CreditCard, Trash2, ArrowUpRight, ArrowDownRight, Banknote, Clock, ChevronLeft, AlertTriangle, CheckCircle, List, X, ChevronDown, Pencil } from 'lucide-react';
 import { DebtModal } from './DebtModal';
 import { MultiCurrencyPaymentModal } from './MultiCurrencyPaymentModal';
+import { EditMovementModal } from './EditMovementModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -158,6 +159,56 @@ export function DebtsPage() {
     data: Debt | DebtPayment;
     overflowAmount?: number;
   } | null>(null);
+
+  // حالة نافذة تعديل الحركة
+  const [editingMovement, setEditingMovement] = useState<{
+    type: 'DEBT' | 'PAYMENT';
+    originalData: Debt | DebtPayment;
+    direction: 'RECEIVABLE' | 'PAYABLE';
+    mode: 'CASH' | 'DEFERRED';
+  } | null>(null);
+
+  // حالة الضغط المطول
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [longPressedMovement, setLongPressedMovement] = useState<UnifiedMovement | null>(null);
+
+  // معالج الضغط المطول
+  const handleLongPressStart = (movement: UnifiedMovement) => {
+    longPressTimerRef.current = setTimeout(() => {
+      setLongPressedMovement(movement);
+    }, 500); // 500ms للضغط المطول
+  };
+
+  const handleLongPressEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const handleEditMovement = (movement: UnifiedMovement) => {
+    setEditingMovement({
+      type: movement.type,
+      originalData: movement.originalData,
+      direction: movement.direction,
+      mode: movement.mode,
+    });
+    setLongPressedMovement(null);
+  };
+
+  // إعادة تحميل البيانات بعد التعديل
+  const handleEditSaved = async () => {
+    if (selectedAccountSummary) {
+      const updatedSummary = await getAccountDebtSummary(selectedAccountSummary.accountId);
+      if (updatedSummary.debts.length === 0) {
+        setSelectedAccountSummary(null);
+        setShowAllMovementsModal(false);
+      } else {
+        setSelectedAccountSummary(calculateCumulativeSummary(updatedSummary));
+      }
+    }
+    await refreshData();
+  };
 
   // حساب المدفوع لكل دين
   const getPaymentsForDebt = (debtId: string): DebtPayment[] => {
@@ -1227,7 +1278,7 @@ export function DebtsPage() {
                         <div
                           key={`${movement.type}-${movement.id}`}
                           className={cn(
-                            'p-3 rounded-xl border',
+                            'p-3 rounded-xl border select-none',
                             isOverflow
                               ? 'bg-gray-50/50 dark:bg-gray-950/20 border-gray-200/50' // لون محايد للفائض
                               : movement.type === 'PAYMENT'
@@ -1236,6 +1287,16 @@ export function DebtsPage() {
                                   ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50'
                                   : 'bg-red-50/50 dark:bg-red-950/20 border-red-200/50'
                           )}
+                          onTouchStart={() => handleLongPressStart(movement)}
+                          onTouchEnd={handleLongPressEnd}
+                          onTouchCancel={handleLongPressEnd}
+                          onMouseDown={() => handleLongPressStart(movement)}
+                          onMouseUp={handleLongPressEnd}
+                          onMouseLeave={handleLongPressEnd}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            handleEditMovement(movement);
+                          }}
                         >
                           <div className="flex items-start justify-between mb-2">
                             <div className="flex items-center gap-2">
@@ -1312,6 +1373,15 @@ export function DebtsPage() {
                           )}
 
                           <div className="flex gap-2 mt-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEditMovement(movement)}
+                              className="text-xs h-7"
+                            >
+                              <Pencil className="w-3 h-3 ml-1" />
+                              تعديل
+                            </Button>
                             <Button
                               size="sm"
                               variant="destructive"
@@ -1422,6 +1492,52 @@ export function DebtsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Long Press Context Menu */}
+      <Dialog open={!!longPressedMovement} onOpenChange={() => setLongPressedMovement(null)}>
+        <DialogContent className="max-w-xs">
+          <DialogHeader>
+            <DialogTitle className="text-base">
+              {longPressedMovement?.type === 'DEBT' ? 'خيارات الدين' : 'خيارات الدفعة'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 mt-2">
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2"
+              onClick={() => longPressedMovement && handleEditMovement(longPressedMovement)}
+            >
+              <Pencil className="w-4 h-4" />
+              تعديل
+            </Button>
+            <Button
+              variant="destructive"
+              className="w-full justify-start gap-2"
+              onClick={() => {
+                if (longPressedMovement) {
+                  if (longPressedMovement.type === 'DEBT') {
+                    handleDeleteDebtClick(longPressedMovement.originalData as Debt);
+                  } else {
+                    handleDeletePaymentClick(longPressedMovement.originalData as DebtPayment);
+                  }
+                  setLongPressedMovement(null);
+                }
+              }}
+            >
+              <Trash2 className="w-4 h-4" />
+              حذف
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Movement Modal */}
+      <EditMovementModal
+        isOpen={!!editingMovement}
+        onClose={() => setEditingMovement(null)}
+        movement={editingMovement}
+        onSaved={handleEditSaved}
+      />
 
 
     </div>

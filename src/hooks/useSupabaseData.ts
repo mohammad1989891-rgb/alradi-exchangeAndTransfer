@@ -29,6 +29,8 @@ import {
   addDebt,
   updateDebt,
   deleteDebt,
+  editDebtWithVaultReversal,
+  editDebtPaymentWithVaultReversal,
   getDebtPayments,
   addDebtPayment,
   deleteDebtPayment,
@@ -917,6 +919,26 @@ export function useSupabaseData() {
         await refreshData();
       } catch (error) {
         console.error('Error deleting debt:', error);
+        throw error;
+      }
+    },
+    editDebtWithVaultReversal: async (id: string, data: Parameters<typeof editDebtWithVaultReversal>[1]): Promise<Debt> => {
+      try {
+        const result = await editDebtWithVaultReversal(id, data);
+        await refreshData();
+        return result;
+      } catch (error) {
+        console.error('Error editing debt with vault reversal:', error);
+        throw error;
+      }
+    },
+    editDebtPaymentWithVaultReversal: async (id: string, data: Parameters<typeof editDebtPaymentWithVaultReversal>[1]): Promise<DebtPayment> => {
+      try {
+        const result = await editDebtPaymentWithVaultReversal(id, data);
+        await refreshData();
+        return result;
+      } catch (error) {
+        console.error('Error editing debt payment with vault reversal:', error);
         throw error;
       }
     },

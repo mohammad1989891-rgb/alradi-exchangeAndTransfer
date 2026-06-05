@@ -1570,6 +1570,256 @@ export async function updateDebt(id: string, data: Partial<Debt>): Promise<Debt>
   return rowToDebt(updatedRow);
 }
 
+// ============================================
+// 🔹 تعديل الدين مع عكس الحركة على الصندوق
+// 🔸 الخطوة 1: عكس تأثير الحركة القديمة على الصندوق
+// 🔸 الخطوة 2: تحديث سجل الدين
+// 🔸 الخطوة 3: تطبيق تأثير الحركة الجديدة على الصندوق
+// 🔸 منطق الصناديق:
+//   - لنا + كاش → خصم من الصندوق (نخرج مبلغ للطرف الآخر)
+//   - لنا + آجل → لا تأثير
+//   - علينا + كاش → إضافة للصندوق (نستلم مبلغ من الطرف الآخر)
+//   - علينا + آجل → لا تأثير
+// ============================================
+export async function editDebtWithVaultReversal(id: string, newData: {
+  accountId?: string;
+  currencyId?: string;
+  amount?: number;
+  conversionFactor?: number;
+  conversionMethod?: 'MULTIPLY' | 'DIVIDE';
+  description?: string | null;
+  date?: string;
+  debtType?: 'RECEIVABLE' | 'PAYABLE';
+  debtMode?: 'CASH' | 'DEFERRED';
+}): Promise<Debt> {
+  await initializeDatabase();
+  const now = new Date();
+
+  // 🔸 الخطوة 1: جلب الدين القديم وعكس تأثيره على الصندوق
+  const { data: oldDebtRow } = await supabase.from('debts').select('*').eq('id', id).single();
+  if (!oldDebtRow) throw new Error('الدين غير موجود');
+  const oldDebt = rowToDebt(oldDebtRow);
+
+  // عكس تأثير الدين القديم على الصندوق
+  if (oldDebt.debtMode === 'CASH') {
+    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', oldDebt.currencyId);
+    if (vaultRows && vaultRows.length > 0) {
+      const vault = rowToVault(vaultRows[0]);
+      let newBalance = vault.balance;
+      // عكس: لنا كان خصم → نعيد، علينا كان إضافة → نخصم
+      if (oldDebt.debtType === 'PAYABLE') {
+        newBalance = vault.balance - oldDebt.amount;
+      } else {
+        newBalance = vault.balance + oldDebt.amount;
+      }
+      await supabase.from('vaults').update({
+        balance: newBalance,
+        updated_at: now.toISOString(),
+      }).eq('id', vault.id);
+    }
+  }
+
+  // 🔸 الخطوة 2: حساب finalBalance الجديد
+  const newAmount = newData.amount ?? oldDebt.amount;
+  const newConversionFactor = newData.conversionFactor ?? oldDebt.conversionFactor;
+  const newConversionMethod = newData.conversionMethod ?? oldDebt.conversionMethod;
+  const newCurrencyId = newData.currencyId ?? oldDebt.currencyId;
+  const newDebtType = newData.debtType ?? oldDebt.debtType;
+  const newDebtMode = newData.debtMode ?? oldDebt.debtMode;
+
+  let newFinalBalance = newAmount;
+  if (newConversionMethod === 'MULTIPLY') {
+    newFinalBalance = newAmount * newConversionFactor;
+  } else {
+    newFinalBalance = newAmount / newConversionFactor;
+  }
+
+  // 🔸 الخطوة 2.5: تحديث سجل الدين
+  const updatedFields: Record<string, unknown> = {
+    accountId: newData.accountId ?? oldDebt.accountId,
+    currencyId: newCurrencyId,
+    amount: newAmount,
+    conversionFactor: newConversionFactor,
+    conversionMethod: newConversionMethod,
+    finalBalance: newFinalBalance,
+    description: newData.description !== undefined ? newData.description : oldDebt.description,
+    debtType: newDebtType,
+    debtMode: newDebtMode,
+    date: newData.date ? new Date(newData.date).toISOString() : oldDebt.date,
+    updatedAt: now,
+  };
+
+  const { error: updateError } = await supabase.from('debts').update(
+    debtToRow(updatedFields as Partial<Debt>)
+  ).eq('id', id);
+  if (updateError) throw new Error(updateError.message);
+
+  // 🔸 الخطوة 3: تطبيق تأثير الدين الجديد على الصندوق
+  if (newDebtMode === 'CASH') {
+    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', newCurrencyId);
+    if (vaultRows && vaultRows.length > 0) {
+      const vault = rowToVault(vaultRows[0]);
+      let newBalance = vault.balance;
+      // لنا + كاش → خصم من الصندوق
+      // علينا + كاش → إضافة للصندوق
+      if (newDebtType === 'PAYABLE') {
+        newBalance = vault.balance + newAmount;
+      } else {
+        newBalance = vault.balance - newAmount;
+      }
+      await supabase.from('vaults').update({
+        balance: newBalance,
+        updated_at: now.toISOString(),
+      }).eq('id', vault.id);
+    }
+  }
+
+  // 🔸 إعادة حساب حالة isPaid للدين
+  const { data: allPaymentRows } = await supabase.from('debt_payments').select('*').eq('debt_id', id);
+  const allPayments = (allPaymentRows || []).map(rowToDebtPayment);
+  const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+
+  if (totalPaid >= newFinalBalance && !oldDebt.isPaid) {
+    await supabase.from('debts').update({
+      is_paid: true,
+      paid_at: now.toISOString(),
+      updated_at: now.toISOString(),
+    }).eq('id', id);
+  } else if (totalPaid < newFinalBalance && oldDebt.isPaid) {
+    await supabase.from('debts').update({
+      is_paid: false,
+      paid_at: null,
+      updated_at: now.toISOString(),
+    }).eq('id', id);
+  }
+
+  // 🔸 إرجاع الدين المحدّث
+  const { data: updatedRow, error: refetchError } = await supabase.from('debts').select('*').eq('id', id).single();
+  if (refetchError) throw new Error(refetchError.message);
+  return rowToDebt(updatedRow);
+}
+
+// ============================================
+// 🔹 تعديل دفعة السداد مع عكس الحركة على الصندوق
+// 🔸 الخطوة 1: عكس تأثير الدفعة القديمة على الصندوق
+// 🔸 الخطوة 2: تحديث سجل الدفعة
+// 🔸 الخطوة 3: تطبيق تأثير الدفعة الجديدة على الصندوق
+// 🔸 منطق الصناديق:
+//   - لنا + كاش → خصم من الصندوق (نخرج مبلغ للطرف الآخر)
+//   - لنا + آجل → لا تأثير
+//   - علينا + كاش → إضافة للصندوق (نستلم مبلغ من الطرف الآخر)
+//   - علينا + آجل → لا تأثير
+// ============================================
+export async function editDebtPaymentWithVaultReversal(id: string, newData: {
+  amount?: number;
+  currencyId?: string;
+  description?: string | null;
+  date?: string;
+  paymentMode?: 'CASH' | 'DEFERRED';
+  paymentDirection?: 'RECEIVABLE' | 'PAYABLE';
+}): Promise<DebtPayment> {
+  await initializeDatabase();
+  const now = new Date();
+
+  // 🔸 الخطوة 1: جلب الدفعة القديمة وعكس تأثيرها على الصندوق
+  const { data: oldPaymentRow } = await supabase.from('debt_payments').select('*').eq('id', id).single();
+  if (!oldPaymentRow) throw new Error('الدفعة غير موجودة');
+  const oldPayment = rowToDebtPayment(oldPaymentRow);
+
+  // جلب الدين المرتبط
+  const { data: debtRow } = await supabase.from('debts').select('*').eq('id', oldPayment.debtId).single();
+  const debt = debtRow ? rowToDebt(debtRow) : null;
+
+  const oldPaymentMode = oldPayment.paymentMode || 'CASH';
+  const oldPaymentDirection = oldPayment.paymentDirection || debt?.debtType || 'RECEIVABLE';
+
+  // عكس تأثير الدفعة القديمة على الصندوق
+  if (oldPaymentMode === 'CASH') {
+    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', oldPayment.currencyId);
+    if (vaultRows && vaultRows.length > 0) {
+      const vault = rowToVault(vaultRows[0]);
+      let newBalance = vault.balance;
+      // عكس: لنا كان خصم → نعيد، علينا كان إضافة → نخصم
+      if (oldPaymentDirection === 'RECEIVABLE') {
+        newBalance = vault.balance + oldPayment.amount;
+      } else {
+        newBalance = vault.balance - oldPayment.amount;
+      }
+      await supabase.from('vaults').update({
+        balance: newBalance,
+        updated_at: now.toISOString(),
+      }).eq('id', vault.id);
+    }
+  }
+
+  // 🔸 الخطوة 2: تحديث سجل الدفعة
+  const newAmount = newData.amount ?? oldPayment.amount;
+  const newCurrencyId = newData.currencyId ?? oldPayment.currencyId;
+  const newPaymentMode = newData.paymentMode ?? oldPaymentMode;
+  const newPaymentDirection = newData.paymentDirection ?? oldPaymentDirection;
+
+  const updatedFields: Record<string, unknown> = {
+    amount: newAmount,
+    currencyId: newCurrencyId,
+    description: newData.description !== undefined ? newData.description : oldPayment.description,
+    date: newData.date ? new Date(newData.date).toISOString() : oldPayment.date,
+    paymentMode: newPaymentMode,
+    paymentDirection: newPaymentDirection,
+    updatedAt: now,
+  };
+
+  const { error: updateError } = await supabase.from('debt_payments').update(
+    debtPaymentToRow(updatedFields as Partial<DebtPayment>)
+  ).eq('id', id);
+  if (updateError) throw new Error(updateError.message);
+
+  // 🔸 الخطوة 3: تطبيق تأثير الدفعة الجديدة على الصندوق
+  if (newPaymentMode === 'CASH') {
+    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', newCurrencyId);
+    if (vaultRows && vaultRows.length > 0) {
+      const vault = rowToVault(vaultRows[0]);
+      let newBalance = vault.balance;
+      // لنا + كاش → خصم من الصندوق
+      // علينا + كاش → إضافة للصندوق
+      if (newPaymentDirection === 'RECEIVABLE') {
+        newBalance = vault.balance - newAmount;
+      } else {
+        newBalance = vault.balance + newAmount;
+      }
+      await supabase.from('vaults').update({
+        balance: newBalance,
+        updated_at: now.toISOString(),
+      }).eq('id', vault.id);
+    }
+  }
+
+  // 🔸 إعادة حساب حالة isPaid للدين
+  if (debt) {
+    const { data: allPaymentRows } = await supabase.from('debt_payments').select('*').eq('debt_id', oldPayment.debtId);
+    const allPayments = (allPaymentRows || []).map(rowToDebtPayment);
+    const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    if (totalPaid >= debt.finalBalance && !debt.isPaid) {
+      await supabase.from('debts').update({
+        is_paid: true,
+        paid_at: now.toISOString(),
+        updated_at: now.toISOString(),
+      }).eq('id', oldPayment.debtId);
+    } else if (totalPaid < debt.finalBalance && debt.isPaid) {
+      await supabase.from('debts').update({
+        is_paid: false,
+        paid_at: null,
+        updated_at: now.toISOString(),
+      }).eq('id', oldPayment.debtId);
+    }
+  }
+
+  // 🔸 إرجاع الدفعة المحدّثة
+  const { data: updatedRow, error: refetchError } = await supabase.from('debt_payments').select('*').eq('id', id).single();
+  if (refetchError) throw new Error(refetchError.message);
+  return rowToDebtPayment(updatedRow);
+}
+
 export async function deleteDebt(id: string): Promise<void> {
   await initializeDatabase();
   

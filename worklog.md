@@ -149,3 +149,66 @@ Stage Summary:
 - Backend respects isComplete from frontend directly (no AND check with isDataComplete)
 - Backend supports finalBalance override for incomplete transactions
 - All changes are UI-behavior only - no design/layout changes (UI Freeze respected)
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Fix Debt Calculation Logic - Separate by Currency (UI Freeze)
+
+Work Log:
+- Read and analyzed key files: supabaseDb.ts (AccountDebtSummary, getAccountDebtSummary), DebtsPage.tsx (CumulativeAccountSummary, calculateCumulativeSummary, account card, detail modal, debt details, movement items, executePayment), localDb.ts (parallel AccountDebtSummary)
+- Identified root cause: all debt calculations mixed currencies together, e.g., USD 1000 + SYP 1,500,000 summed as a single number
+- Identified hardcoded `cur_usd` in executePayment overflow transaction
+- Identified hardcoded `$` symbols throughout all display sections
+
+Changes made:
+
+1. **supabaseDb.ts**:
+   - Added `CurrencyDebtSummary` interface with per-currency fields (receivable, payable, receivablePaid, payablePaid, receivableRemaining, payableRemaining, netBalance)
+   - Added `currencyBreakdown: CurrencyDebtSummary[]` to `AccountDebtSummary`
+   - Updated `getAccountDebtSummary()` to group debts by `currencyId` first, calculate per-currency totals, build `currencyBreakdown` array
+   - Kept existing global total fields for backward compatibility (with comment noting they mix currencies)
+
+2. **localDb.ts** (consistency update):
+   - Added same `CurrencyDebtSummary` interface
+   - Added `currencyBreakdown: CurrencyDebtSummary[]` to `AccountDebtSummary`
+   - Updated `getAccountDebtSummary()` with same per-currency logic
+
+3. **DebtsPage.tsx - Interfaces & Calculation**:
+   - Added `CurrencyCumulativeSummary` interface (cashReceivable, cashPayable, cashPaid, deferredReceivable, deferredPayable, deferredPaid, netBalance per currency)
+   - Added `currencyBreakdown: CurrencyCumulativeSummary[]` to `CumulativeAccountSummary`
+   - Added `getCurrencySymbol(currencyId)` helper function
+   - Updated `calculateCumulativeSummary()` to group debts by `currencyId` first, calculate per-currency totals for each currency, build `currencyBreakdown` array
+   - Kept existing global cumulative fields for backward compatibility
+
+4. **DebtsPage.tsx - Fix hardcoded cur_usd**:
+   - Changed `currencyId: 'cur_usd'` to `currencyId: unpaidDebtCurrencyId || 'cur_usd'` in executePayment overflow transaction
+   - Added `unpaidDebtCurrencyId` variable to track the unpaid debt's currency across the payment flow
+
+5. **DebtsPage.tsx - Account Card Display**:
+   - Replaced single "الرصيد التراكمي" with per-currency balance lines
+   - For single-currency accounts: shows one balance with actual currency symbol
+   - For multi-currency accounts: shows each currency as separate line with symbol and amount
+   - Updated grid items (لنا نقدي, علينا نقدي, مدفوع) to show per-currency breakdown when multiple currencies exist
+
+6. **DebtsPage.tsx - Detail Modal**:
+   - Replaced single cumulative summary section with per-currency sections
+   - Each currency shows: لنا, علينا, مدفوع, الرصيد النهائي with correct currency symbol
+   - Moved payment button outside the currency sections
+
+7. **DebtsPage.tsx - Currency Symbol Fixes**:
+   - Fixed `$` → `getCurrencySymbol(debt.currencyId)` in debt detail items (remaining, finalBalance)
+   - Fixed `$` → `getCurrencySymbol(movement.originalData.currencyId)` in movement items (amount, remaining)
+   - Fixed `$` → `getCurrencySymbol(deleteConfirm.data.currencyId)` in delete confirmation dialog
+   - Fixed `$` → `getCurrencySymbol(currencyBreakdown[0].currencyId)` in overpayment dialog
+   - Fixed `$` → `getCurrencySymbol(unpaidDebtCurrencyId)` in toast messages
+
+8. **Verification**: `bun run lint` — all clean, no errors
+
+Stage Summary:
+- Critical accounting bug fixed: debts in different currencies are never summed together
+- Per-currency breakdown available in both `AccountDebtSummary.currencyBreakdown` and `CumulativeAccountSummary.currencyBreakdown`
+- All display sections now use actual currency symbols instead of hardcoded `$`
+- Overflow transactions use the debt's actual currency instead of hardcoded `cur_usd`
+- Backward compatibility maintained: existing global total fields still present but marked as mixing currencies
+- UI Freeze respected: no colors, layouts, component structure, spacing, or visual design changes

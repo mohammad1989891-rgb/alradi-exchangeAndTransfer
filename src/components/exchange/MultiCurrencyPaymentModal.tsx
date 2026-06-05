@@ -52,7 +52,16 @@ interface CumulativeAccountSummary {
   cumulativeCashPaid: number;
   cumulativeCashRemaining: number;
   primaryDebtMode: 'CASH' | 'DEFERRED';
-  [key: string]: unknown;
+  currencyBreakdown?: Array<{
+    currencyId: string;
+    netBalance: number;
+    cashReceivable: number;
+    cashPayable: number;
+    cashPaid: number;
+    deferredReceivable: number;
+    deferredPayable: number;
+    deferredPaid: number;
+  }>;
 }
 
 interface Currency {
@@ -62,7 +71,7 @@ interface Currency {
   symbol: string;
   isDefault: boolean;
   exchangeRate: number;
-  conversionMethod: string;
+  conversionMethod?: string;
 }
 
 interface CurrencyAllocation {

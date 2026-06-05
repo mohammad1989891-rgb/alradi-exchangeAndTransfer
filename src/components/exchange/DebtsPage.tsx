@@ -31,7 +31,7 @@ import { formatNumber, formatDate } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import type { Debt, DebtPayment } from '@/lib/supabaseDb';
-import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary } from '@/lib/supabaseDb';
+import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary, type CurrencyDebtSummary } from '@/lib/supabaseDb';
 import { groupByMonth } from '@/lib/monthlyGrouping';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
@@ -42,14 +42,26 @@ interface UnifiedMovement {
   date: Date;
   direction: 'RECEIVABLE' | 'PAYABLE'; // لنا أو علينا
   mode: 'CASH' | 'DEFERRED';
-  description?: string;
+  description?: string | null;
   remaining?: number;
   originalData: Debt | DebtPayment;
   overflowTransactionId?: string | null;
 }
 
+// واجهة للملخص التراكمي حسب العملة
+interface CurrencyCumulativeSummary {
+  currencyId: string;
+  cashReceivable: number;
+  cashPayable: number;
+  cashPaid: number;
+  deferredReceivable: number;
+  deferredPayable: number;
+  deferredPaid: number;
+  netBalance: number;  // positive = لنا, negative = علينا (same currency only)
+}
+
 // واجهة للحساب مع الإجمالي التراكمي
-interface CumulativeAccountSummary extends AccountDebtSummary {
+interface CumulativeAccountSummary extends Omit<AccountDebtSummary, 'currencyBreakdown'> {
   // الديون النقدية فقط
   cashDebts: Debt[];
   deferredDebts: Debt[];
@@ -62,6 +74,8 @@ interface CumulativeAccountSummary extends AccountDebtSummary {
   netCashBalance: number;              // صافي النقدية = (لنا - علينا) - مدفوع
   // معلومات إضافية لمعالجة الدفعات الزائدة
   primaryDebtMode: 'CASH' | 'DEFERRED';  // نوع الدين الأساسي
+  // الملخص التراكمي حسب العملة
+  currencyBreakdown: CurrencyCumulativeSummary[];
 }
 
 // واجهة مساعدة للتجميع الشهري للحركات
@@ -258,6 +272,11 @@ export function DebtsPage() {
     });
   }, [debtPayments]);
 
+  // دالة مساعدة للحصول على رمز العملة
+  const getCurrencySymbol = (currencyId: string): string => {
+    return currencies.find(c => c.id === currencyId)?.symbol || '$';
+  };
+
   // حساب الملخص التراكمي للحساب
   const calculateCumulativeSummary = (summary: AccountDebtSummary): CumulativeAccountSummary => {
     // فصل الديون النقدية عن الآجلة
@@ -265,7 +284,78 @@ export function DebtsPage() {
     const deferredDebts = summary.debts.filter(d => d.debtMode === 'DEFERRED' || !d.debtMode);
 
     // ============================================
-    // 🔹 حساب الديون النقدية
+    // 🔹 حسابات حسب العملة (لا ندمج عملات مختلفة)
+    // ============================================
+    const allDebts = [...cashDebts, ...deferredDebts];
+    const currencyIds = [...new Set(allDebts.map(d => d.currencyId))];
+
+    const currencyBreakdown: CurrencyCumulativeSummary[] = currencyIds.map(currencyId => {
+      const currencyCashDebts = cashDebts.filter(d => d.currencyId === currencyId);
+      const currencyDeferredDebts = deferredDebts.filter(d => d.currencyId === currencyId);
+
+      let cashReceivable = 0;
+      let cashPayable = 0;
+      let cashPaid = 0;
+
+      for (const debt of currencyCashDebts) {
+        const paid = getPaidAmountForDebt(debt.id);
+        cashPaid += paid;
+        if (debt.debtType === 'RECEIVABLE' || !debt.debtType) {
+          cashReceivable += debt.finalBalance;
+        } else {
+          cashPayable += debt.finalBalance;
+        }
+      }
+
+      let deferredReceivable = 0;
+      let deferredPayable = 0;
+      let deferredPaid = 0;
+
+      for (const debt of currencyDeferredDebts) {
+        const paid = getPaidAmountForDebt(debt.id);
+        deferredPaid += paid;
+        if (debt.debtType === 'RECEIVABLE' || !debt.debtType) {
+          deferredReceivable += debt.finalBalance;
+        } else {
+          deferredPayable += debt.finalBalance;
+        }
+      }
+
+      // حساب الدفعات حسب الاتجاه لهذه العملة فقط
+      let receivablePayments = 0;
+      let payablePayments = 0;
+
+      const currencyAllDebts = [...currencyCashDebts, ...currencyDeferredDebts];
+      for (const debt of currencyAllDebts) {
+        const payments = getPaymentsForDebt(debt.id);
+        for (const payment of payments) {
+          const direction = payment.paymentDirection || debt.debtType || 'RECEIVABLE';
+          if (direction === 'RECEIVABLE') {
+            receivablePayments += payment.amount;
+          } else {
+            payablePayments += payment.amount;
+          }
+        }
+      }
+
+      const receivableTransactions = cashReceivable + deferredReceivable;
+      const payableTransactions = cashPayable + deferredPayable;
+      const netBalance = receivableTransactions - payableTransactions + receivablePayments - payablePayments;
+
+      return {
+        currencyId,
+        cashReceivable,
+        cashPayable,
+        cashPaid,
+        deferredReceivable,
+        deferredPayable,
+        deferredPaid,
+        netBalance,
+      };
+    });
+
+    // ============================================
+    // 🔹 حساب الديون النقدية (إجمالي لكل العملات - للتوافق)
     // ============================================
     let cashReceivable = 0;   // ديون نقدية لنا
     let cashPayable = 0;      // ديون نقدية علينا
@@ -283,7 +373,7 @@ export function DebtsPage() {
     }
 
     // ============================================
-    // 🔹 حساب الديون الآجلة
+    // 🔹 حساب الديون الآجلة (إجمالي لكل العملات - للتوافق)
     // ============================================
     let deferredReceivable = 0;   // ديون آجلة لنا
     let deferredPayable = 0;      // ديون آجلة علينا
@@ -299,16 +389,6 @@ export function DebtsPage() {
         deferredPayable += debt.finalBalance;
       }
     }
-
-    // ============================================
-    // 🔹 حساب الرصيد التراكمي الكلي
-    // 🔸 المعادلة الصحيحة:
-    // 🔸 finalBalance = RT - PT + RP - PP
-    // 🔸 RT = receivableTransactions (ديون لنا)
-    // 🔸 PT = payableTransactions (ديون علينا)
-    // 🔸 RP = receivablePayments (دفعات لنا)
-    // 🔸 PP = payablePayments (دفعات علينا)
-    // ============================================
     
     // إجمالي الحركات (الديون) لنا (نقد + آجل)
     const receivableTransactions = cashReceivable + deferredReceivable;
@@ -318,13 +398,10 @@ export function DebtsPage() {
     
     // ============================================
     // 🔹 حساب الدفعات حسب الاتجاه
-    // 🔸 paymentDirection === 'RECEIVABLE' = دفعة لنا (الطرف يدفع لنا)
-    // 🔸 paymentDirection === 'PAYABLE' = دفعة علينا (نحن ندفع للطرف)
     // ============================================
     let receivablePayments = 0;  // دفعات لنا
     let payablePayments = 0;     // دفعات علينا
     
-    const allDebts = [...cashDebts, ...deferredDebts];
     for (const debt of allDebts) {
       const payments = getPaymentsForDebt(debt.id);
       for (const payment of payments) {
@@ -338,14 +415,8 @@ export function DebtsPage() {
       }
     }
     
-    // إجمالي المدفوعات (للعرض فقط)
-    const totalPaid = cashPaid + deferredPaid;
-    
     // ============================================
-    // 🔹 المعادلة الصحيحة للرصيد النهائي
-    // 🔸 finalBalance = RT - PT + RP - PP
-    // 🔸 موجب = لنا
-    // 🔸 سالب = علينا
+    // 🔹 المعادلة الصحيحة للرصيد النهائي (للتوافق)
     // ============================================
     const netCashBalance = 
       receivableTransactions    // ديون لنا (موجب)
@@ -373,6 +444,8 @@ export function DebtsPage() {
       // الرصيد التراكمي الكلي
       netCashBalance,
       primaryDebtMode,
+      // الملخص حسب العملة
+      currencyBreakdown,
     };
   };
 
@@ -522,6 +595,7 @@ export function DebtsPage() {
       const direction = currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
 
       let addedPaymentId: string | null = null;
+      let unpaidDebtCurrencyId: string | undefined;
       
       if (appliedAmount > 0) {
         // ============================================
@@ -536,6 +610,7 @@ export function DebtsPage() {
         });
 
         if (unpaidDebt) {
+          unpaidDebtCurrencyId = unpaidDebt.currencyId;
           const payment = await addDebtPayment({
             debtId: unpaidDebt.id,
             amount: appliedAmount,
@@ -576,7 +651,7 @@ export function DebtsPage() {
 
         const transaction = await addTransaction({
           accountId: selectedAccountSummary.accountId,
-          currencyId: 'cur_usd',
+          currencyId: unpaidDebtCurrencyId || 'cur_usd',
           type: overflowTransactionType,
           paymentType: overflowPaymentType,
           amount: excessAmount,
@@ -600,7 +675,7 @@ export function DebtsPage() {
 
         toast({
           title: 'تم تسجيل الفائض كحركة',
-          description: `تم إضافة حركة "${overflowDirection === 'RECEIVABLE' ? 'لنا' : 'علينا'}" بقيمة ${formatNumber(excessAmount)} $`,
+          description: `تم إضافة حركة "${overflowDirection === 'RECEIVABLE' ? 'لنا' : 'علينا'}" بقيمة ${formatNumber(excessAmount)} ${getCurrencySymbol(unpaidDebtCurrencyId || '')}`,
         });
       }
 
@@ -617,7 +692,7 @@ export function DebtsPage() {
 
       toast({
         title: 'تم بنجاح',
-        description: `تم إضافة دفعة بقيمة ${formatNumber(appliedAmount)} $${excessAmount > 0 ? ` وفائض ${formatNumber(excessAmount)} $` : ''}`,
+        description: `تم إضافة دفعة بقيمة ${formatNumber(appliedAmount)} ${getCurrencySymbol(unpaidDebtCurrencyId || '')}${excessAmount > 0 ? ` وفائض ${formatNumber(excessAmount)} ${getCurrencySymbol(unpaidDebtCurrencyId || '')}` : ''}`,
       });
     } catch (error) {
       console.error('Error adding payment:', error);
@@ -877,59 +952,140 @@ export function DebtsPage() {
                       
                       <div className="text-left">
                         <p className="text-xs text-muted-foreground mb-0.5">الرصيد التراكمي</p>
-                        <p className={cn(
-                          'text-2xl font-bold',
-                          isZeroBalance 
-                            ? 'text-gray-600 dark:text-gray-400' 
-                            : isPositiveBalance 
-                              ? 'text-emerald-600 dark:text-emerald-400' 
-                              : 'text-red-600 dark:text-red-400'
-                        )}>
-                          {isZeroBalance ? '0' : `${isPositiveBalance ? '+' : ''}${formatNumber(summary.netCashBalance)}`} $
-                        </p>
+                        {summary.currencyBreakdown.length === 0 ? (
+                          <p className="text-2xl font-bold text-gray-600 dark:text-gray-400">0</p>
+                        ) : summary.currencyBreakdown.length === 1 ? (
+                          <p className={cn(
+                            'text-2xl font-bold',
+                            summary.currencyBreakdown[0].netBalance === 0
+                              ? 'text-gray-600 dark:text-gray-400'
+                              : summary.currencyBreakdown[0].netBalance > 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-red-600 dark:text-red-400'
+                          )}>
+                            {summary.currencyBreakdown[0].netBalance === 0 ? '0' : `${summary.currencyBreakdown[0].netBalance > 0 ? '+' : ''}${formatNumber(summary.currencyBreakdown[0].netBalance)}`} {getCurrencySymbol(summary.currencyBreakdown[0].currencyId)}
+                          </p>
+                        ) : (
+                          <div className="space-y-0.5">
+                            {summary.currencyBreakdown.map(cb => {
+                              const isCbPositive = cb.netBalance > 0;
+                              const isCbZero = cb.netBalance === 0;
+                              return (
+                                <p key={cb.currencyId} className={cn(
+                                  'text-base font-bold',
+                                  isCbZero
+                                    ? 'text-gray-600 dark:text-gray-400'
+                                    : isCbPositive
+                                      ? 'text-emerald-600 dark:text-emerald-400'
+                                      : 'text-red-600 dark:text-red-400'
+                                )}>
+                                  {isCbZero ? '0' : `${isCbPositive ? '+' : ''}${formatNumber(cb.netBalance)}`} {getCurrencySymbol(cb.currencyId)}
+                                </p>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </div>
                     
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="bg-emerald-100/50 dark:bg-emerald-900/20 rounded-xl p-3">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Banknote className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="text-xs text-emerald-700 dark:text-emerald-400">لنا نقدي</span>
-                        </div>
-                        <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
-                          {formatNumber(summary.cumulativeCashReceivable)} $
-                        </p>
-                      </div>
-                      
-                      <div className="bg-red-100/50 dark:bg-red-900/20 rounded-xl p-3">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Banknote className="w-3.5 h-3.5 text-red-600" />
-                          <span className="text-xs text-red-700 dark:text-red-400">علينا نقدي</span>
-                        </div>
-                        <p className="text-lg font-bold text-red-600 dark:text-red-400">
-                          {formatNumber(summary.cumulativeCashPayable)} $
-                        </p>
-                      </div>
-                      
-                      <div className="bg-teal-100/50 dark:bg-teal-900/20 rounded-xl p-3">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <CheckCircle className="w-3.5 h-3.5 text-teal-600" />
-                          <span className="text-xs text-teal-700 dark:text-teal-400">مدفوع</span>
-                        </div>
-                        <p className="text-lg font-bold text-teal-600 dark:text-teal-400">
-                          {formatNumber(summary.cumulativeCashPaid)} $
-                        </p>
-                      </div>
-                      
-                      <div className="bg-purple-100/50 dark:bg-purple-900/20 rounded-xl p-3">
-                        <div className="flex items-center gap-1.5 mb-1">
-                          <Clock className="w-3.5 h-3.5 text-purple-600" />
-                          <span className="text-xs text-purple-700 dark:text-purple-400">آجل</span>
-                        </div>
-                        <p className="text-lg font-bold text-purple-600 dark:text-purple-400">
-                          {summary.deferredDebts.length} دين
-                        </p>
-                      </div>
+                      {summary.currencyBreakdown.length <= 1 ? (
+                        <>
+                          <div className="bg-emerald-100/50 dark:bg-emerald-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="text-xs text-emerald-700 dark:text-emerald-400">لنا نقدي</span>
+                            </div>
+                            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                              {formatNumber(summary.cumulativeCashReceivable)} {getCurrencySymbol(summary.currencyBreakdown[0]?.currencyId || '')}
+                            </p>
+                          </div>
+                          
+                          <div className="bg-red-100/50 dark:bg-red-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Banknote className="w-3.5 h-3.5 text-red-600" />
+                              <span className="text-xs text-red-700 dark:text-red-400">علينا نقدي</span>
+                            </div>
+                            <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                              {formatNumber(summary.cumulativeCashPayable)} {getCurrencySymbol(summary.currencyBreakdown[0]?.currencyId || '')}
+                            </p>
+                          </div>
+                          
+                          <div className="bg-teal-100/50 dark:bg-teal-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <CheckCircle className="w-3.5 h-3.5 text-teal-600" />
+                              <span className="text-xs text-teal-700 dark:text-teal-400">مدفوع</span>
+                            </div>
+                            <p className="text-lg font-bold text-teal-600 dark:text-teal-400">
+                              {formatNumber(summary.cumulativeCashPaid)} {getCurrencySymbol(summary.currencyBreakdown[0]?.currencyId || '')}
+                            </p>
+                          </div>
+                          
+                          <div className="bg-purple-100/50 dark:bg-purple-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Clock className="w-3.5 h-3.5 text-purple-600" />
+                              <span className="text-xs text-purple-700 dark:text-purple-400">آجل</span>
+                            </div>
+                            <p className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                              {summary.deferredDebts.length} دين
+                            </p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="bg-emerald-100/50 dark:bg-emerald-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Banknote className="w-3.5 h-3.5 text-emerald-600" />
+                              <span className="text-xs text-emerald-700 dark:text-emerald-400">لنا نقدي</span>
+                            </div>
+                            <div className="space-y-0.5">
+                              {summary.currencyBreakdown.map(cb => (
+                                <p key={cb.currencyId} className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                  {formatNumber(cb.cashReceivable)} {getCurrencySymbol(cb.currencyId)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          <div className="bg-red-100/50 dark:bg-red-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Banknote className="w-3.5 h-3.5 text-red-600" />
+                              <span className="text-xs text-red-700 dark:text-red-400">علينا نقدي</span>
+                            </div>
+                            <div className="space-y-0.5">
+                              {summary.currencyBreakdown.map(cb => (
+                                <p key={cb.currencyId} className="text-sm font-bold text-red-600 dark:text-red-400">
+                                  {formatNumber(cb.cashPayable)} {getCurrencySymbol(cb.currencyId)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          <div className="bg-teal-100/50 dark:bg-teal-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <CheckCircle className="w-3.5 h-3.5 text-teal-600" />
+                              <span className="text-xs text-teal-700 dark:text-teal-400">مدفوع</span>
+                            </div>
+                            <div className="space-y-0.5">
+                              {summary.currencyBreakdown.map(cb => (
+                                <p key={cb.currencyId} className="text-sm font-bold text-teal-600 dark:text-teal-400">
+                                  {formatNumber(cb.cashPaid)} {getCurrencySymbol(cb.currencyId)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                          
+                          <div className="bg-purple-100/50 dark:bg-purple-900/20 rounded-xl p-3">
+                            <div className="flex items-center gap-1.5 mb-1">
+                              <Clock className="w-3.5 h-3.5 text-purple-600" />
+                              <span className="text-xs text-purple-700 dark:text-purple-400">آجل</span>
+                            </div>
+                            <p className="text-lg font-bold text-purple-600 dark:text-purple-400">
+                              {summary.deferredDebts.length} دين
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </motion.div>
@@ -957,80 +1113,94 @@ export function DebtsPage() {
           
           {selectedAccountSummary && (
             <div className="space-y-4 mt-4">
-              {/* Cumulative Cash Summary */}
-              <div className={cn(
-                'rounded-xl p-4',
-                selectedAccountSummary.netCashBalance >= 0
-                  ? 'bg-emerald-50 dark:bg-emerald-950/20'
-                  : 'bg-red-50 dark:bg-red-950/20'
-              )}>
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
-                    <Banknote className="w-5 h-5 text-amber-600" />
-                    <span className="font-medium">الرصيد التراكمي</span>
-                  </div>
-                  <span className={cn(
-                    'text-xs px-2 py-1 rounded-full',
-                    selectedAccountSummary.netCashBalance >= 0
-                      ? 'bg-emerald-100 text-emerald-700'
-                      : 'bg-red-100 text-red-700'
+              {/* Per-Currency Summary */}
+              {selectedAccountSummary.currencyBreakdown.map(cb => {
+                const isPositive = cb.netBalance > 0;
+                const isZero = cb.netBalance === 0;
+                const currencySymbol = getCurrencySymbol(cb.currencyId);
+                return (
+                  <div key={cb.currencyId} className={cn(
+                    'rounded-xl p-4',
+                    isZero
+                      ? 'bg-gray-50 dark:bg-gray-950/20'
+                      : isPositive
+                        ? 'bg-emerald-50 dark:bg-emerald-950/20'
+                        : 'bg-red-50 dark:bg-red-950/20'
                   )}>
-                    {selectedAccountSummary.netCashBalance >= 0 ? 'لنا' : 'علينا'}
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-3 mb-3">
-                  <div className="text-center">
-                    <p className="text-xs text-muted-foreground">لنا</p>
-                    <p className="text-lg font-bold text-emerald-600">
-                      {formatNumber(selectedAccountSummary.cumulativeCashReceivable)} $
-                    </p>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Banknote className="w-5 h-5 text-amber-600" />
+                        <span className="font-medium">الرصيد التراكمي</span>
+                        <span className="text-xs text-muted-foreground">({currencySymbol})</span>
+                      </div>
+                      <span className={cn(
+                        'text-xs px-2 py-1 rounded-full',
+                        isZero
+                          ? 'bg-gray-100 text-gray-700'
+                          : isPositive
+                            ? 'bg-emerald-100 text-emerald-700'
+                            : 'bg-red-100 text-red-700'
+                      )}>
+                        {isZero ? 'متوازن' : isPositive ? 'لنا' : 'علينا'}
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-3 gap-3 mb-3">
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">لنا</p>
+                        <p className="text-lg font-bold text-emerald-600">
+                          {formatNumber(cb.cashReceivable + cb.deferredReceivable)} {currencySymbol}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">علينا</p>
+                        <p className="text-lg font-bold text-red-600">
+                          {formatNumber(cb.cashPayable + cb.deferredPayable)} {currencySymbol}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-xs text-muted-foreground">مدفوع</p>
+                        <p className="text-lg font-bold text-teal-600">
+                          {formatNumber(cb.cashPaid + cb.deferredPaid)} {currencySymbol}
+                        </p>
+                      </div>
+                    </div>
+                    
+                    <div className={cn(
+                      'pt-3 border-t',
+                      isZero 
+                        ? 'border-gray-200 dark:border-gray-800' 
+                        : isPositive 
+                          ? 'border-emerald-200 dark:border-emerald-800' 
+                          : 'border-red-200 dark:border-red-800'
+                    )}>
+                      <p className="text-sm text-muted-foreground">الرصيد النهائي</p>
+                      <p className={cn(
+                        'text-2xl font-bold',
+                        isZero ? 'text-gray-600' : isPositive ? 'text-emerald-600' : 'text-red-600'
+                      )}>
+                        {isZero ? '0' : `${isPositive ? '+' : ''}${formatNumber(cb.netBalance)}`} {currencySymbol}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <p className="text-xs text-muted-foreground">علينا</p>
-                    <p className="text-lg font-bold text-red-600">
-                      {formatNumber(selectedAccountSummary.cumulativeCashPayable)} $
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-xs text-muted-foreground">مدفوع</p>
-                    <p className="text-lg font-bold text-teal-600">
-                      {formatNumber(selectedAccountSummary.cumulativeCashPaid)} $
-                    </p>
-                  </div>
-                </div>
-                
-                <div className={cn(
-                  'pt-3 border-t',
-                  selectedAccountSummary.netCashBalance >= 0 
-                    ? 'border-emerald-200 dark:border-emerald-800' 
-                    : 'border-red-200 dark:border-red-800'
-                )}>
-                  <p className="text-sm text-muted-foreground">الرصيد النهائي</p>
-                  <p className={cn(
-                    'text-2xl font-bold',
-                    selectedAccountSummary.netCashBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
-                  )}>
-                    {selectedAccountSummary.netCashBalance >= 0 ? '+' : ''}{formatNumber(selectedAccountSummary.netCashBalance)} $
-                  </p>
-                </div>
-                
-                {/* أزرار الإجراءات */}
-                <div className="mt-3 pt-3 border-t border-border/30 flex gap-2">
-                  <Button
-                    onClick={() => setShowPaymentModal(true)}
-                    className={cn(
-                      "flex-1",
-                      selectedAccountSummary.netCashBalance === 0
-                        ? "bg-gray-300 hover:bg-gray-300 text-gray-500 cursor-not-allowed"
-                        : "bg-teal-500 hover:bg-teal-600"
-                    )}
-                    disabled={selectedAccountSummary.netCashBalance === 0}
-                  >
-                    <CreditCard className="w-4 h-4 ml-2" />
-                    إضافة دفعة
-                  </Button>
-                </div>
+                );
+              })}
+
+              {/* أزرار الإجراءات */}
+              <div className="flex gap-2">
+                <Button
+                  onClick={() => setShowPaymentModal(true)}
+                  className={cn(
+                    "flex-1",
+                    selectedAccountSummary.netCashBalance === 0
+                      ? "bg-gray-300 hover:bg-gray-300 text-gray-500 cursor-not-allowed"
+                      : "bg-teal-500 hover:bg-teal-600"
+                  )}
+                  disabled={selectedAccountSummary.netCashBalance === 0}
+                >
+                  <CreditCard className="w-4 h-4 ml-2" />
+                  إضافة دفعة
+                </Button>
               </div>
 
               {/* زر عرض جميع الحركات */}
@@ -1117,11 +1287,11 @@ export function DebtsPage() {
                                   'font-bold text-sm',
                                   isFullyPaid ? 'text-green-600' : isReceivable ? 'text-emerald-600' : 'text-red-600'
                                 )}>
-                                  {formatNumber(remaining)} $
+                                  {formatNumber(remaining)} {getCurrencySymbol(debt.currencyId)}
                                 </p>
                                 {paid > 0 && (
                                   <p className="text-xs text-muted-foreground">
-                                    من {formatNumber(debt.finalBalance)} $
+                                    من {formatNumber(debt.finalBalance)} {getCurrencySymbol(debt.currencyId)}
                                   </p>
                                 )}
                               </div>
@@ -1277,11 +1447,11 @@ export function DebtsPage() {
                                       ? 'text-emerald-600' 
                                       : 'text-red-600'
                               )}>
-                                {formatNumber(movement.amount)} $
+                                {formatNumber(movement.amount)} {getCurrencySymbol((movement.originalData as Debt).currencyId || (movement.originalData as DebtPayment).currencyId)}
                               </p>
                               {movement.type === 'DEBT' && movement.remaining !== undefined && (
                                 <p className="text-xs text-muted-foreground">
-                                  متبقي: {formatNumber(movement.remaining)} $
+                                  متبقي: {formatNumber(movement.remaining)} {getCurrencySymbol((movement.originalData as Debt).currencyId)}
                                 </p>
                               )}
                             </div>
@@ -1362,7 +1532,7 @@ export function DebtsPage() {
               <div className="p-3 rounded-lg bg-muted/50 space-y-2">
                 <p className="text-sm">
                   <span className="text-muted-foreground">المبلغ: </span>
-                  <span className="font-bold">{formatNumber(deleteConfirm?.data?.amount || 0)} $</span>
+                  <span className="font-bold">{formatNumber(deleteConfirm?.data?.amount || 0)} {getCurrencySymbol((deleteConfirm?.data as Debt)?.currencyId || (deleteConfirm?.data as DebtPayment)?.currencyId || '')}</span>
                 </p>
                 <p className="text-sm">
                   <span className="text-muted-foreground">النوع: </span>
@@ -1415,20 +1585,20 @@ export function DebtsPage() {
           <AlertDialogDescription asChild>
             <div className="space-y-3">
               <p>
-                المبلغ المدخل: <span className="font-bold">{formatNumber(pendingPaymentAmount)} $</span>
+                المبلغ المدخل: <span className="font-bold">{formatNumber(pendingPaymentAmount)} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')}</span>
               </p>
               <p>
-                المبلغ المطلوب: <span className="font-bold">{formatNumber(Math.abs(selectedAccountSummary?.netCashBalance || 0))} $</span>
+                المبلغ المطلوب: <span className="font-bold">{formatNumber(Math.abs(selectedAccountSummary?.netCashBalance || 0))} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')}</span>
               </p>
               <p>
-                الفائض: <span className="font-bold text-amber-600">{formatNumber(overpaymentAmount)} $</span>
+                الفائض: <span className="font-bold text-amber-600">{formatNumber(overpaymentAmount)} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')}</span>
               </p>
               <div className="mt-4 p-3 rounded-lg bg-muted/50">
                 <p className="text-sm font-medium mb-2">سيتم:</p>
                 <ol className="text-sm list-decimal list-inside space-y-1">
                   <li>تسديد الدين بالكامل وتصفير الحساب</li>
                   <li>
-                    إنشاء حركة "{selectedAccountSummary && selectedAccountSummary.netCashBalance >= 0 ? 'علينا' : 'لنا'}" بقيمة {formatNumber(overpaymentAmount)} $ (حساب خاص)
+                    إنشاء حركة "{selectedAccountSummary && selectedAccountSummary.netCashBalance >= 0 ? 'علينا' : 'لنا'}" بقيمة {formatNumber(overpaymentAmount)} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')} (حساب خاص)
                   </li>
                 </ol>
               </div>

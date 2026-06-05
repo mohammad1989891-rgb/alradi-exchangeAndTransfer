@@ -1521,6 +1521,17 @@ export async function getTotalDebtRemaining(): Promise<{
 // Account-Specific Debt Statistics
 // ============================================
 
+export interface CurrencyDebtSummary {
+  currencyId: string;
+  receivable: number;
+  payable: number;
+  receivablePaid: number;
+  payablePaid: number;
+  receivableRemaining: number;
+  payableRemaining: number;
+  netBalance: number;  // positive = لنا, negative = علينا
+}
+
 export interface AccountDebtSummary {
   accountId: string;
   account: Account | undefined;
@@ -1533,6 +1544,7 @@ export interface AccountDebtSummary {
   finalBalance: number;         // الرصيد النهائي = لنا - علينا
   debts: Debt[];               // جميع ديون الحساب
   payments: DebtPayment[];     // جميع دفعات الحساب
+  currencyBreakdown: CurrencyDebtSummary[];
 }
 
 /**
@@ -1554,19 +1566,58 @@ export async function getAccountDebtSummary(accountId: string): Promise<AccountD
     allPayments.push(...payments);
   }
   
-  // فصل الديون حسب النوع
-  const receivableDebts = allDebts.filter(d => d.debtType === 'RECEIVABLE' || !d.debtType);
-  const payableDebts = allDebts.filter(d => d.debtType === 'PAYABLE');
-  
-  const totalReceivable = receivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
-  const totalPayable = payableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
-  
   // حساب المدفوع لكل دين
   const paymentsByDebt = new Map<string, number>();
   for (const payment of allPayments) {
     const current = paymentsByDebt.get(payment.debtId) || 0;
     paymentsByDebt.set(payment.debtId, current + payment.amount);
   }
+  
+  // ============================================
+  // 🔹 حسابات حسب العملة (لا ندمج عملات مختلفة)
+  // ============================================
+  const currencyIds = [...new Set(allDebts.map(d => d.currencyId))];
+  
+  const currencyBreakdown: CurrencyDebtSummary[] = currencyIds.map(currencyId => {
+    const currencyDebts = allDebts.filter(d => d.currencyId === currencyId);
+    const receivableDebts = currencyDebts.filter(d => d.debtType === 'RECEIVABLE' || !d.debtType);
+    const payableDebts = currencyDebts.filter(d => d.debtType === 'PAYABLE');
+    
+    const receivable = receivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+    const payable = payableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+    
+    let receivablePaid = 0;
+    let payablePaid = 0;
+    
+    for (const debt of receivableDebts) {
+      receivablePaid += paymentsByDebt.get(debt.id) || 0;
+    }
+    for (const debt of payableDebts) {
+      payablePaid += paymentsByDebt.get(debt.id) || 0;
+    }
+    
+    const receivableRemaining = receivable - receivablePaid;
+    const payableRemaining = payable - payablePaid;
+    const netBalance = receivableRemaining - payableRemaining;
+    
+    return {
+      currencyId,
+      receivable,
+      payable,
+      receivablePaid,
+      payablePaid,
+      receivableRemaining,
+      payableRemaining,
+      netBalance,
+    };
+  });
+  
+  // فصل الديون حسب النوع
+  const receivableDebts = allDebts.filter(d => d.debtType === 'RECEIVABLE' || !d.debtType);
+  const payableDebts = allDebts.filter(d => d.debtType === 'PAYABLE');
+  
+  const totalReceivable = receivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  const totalPayable = payableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
   
   // حساب المدفوع لكل نوع
   let totalReceivablePaid = 0;
@@ -1599,6 +1650,7 @@ export async function getAccountDebtSummary(accountId: string): Promise<AccountD
     finalBalance,
     debts: allDebts,
     payments: allPayments,
+    currencyBreakdown,
   };
 }
 

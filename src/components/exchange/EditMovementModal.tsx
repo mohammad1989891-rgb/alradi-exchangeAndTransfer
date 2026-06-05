@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { Button } from '@/components/ui/button';
@@ -23,7 +23,7 @@ import {
 import { cn } from '@/lib/utils';
 import { formatNumber } from '@/lib/format';
 import { format } from 'date-fns';
-import { AlertCircle, ArrowUpRight, ArrowDownRight, Banknote, Clock, RefreshCcw, Save, X } from 'lucide-react';
+import { CreditCard, ArrowUpRight, ArrowDownRight, Banknote, Clock, RefreshCcw, Save, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
 import type { Debt, DebtPayment } from '@/lib/supabaseDb';
 
@@ -186,6 +186,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
   const selectedCurrency = currencies.find(c => c.id === currencyId);
   const isDebtSYP = isSYPCurrency(currencyId, selectedCurrency?.code);
   const selectedPaymentCurrency = currencies.find(c => c.id === paymentCurrencyId);
+  const selectedAccount = accounts.find(a => a.id === accountId);
 
   // Conversion preview
   const getConversionPreview = () => {
@@ -206,20 +207,107 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
 
   if (!movement) return null;
 
+  const isDebt = movement.type === 'DEBT';
+  const currentDirection = isDebt ? debtType : paymentDirection;
+  const currentMode = isDebt ? debtMode : paymentMode;
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-xl flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-amber-500" />
-            تعديل {movement.type === 'DEBT' ? 'الدين' : 'الدفعة'}
+            {isDebt ? (
+              <AlertCircle className="w-5 h-5 text-amber-500" />
+            ) : (
+              <CreditCard className="w-5 h-5 text-teal-500" />
+            )}
+            تعديل {isDebt ? 'الدين' : 'الدفعة'}
           </DialogTitle>
         </DialogHeader>
 
-        {movement.type === 'DEBT' ? (
-          /* ===== Debt Edit Form ===== */
-          <div className="space-y-4 mt-4">
-            {/* Debt Type Selection */}
+        {/* Account Info Header - matching MultiCurrencyPaymentModal style */}
+        {isDebt && selectedAccount && (
+          <div className="rounded-xl p-3 bg-muted/50">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                'w-10 h-10 rounded-xl flex items-center justify-center',
+                currentDirection === 'RECEIVABLE'
+                  ? 'bg-emerald-100 dark:bg-emerald-900/30'
+                  : 'bg-red-100 dark:bg-red-900/30'
+              )}>
+                {currentDirection === 'RECEIVABLE'
+                  ? <ArrowUpRight className="w-5 h-5 text-emerald-600" />
+                  : <ArrowDownRight className="w-5 h-5 text-red-600" />
+                }
+              </div>
+              <div>
+                <p className="font-bold text-foreground">{selectedAccount.name}</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className={cn(
+                    'text-xs px-1.5 py-0.5 rounded',
+                    currentDirection === 'RECEIVABLE'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-red-100 text-red-700'
+                  )}>
+                    {currentDirection === 'RECEIVABLE' ? 'لنا' : 'علينا'}
+                  </span>
+                  <span className={cn(
+                    'text-xs px-1.5 py-0.5 rounded',
+                    currentMode === 'CASH'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-purple-100 text-purple-700'
+                  )}>
+                    {currentMode === 'CASH' ? 'نقدي' : 'آجل'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {!isDebt && (
+          <div className="rounded-xl p-3 bg-muted/50">
+            <div className="flex items-center gap-3">
+              <div className={cn(
+                'w-10 h-10 rounded-xl flex items-center justify-center',
+                paymentDirection === 'RECEIVABLE'
+                  ? 'bg-emerald-100 dark:bg-emerald-900/30'
+                  : 'bg-red-100 dark:bg-red-900/30'
+              )}>
+                {paymentDirection === 'RECEIVABLE'
+                  ? <ArrowUpRight className="w-5 h-5 text-emerald-600" />
+                  : <ArrowDownRight className="w-5 h-5 text-red-600" />
+                }
+              </div>
+              <div>
+                <p className="font-bold text-foreground">دفعة سداد</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className={cn(
+                    'text-xs px-1.5 py-0.5 rounded',
+                    paymentDirection === 'RECEIVABLE'
+                      ? 'bg-emerald-100 text-emerald-700'
+                      : 'bg-red-100 text-red-700'
+                  )}>
+                    {paymentDirection === 'RECEIVABLE' ? 'لنا' : 'علينا'}
+                  </span>
+                  <span className={cn(
+                    'text-xs px-1.5 py-0.5 rounded',
+                    paymentMode === 'CASH'
+                      ? 'bg-blue-100 text-blue-700'
+                      : 'bg-purple-100 text-purple-700'
+                  )}>
+                    {paymentMode === 'CASH' ? 'نقدي' : 'آجل'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isDebt ? (
+          /* ===== Debt Edit Form - matching MultiCurrencyPaymentModal style ===== */
+          <div className="space-y-4 mt-2">
+            {/* Direction Selection - matching payment modal toggle style */}
             <div className="space-y-2">
               <Label>نوع الدين</Label>
               <div className="grid grid-cols-2 gap-3">
@@ -227,34 +315,32 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
                   type="button"
                   onClick={() => setDebtType('RECEIVABLE')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     debtType === 'RECEIVABLE'
                       ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-600 dark:text-emerald-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <ArrowUpRight className="w-6 h-6" />
-                  <span className="text-base">لنا</span>
-                  <span className="text-[10px] opacity-70">مستحق لنا من الآخرين</span>
+                  <ArrowUpRight className="w-5 h-5" />
+                  <span>لنا</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setDebtType('PAYABLE')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     debtType === 'PAYABLE'
                       ? 'bg-red-50 border-red-500 text-red-700 dark:bg-red-950/30 dark:border-red-600 dark:text-red-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <ArrowDownRight className="w-6 h-6" />
-                  <span className="text-base">علينا</span>
-                  <span className="text-[10px] opacity-70">مستحق علينا للآخرين</span>
+                  <ArrowDownRight className="w-5 h-5" />
+                  <span>علينا</span>
                 </button>
               </div>
             </div>
 
-            {/* Debt Mode Selection */}
+            {/* Mode Selection - matching payment modal toggle style */}
             <div className="space-y-2">
               <Label>طريقة الدين</Label>
               <div className="grid grid-cols-2 gap-3">
@@ -262,32 +348,30 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
                   type="button"
                   onClick={() => setDebtMode('CASH')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     debtMode === 'CASH'
-                      ? 'bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-950/30 dark:border-blue-600 dark:text-blue-400'
+                      ? 'bg-teal-50 border-teal-500 text-teal-700 dark:bg-teal-950/30 dark:border-teal-600 dark:text-teal-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <Banknote className="w-6 h-6" />
-                  <span className="text-base">نقدي</span>
-                  <span className="text-[10px] opacity-70">يؤثر على الصندوق</span>
+                  <Banknote className="w-5 h-5" />
+                  <span>نقدي</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setDebtMode('DEFERRED')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     debtMode === 'DEFERRED'
                       ? 'bg-purple-50 border-purple-500 text-purple-700 dark:bg-purple-950/30 dark:border-purple-600 dark:text-purple-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <Clock className="w-6 h-6" />
-                  <span className="text-base">آجل</span>
-                  <span className="text-[10px] opacity-70">لا يؤثر على الصندوق</span>
+                  <Clock className="w-5 h-5" />
+                  <span>آجل</span>
                 </button>
               </div>
-              {/* Cash mode explanation */}
+              {/* Cash mode explanation - matching payment modal */}
               {debtMode === 'CASH' && (
                 <div className={cn(
                   'mt-2 p-3 rounded-lg text-sm',
@@ -303,7 +387,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               )}
             </div>
 
-            {/* Account */}
+            {/* Account - matching payment modal select style */}
             <div className="space-y-2">
               <Label>الحساب</Label>
               <Select value={accountId} onValueChange={setAccountId}>
@@ -320,50 +404,57 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               </Select>
             </div>
 
-            {/* Amount & Currency Row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>المبلغ</Label>
+            {/* Amount & Currency Row - matching payment modal style */}
+            <div className="space-y-2">
+              <Label>المبلغ</Label>
+              <div className="relative">
                 <Input
                   type="text"
                   inputMode="decimal"
                   value={amountDisplay}
                   onChange={(e) => handleAmountChange(e.target.value)}
                   placeholder="0"
-                  className="text-left font-mono"
+                  className="text-left font-mono text-lg"
                   dir="ltr"
                 />
-                {isDebtSYP && (
-                  <div className="flex gap-1">
-                    <span className="flex-1 py-1.5 rounded-md text-xs font-medium text-center bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                      ل.س قديم
-                    </span>
-                  </div>
+                {selectedCurrency && (
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                    {selectedCurrency.symbol}
+                  </span>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label>العملة</Label>
-                <Select
-                  value={currencyId}
-                  onValueChange={(value) => {
-                    setCurrencyId(value);
-                    if (parseFormattedNumber(amountDisplay)) {
-                      setAmountDisplay(formatInputNumber(parseFormattedNumber(amountDisplay)));
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="اختر" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {currencies.map((currency) => (
-                      <SelectItem key={currency.id} value={currency.id}>
-                        {currency.name} ({currency.symbol})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              {isDebtSYP && (
+                <div className="flex gap-1">
+                  <span className="flex-1 py-1.5 rounded-md text-xs font-medium text-center bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                    ل.س قديم
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Currency Selector - matching payment modal */}
+            <div className="space-y-2">
+              <Label>العملة</Label>
+              <Select
+                value={currencyId}
+                onValueChange={(value) => {
+                  setCurrencyId(value);
+                  if (parseFormattedNumber(amountDisplay)) {
+                    setAmountDisplay(formatInputNumber(parseFormattedNumber(amountDisplay)));
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر العملة" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencies.map((currency) => (
+                    <SelectItem key={currency.id} value={currency.id}>
+                      {currency.name} ({currency.symbol})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Conversion Factor Row */}
@@ -417,7 +508,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               )}
             </div>
 
-            {/* Date */}
+            {/* Date - matching payment modal */}
             <div className="space-y-2">
               <Label>التاريخ</Label>
               <Input
@@ -427,7 +518,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               />
             </div>
 
-            {/* Description */}
+            {/* Description - matching payment modal */}
             <div className="space-y-2">
               <Label>البيان</Label>
               <Textarea
@@ -438,7 +529,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               />
             </div>
 
-            {/* Calculated Balance */}
+            {/* Calculated Balance Preview */}
             <div className="rounded-xl p-4 bg-amber-50 dark:bg-amber-950/20">
               <p className="text-xs text-muted-foreground mb-1">الرصيد النهائي</p>
               <p className="text-2xl font-bold text-amber-600 font-mono" dir="ltr">
@@ -456,7 +547,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               </p>
             </div>
 
-            {/* Action Buttons */}
+            {/* Action Buttons - matching payment modal style */}
             <div className="flex gap-3">
               <Button
                 onClick={handleSubmit}
@@ -477,9 +568,9 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
             </div>
           </div>
         ) : (
-          /* ===== Payment Edit Form ===== */
-          <div className="space-y-4 mt-4">
-            {/* Payment Direction Selection */}
+          /* ===== Payment Edit Form - matching MultiCurrencyPaymentModal style ===== */
+          <div className="space-y-4 mt-2">
+            {/* Direction Selection - matching payment modal toggle style */}
             <div className="space-y-2">
               <Label>اتجاه الدفعة</Label>
               <div className="grid grid-cols-2 gap-3">
@@ -487,67 +578,63 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
                   type="button"
                   onClick={() => setPaymentDirection('RECEIVABLE')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     paymentDirection === 'RECEIVABLE'
                       ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-600 dark:text-emerald-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <ArrowUpRight className="w-6 h-6" />
-                  <span className="text-base">لنا</span>
-                  <span className="text-[10px] opacity-70">دفعة مستحقة لنا</span>
+                  <ArrowUpRight className="w-5 h-5" />
+                  <span>لنا</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPaymentDirection('PAYABLE')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     paymentDirection === 'PAYABLE'
                       ? 'bg-red-50 border-red-500 text-red-700 dark:bg-red-950/30 dark:border-red-600 dark:text-red-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <ArrowDownRight className="w-6 h-6" />
-                  <span className="text-base">علينا</span>
-                  <span className="text-[10px] opacity-70">دفعة مستحقة علينا</span>
+                  <ArrowDownRight className="w-5 h-5" />
+                  <span>علينا</span>
                 </button>
               </div>
             </div>
 
-            {/* Payment Mode Selection */}
+            {/* Payment Mode Selection - matching payment modal toggle style */}
             <div className="space-y-2">
-              <Label>طريقة الدفع</Label>
+              <Label>نوع الدفع</Label>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => setPaymentMode('CASH')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     paymentMode === 'CASH'
-                      ? 'bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-950/30 dark:border-blue-600 dark:text-blue-400'
+                      ? 'bg-teal-50 border-teal-500 text-teal-700 dark:bg-teal-950/30 dark:border-teal-600 dark:text-teal-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <Banknote className="w-6 h-6" />
-                  <span className="text-base">نقدي</span>
-                  <span className="text-[10px] opacity-70">يؤثر على الصندوق</span>
+                  <Banknote className="w-5 h-5" />
+                  <span>نقدي</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPaymentMode('DEFERRED')}
                   className={cn(
-                    'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+                    'py-3 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-1.5 border-2',
                     paymentMode === 'DEFERRED'
                       ? 'bg-purple-50 border-purple-500 text-purple-700 dark:bg-purple-950/30 dark:border-purple-600 dark:text-purple-400'
                       : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
                   )}
                 >
-                  <Clock className="w-6 h-6" />
-                  <span className="text-base">آجل</span>
-                  <span className="text-[10px] opacity-70">لا يؤثر على الصندوق</span>
+                  <Clock className="w-5 h-5" />
+                  <span>آجل</span>
                 </button>
               </div>
-              {/* Cash mode explanation */}
+              {/* Cash mode explanation - matching payment modal */}
               {paymentMode === 'CASH' && (
                 <div className={cn(
                   'mt-2 p-3 rounded-lg text-sm',
@@ -563,41 +650,48 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               )}
             </div>
 
-            {/* Amount & Currency Row */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-2">
-                <Label>المبلغ</Label>
+            {/* Amount - matching payment modal style with currency symbol overlay */}
+            <div className="space-y-2">
+              <Label>المبلغ</Label>
+              <div className="relative">
                 <Input
                   type="text"
                   inputMode="decimal"
                   value={paymentAmountDisplay}
                   onChange={(e) => handlePaymentAmountChange(e.target.value)}
                   placeholder="0"
-                  className="text-left font-mono"
+                  className="text-left font-mono text-lg"
                   dir="ltr"
                 />
-              </div>
-              <div className="space-y-2">
-                <Label>العملة</Label>
-                <Select
-                  value={paymentCurrencyId}
-                  onValueChange={setPaymentCurrencyId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="اختر" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {currencies.map((currency) => (
-                      <SelectItem key={currency.id} value={currency.id}>
-                        {currency.name} ({currency.symbol})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {selectedPaymentCurrency && (
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                    {selectedPaymentCurrency.symbol}
+                  </span>
+                )}
               </div>
             </div>
 
-            {/* Date */}
+            {/* Currency Selector - matching payment modal */}
+            <div className="space-y-2">
+              <Label>العملة</Label>
+              <Select
+                value={paymentCurrencyId}
+                onValueChange={setPaymentCurrencyId}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="اختر العملة" />
+                </SelectTrigger>
+                <SelectContent>
+                  {currencies.map((currency) => (
+                    <SelectItem key={currency.id} value={currency.id}>
+                      {currency.name} ({currency.symbol})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Date - matching payment modal */}
             <div className="space-y-2">
               <Label>التاريخ</Label>
               <Input
@@ -607,7 +701,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               />
             </div>
 
-            {/* Description */}
+            {/* Description - matching payment modal */}
             <div className="space-y-2">
               <Label>البيان</Label>
               <Textarea
@@ -633,7 +727,7 @@ export function EditMovementModal({ isOpen, onClose, movement, onSaved }: EditMo
               </p>
             </div>
 
-            {/* Action Buttons */}
+            {/* Action Buttons - matching payment modal style */}
             <div className="flex gap-3">
               <Button
                 onClick={handleSubmit}

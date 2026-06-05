@@ -1,28 +1,33 @@
 ---
 Task ID: 1
 Agent: Main Agent
-Task: Add edit functionality for debt movements and payment transactions in "Show All Movements" modal
+Task: Improve debt transaction editing experience in "عرض جميع الحركات" window
 
 Work Log:
-- Analyzed codebase structure: DebtsPage.tsx, DebtModal.tsx, supabaseDb.ts, useSupabaseData.ts
-- Created `editDebtWithVaultReversal()` function in supabaseDb.ts - reverses old debt vault effect, updates debt record, applies new vault effect
-- Created `editDebtPaymentWithVaultReversal()` function in supabaseDb.ts - reverses old payment vault effect, updates payment record, applies new vault effect
-- Added wrapper functions in useSupabaseData.ts hook for both edit functions
-- Created EditMovementModal.tsx component with full edit forms for both debts and payments
-- Integrated long press (500ms) and right-click context menu on movement cards in DebtsPage.tsx
-- Added edit button (✏️ تعديل) alongside delete button on each movement card
-- Added long press context menu dialog with edit/delete options
-- Added EditMovementModal component at the bottom of DebtsPage
-- Vault logic follows user's spec: لنا+كاش→deduct, لنا+آجل→no effect, علينا+كاش→add, علينا+آجل→no effect
-- Currency-specific vault updates (same currency only, no cross-currency)
-- Added vault reversal notice in edit modal
-- Added isPaid recalculation after edit
-- Lint passes with no errors
-- Dev server compiles and serves successfully (HTTP 200)
+- Read and analyzed DebtsPage.tsx - found long press handler and options dialog
+- Read and analyzed EditMovementModal.tsx - found existing edit modal with different design
+- Read and analyzed MultiCurrencyPaymentModal.tsx - understood target design pattern
+- Read and analyzed supabaseDb.ts - verified editDebtWithVaultReversal and editDebtPaymentWithVaultReversal functions
+- Modified DebtsPage.tsx:
+  - Changed handleLongPressStart to directly call handleEditMovement (no options dialog)
+  - Removed longPressedMovement state variable
+  - Removed Long Press Context Menu dialog (خيارات الدين/الدفعة)
+  - Kept edit/delete buttons on each movement card for quick access
+- Redesigned EditMovementModal.tsx to match MultiCurrencyPaymentModal:
+  - Added Account Info Header with direction/mode badges
+  - Changed toggle buttons to match payment modal style (teal for CASH, purple for DEFERRED)
+  - Changed toggle button layout from py-4 to py-3 with smaller icons (matching payment modal)
+  - Added currency symbol overlay inside amount input (matching payment modal)
+  - Separated amount and currency into distinct sections (matching payment modal layout)
+  - Added CreditCard icon for payment edit modal title (matching payment modal)
+  - Kept vault reversal notice and calculated balance sections
+  - Kept all accounting logic unchanged (reverse + apply pattern)
 
 Stage Summary:
-- 3 files modified: supabaseDb.ts, useSupabaseData.ts, DebtsPage.tsx
-- 1 new file: EditMovementModal.tsx
-- All vault reversal logic implemented with proper accounting
-- Long press + right-click + edit button all trigger edit modal
-- UI Freeze maintained - same design patterns as existing DebtModal
+- Long press now directly opens edit modal (0 extra clicks)
+- No options dialog appears on long press
+- Edit modal design unified with "تسديد الديون" (MultiCurrencyPaymentModal) style
+- All accounting logic preserved (vault reversal, direction-based effects)
+- UI Freeze maintained - no changes to overall app design
+- Lint check passes, TypeScript compilation passes for modified files
+- Dev server runs and compiles successfully with changes

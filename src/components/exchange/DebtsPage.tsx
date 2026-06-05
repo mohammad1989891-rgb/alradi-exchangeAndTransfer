@@ -170,12 +170,11 @@ export function DebtsPage() {
 
   // حالة الضغط المطول
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [longPressedMovement, setLongPressedMovement] = useState<UnifiedMovement | null>(null);
 
-  // معالج الضغط المطول
+  // معالج الضغط المطول - يفتح نافذة التعديل مباشرة
   const handleLongPressStart = (movement: UnifiedMovement) => {
     longPressTimerRef.current = setTimeout(() => {
-      setLongPressedMovement(movement);
+      handleEditMovement(movement);
     }, 500); // 500ms للضغط المطول
   };
 
@@ -193,7 +192,6 @@ export function DebtsPage() {
       direction: movement.direction,
       mode: movement.mode,
     });
-    setLongPressedMovement(null);
   };
 
   // إعادة تحميل البيانات بعد التعديل
@@ -1492,44 +1490,6 @@ export function DebtsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* Long Press Context Menu */}
-      <Dialog open={!!longPressedMovement} onOpenChange={() => setLongPressedMovement(null)}>
-        <DialogContent className="max-w-xs">
-          <DialogHeader>
-            <DialogTitle className="text-base">
-              {longPressedMovement?.type === 'DEBT' ? 'خيارات الدين' : 'خيارات الدفعة'}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-2 mt-2">
-            <Button
-              variant="outline"
-              className="w-full justify-start gap-2"
-              onClick={() => longPressedMovement && handleEditMovement(longPressedMovement)}
-            >
-              <Pencil className="w-4 h-4" />
-              تعديل
-            </Button>
-            <Button
-              variant="destructive"
-              className="w-full justify-start gap-2"
-              onClick={() => {
-                if (longPressedMovement) {
-                  if (longPressedMovement.type === 'DEBT') {
-                    handleDeleteDebtClick(longPressedMovement.originalData as Debt);
-                  } else {
-                    handleDeletePaymentClick(longPressedMovement.originalData as DebtPayment);
-                  }
-                  setLongPressedMovement(null);
-                }
-              }}
-            >
-              <Trash2 className="w-4 h-4" />
-              حذف
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Edit Movement Modal */}
       <EditMovementModal

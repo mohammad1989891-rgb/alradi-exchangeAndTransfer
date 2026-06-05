@@ -1401,6 +1401,28 @@ export async function getTotalDebtRemaining(): Promise<{
   cashPayablePaid: number;          // المدفوع من الديون النقدية علينا
   cashReceivableRemaining: number;  // المتبقي من الديون النقدية لنا
   cashPayableRemaining: number;     // المتبقي من الديون النقدية علينا
+  // 🔸 تقسيم حسب العملة
+  currencyBreakdown: Array<{
+    currencyId: string;
+    receivable: number;
+    payable: number;
+    receivablePaid: number;
+    payablePaid: number;
+    receivableRemaining: number;
+    payableRemaining: number;
+    deferredReceivable: number;
+    deferredPayable: number;
+    deferredReceivablePaid: number;
+    deferredPayablePaid: number;
+    deferredReceivableRemaining: number;
+    deferredPayableRemaining: number;
+    cashReceivable: number;
+    cashPayable: number;
+    cashReceivablePaid: number;
+    cashPayablePaid: number;
+    cashReceivableRemaining: number;
+    cashPayableRemaining: number;
+  }>;
 }> {
   await initializeDatabase();
   const allDebts = await db.table<Debt>('debts').toArray();
@@ -1487,7 +1509,73 @@ export async function getTotalDebtRemaining(): Promise<{
       paidDebtsCount++;
     }
   }
-  
+
+  // 🔸 تقسيم الديون حسب العملة — كل عملة كيان مستقل
+  const currencyMap = new Map<string, {
+    currencyId: string;
+    receivable: number; payable: number;
+    receivablePaid: number; payablePaid: number;
+    receivableRemaining: number; payableRemaining: number;
+    deferredReceivable: number; deferredPayable: number;
+    deferredReceivablePaid: number; deferredPayablePaid: number;
+    deferredReceivableRemaining: number; deferredPayableRemaining: number;
+    cashReceivable: number; cashPayable: number;
+    cashReceivablePaid: number; cashPayablePaid: number;
+    cashReceivableRemaining: number; cashPayableRemaining: number;
+  }>();
+
+  for (const debt of allDebts) {
+    const cid = debt.currencyId;
+    if (!currencyMap.has(cid)) {
+      currencyMap.set(cid, {
+        currencyId: cid,
+        receivable: 0, payable: 0,
+        receivablePaid: 0, payablePaid: 0,
+        receivableRemaining: 0, payableRemaining: 0,
+        deferredReceivable: 0, deferredPayable: 0,
+        deferredReceivablePaid: 0, deferredPayablePaid: 0,
+        deferredReceivableRemaining: 0, deferredPayableRemaining: 0,
+        cashReceivable: 0, cashPayable: 0,
+        cashReceivablePaid: 0, cashPayablePaid: 0,
+        cashReceivableRemaining: 0, cashPayableRemaining: 0,
+      });
+    }
+    const cb = currencyMap.get(cid)!;
+    const paid = paymentsByDebt.get(debt.id) || 0;
+    const isReceivable = debt.debtType === 'RECEIVABLE' || !debt.debtType;
+    const isCash = debt.debtMode === 'CASH';
+
+    if (isReceivable) {
+      cb.receivable += debt.finalBalance;
+      cb.receivablePaid += paid;
+      cb.receivableRemaining += debt.finalBalance - paid;
+      if (isCash) {
+        cb.cashReceivable += debt.finalBalance;
+        cb.cashReceivablePaid += paid;
+        cb.cashReceivableRemaining += debt.finalBalance - paid;
+      } else {
+        cb.deferredReceivable += debt.finalBalance;
+        cb.deferredReceivablePaid += paid;
+        cb.deferredReceivableRemaining += debt.finalBalance - paid;
+      }
+    } else {
+      cb.payable += debt.finalBalance;
+      cb.payablePaid += paid;
+      cb.payableRemaining += debt.finalBalance - paid;
+      if (isCash) {
+        cb.cashPayable += debt.finalBalance;
+        cb.cashPayablePaid += paid;
+        cb.cashPayableRemaining += debt.finalBalance - paid;
+      } else {
+        cb.deferredPayable += debt.finalBalance;
+        cb.deferredPayablePaid += paid;
+        cb.deferredPayableRemaining += debt.finalBalance - paid;
+      }
+    }
+  }
+
+  const currencyBreakdown = Array.from(currencyMap.values());
+
   return {
     totalDebts,
     totalPaid,
@@ -1514,6 +1602,8 @@ export async function getTotalDebtRemaining(): Promise<{
     cashPayablePaid,
     cashReceivableRemaining,
     cashPayableRemaining,
+    // 🔸 تقسيم حسب العملة
+    currencyBreakdown,
   };
 }
 

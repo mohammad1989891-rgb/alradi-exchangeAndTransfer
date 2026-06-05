@@ -31,3 +31,36 @@ Stage Summary:
 - UI Freeze maintained - no changes to overall app design
 - Lint check passes, TypeScript compilation passes for modified files
 - Dev server runs and compiles successfully with changes
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Separate debt display by currency on main page (BalancesPage) - no cross-currency merging
+
+Work Log:
+- Analyzed BalancesPage.tsx - found all debt amounts merged into single $ values
+- Analyzed cachedCalculations.ts - found calcDebtRemaining() sums across all currencies
+- Analyzed useSupabaseData.ts, useLocalData.ts, localDb.ts - all needed currencyBreakdown
+- Added CurrencyDebtBreakdown interface to cachedCalculations.ts
+- Added currencyBreakdown field to DebtRemainingResult interface
+- Modified calcDebtRemaining() to build currencyMap and compute per-currency totals
+- Updated EMPTY_DEBT_REMAINING with currencyBreakdown: []
+- Updated DebtRemaining interface in useSupabaseData.ts + re-exported CurrencyDebtBreakdown
+- Updated useLocalData.ts debtRemaining state type with currencyBreakdown
+- Updated localDb.ts getTotalDebtRemaining() return type and logic with currencyBreakdown
+- Completely rewrote BalancesPage.tsx debt section:
+  - Assets card (لنا): shows each currency's remaining amount separately
+  - Liabilities card (علينا): shows each currency's remaining amount separately
+  - Net debt card: shows each currency's net balance separately
+  - Details section: shows per-currency breakdown with الإجمالي/المدفوع/المتبقي and نقدي/آجل split
+- Removed all merged single-value displays (no more "1,500 $" combining USD+SYP+etc)
+- Each currency is displayed with its own symbol (e.g., $, ل.س, ر.س)
+
+Stage Summary:
+- Each currency displayed independently on main page debt cards
+- No cross-currency merging or conversion
+- Per-currency breakdown available in detailed view
+- All data sources (Supabase + Local) include currencyBreakdown
+- TypeScript compilation passes for all modified files
+- ESLint passes with no errors
+- Dev server compiles and runs successfully

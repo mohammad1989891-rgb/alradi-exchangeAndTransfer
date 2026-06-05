@@ -40,7 +40,10 @@ import {
   getExchangeStats,
 } from '@/lib/supabaseDb';
 import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange } from '@/lib/supabaseDb';
-import { calcDebtRemaining, calcTotalBalanceUSD, EMPTY_DEBT_REMAINING } from '@/lib/cachedCalculations';
+import { calcDebtRemaining, calcTotalBalanceUSD, EMPTY_DEBT_REMAINING, CurrencyDebtBreakdown } from '@/lib/cachedCalculations';
+
+// Re-export for consumers
+export type { CurrencyDebtBreakdown };
 
 // ============================================
 // Retry Constants
@@ -78,6 +81,8 @@ interface DebtRemaining {
   cashPayablePaid: number;
   cashReceivableRemaining: number;
   cashPayableRemaining: number;
+  // 🔸 تقسيم حسب العملة
+  currencyBreakdown: CurrencyDebtBreakdown[];
 }
 
 // EMPTY_DEBT_REMAINING is imported from cachedCalculations.ts

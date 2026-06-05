@@ -79,6 +79,29 @@ export const calcTotalBalanceUSD = createCachedCalculator(
 // ============================================
 // Debt Remaining Calculation (cached)
 // ============================================
+// 🔸 تقسيم الديون حسب العملة — كل عملة كيان مستقل
+export interface CurrencyDebtBreakdown {
+  currencyId: string;
+  receivable: number;
+  payable: number;
+  receivablePaid: number;
+  payablePaid: number;
+  receivableRemaining: number;
+  payableRemaining: number;
+  deferredReceivable: number;
+  deferredPayable: number;
+  deferredReceivablePaid: number;
+  deferredPayablePaid: number;
+  deferredReceivableRemaining: number;
+  deferredPayableRemaining: number;
+  cashReceivable: number;
+  cashPayable: number;
+  cashReceivablePaid: number;
+  cashPayablePaid: number;
+  cashReceivableRemaining: number;
+  cashPayableRemaining: number;
+}
+
 interface DebtRemainingResult {
   totalDebts: number;
   totalPaid: number;
@@ -103,6 +126,8 @@ interface DebtRemainingResult {
   cashPayablePaid: number;
   cashReceivableRemaining: number;
   cashPayableRemaining: number;
+  // 🔸 تقسيم حسب العملة
+  currencyBreakdown: CurrencyDebtBreakdown[];
 }
 
 export const EMPTY_DEBT_REMAINING: DebtRemainingResult = {
@@ -117,6 +142,7 @@ export const EMPTY_DEBT_REMAINING: DebtRemainingResult = {
   cashReceivable: 0, cashPayable: 0,
   cashReceivablePaid: 0, cashPayablePaid: 0,
   cashReceivableRemaining: 0, cashPayableRemaining: 0,
+  currencyBreakdown: [],
 };
 
 export const calcDebtRemaining = createCachedCalculator(
@@ -183,6 +209,61 @@ export const calcDebtRemaining = createCachedCalculator(
     }).length;
     const paidDebtsCount = debts.length - unpaidDebtsCount;
 
+    // 🔸 تقسيم الديون حسب العملة — كل عملة كيان مستقل
+    const currencyMap = new Map<string, CurrencyDebtBreakdown>();
+
+    for (const debt of debts) {
+      const cid = debt.currencyId;
+      if (!currencyMap.has(cid)) {
+        currencyMap.set(cid, {
+          currencyId: cid,
+          receivable: 0, payable: 0,
+          receivablePaid: 0, payablePaid: 0,
+          receivableRemaining: 0, payableRemaining: 0,
+          deferredReceivable: 0, deferredPayable: 0,
+          deferredReceivablePaid: 0, deferredPayablePaid: 0,
+          deferredReceivableRemaining: 0, deferredPayableRemaining: 0,
+          cashReceivable: 0, cashPayable: 0,
+          cashReceivablePaid: 0, cashPayablePaid: 0,
+          cashReceivableRemaining: 0, cashPayableRemaining: 0,
+        });
+      }
+      const cb = currencyMap.get(cid)!;
+      const paid = paymentsByDebt.get(debt.id) || 0;
+      const isReceivable = debt.debtType === 'RECEIVABLE' || !debt.debtType;
+      const isCash = debt.debtMode === 'CASH';
+
+      if (isReceivable) {
+        cb.receivable += debt.finalBalance;
+        cb.receivablePaid += paid;
+        cb.receivableRemaining += debt.finalBalance - paid;
+        if (isCash) {
+          cb.cashReceivable += debt.finalBalance;
+          cb.cashReceivablePaid += paid;
+          cb.cashReceivableRemaining += debt.finalBalance - paid;
+        } else {
+          cb.deferredReceivable += debt.finalBalance;
+          cb.deferredReceivablePaid += paid;
+          cb.deferredReceivableRemaining += debt.finalBalance - paid;
+        }
+      } else {
+        cb.payable += debt.finalBalance;
+        cb.payablePaid += paid;
+        cb.payableRemaining += debt.finalBalance - paid;
+        if (isCash) {
+          cb.cashPayable += debt.finalBalance;
+          cb.cashPayablePaid += paid;
+          cb.cashPayableRemaining += debt.finalBalance - paid;
+        } else {
+          cb.deferredPayable += debt.finalBalance;
+          cb.deferredPayablePaid += paid;
+          cb.deferredPayableRemaining += debt.finalBalance - paid;
+        }
+      }
+    }
+
+    const currencyBreakdown = Array.from(currencyMap.values());
+
     return {
       totalDebts,
       totalPaid,
@@ -207,6 +288,7 @@ export const calcDebtRemaining = createCachedCalculator(
       cashPayablePaid,
       cashReceivableRemaining: cashReceivable - cashReceivablePaid,
       cashPayableRemaining: cashPayable - cashPayablePaid,
+      currencyBreakdown,
     };
   },
   (debts, debtPayments) => simpleHash({

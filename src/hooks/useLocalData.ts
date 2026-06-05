@@ -92,6 +92,28 @@ export function useSupabaseData() {
     cashPayablePaid: number;
     cashReceivableRemaining: number;
     cashPayableRemaining: number;
+    // 🔸 تقسيم حسب العملة
+    currencyBreakdown: Array<{
+      currencyId: string;
+      receivable: number;
+      payable: number;
+      receivablePaid: number;
+      payablePaid: number;
+      receivableRemaining: number;
+      payableRemaining: number;
+      deferredReceivable: number;
+      deferredPayable: number;
+      deferredReceivablePaid: number;
+      deferredPayablePaid: number;
+      deferredReceivableRemaining: number;
+      deferredPayableRemaining: number;
+      cashReceivable: number;
+      cashPayable: number;
+      cashReceivablePaid: number;
+      cashPayablePaid: number;
+      cashReceivableRemaining: number;
+      cashPayableRemaining: number;
+    }>;
   }>({
     totalDebts: 0,
     totalPaid: 0,
@@ -118,6 +140,7 @@ export function useSupabaseData() {
     cashPayablePaid: 0,
     cashReceivableRemaining: 0,
     cashPayableRemaining: 0,
+    currencyBreakdown: [],
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -176,9 +199,7 @@ export function useSupabaseData() {
       setDebts(debtData);
       setDebtPayments(debtPaymentsData);
       setTotalBalanceUSD(totalUSD);
-      setDebtRemaining(debtRemainingData);
-      setCurrencyExchanges(exchangeData);
-      setInitError(null);
+      setDebtRemaining(debtRemainingData as typeof debtRemaining);
       
       // 🔸 إطلاق حدث تحديث البيانات فقط إذا لم يُطلب تجاهله
       // (لمنع الحلقة: useLocalData يطلق الحدث → page.tsx يستمع → يطلق refreshAllData → يطلق حدث آخر)
@@ -281,8 +302,7 @@ export function useSupabaseData() {
           setDebts(debtData);
           setDebtPayments(debtPaymentsData);
           setTotalBalanceUSD(totalUSD);
-          setDebtRemaining(debtRemainingData);
-          setCurrencyExchanges(exchangeData);
+          setDebtRemaining(debtRemainingData as typeof debtRemaining);
         }
       } catch (error) {
         console.error('Error refreshing data from event:', error);

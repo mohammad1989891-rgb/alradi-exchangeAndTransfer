@@ -212,3 +212,66 @@ Stage Summary:
 - Overflow transactions use the debt's actual currency instead of hardcoded `cur_usd`
 - Backward compatibility maintained: existing global total fields still present but marked as mixing currencies
 - UI Freeze respected: no colors, layouts, component structure, spacing, or visual design changes
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Fix cross-currency mixing in payment flow and account card color
+
+Work Log:
+- Read and analyzed DebtsPage.tsx (1627 lines) and MultiCurrencyPaymentModal.tsx (1107 lines) thoroughly
+- Identified 8 bugs where `netCashBalance` (cross-currency sum) was used for display, logic, and payment flow
+
+Changes made:
+
+1. **DebtsPage.tsx - Removed simple payment flow (Bug 1-3)**:
+   - Removed `handleAddCumulativePayment` and `executePayment` functions (both used cross-currency `netCashBalance` for direction/amount)
+   - Removed related states: `showPaymentModal`, `paymentAmount`, `paymentDescription`, `paymentDate`, `paymentType`, `isSubmitting`, `showOverpaymentDialog`, `overpaymentAmount`, `pendingPaymentAmount`
+   - Added `showMultiCurrencyPaymentModal` state
+   - "إضافة دفعة" button now always opens `MultiCurrencyPaymentModal` which handles per-currency payment correctly
+
+2. **DebtsPage.tsx - Fixed account card color (Bug 4)**:
+   - Added `getAccountBalanceState()` helper that determines account state from per-currency breakdown:
+     - ALL currencies netBalance === 0 → zero/gray state
+     - ANY positive AND none negative → positive/emerald state
+     - ANY negative AND none positive → negative/red state
+     - MIXED (some positive, some negative) → uses first non-zero balance's direction
+   - Replaced `summary.netCashBalance > 0` / `< 0` / `=== 0` with `getAccountBalanceState()`
+
+3. **DebtsPage.tsx - Fixed payment button disabled logic (Bug 8)**:
+   - Added `isAllCurrencyBalancesZero()` helper
+   - Replaced `selectedAccountSummary.netCashBalance === 0` with `isAllCurrencyBalancesZero(selectedAccountSummary)`
+
+4. **DebtsPage.tsx - Removed overpayment dialog**:
+   - Removed the AlertDialog that used `netCashBalance` and was only needed by the deleted simple payment flow
+   - The `MultiCurrencyPaymentModal` handles surplus/overflow internally
+
+5. **DebtsPage.tsx - Fixed import bug (Bug 6)**:
+   - The `import('@/lib/localDb')` on line 670 was removed along with `executePayment` function
+   - `updateDebtPayment` now correctly imported from `@/lib/supabaseDb` at the top level
+
+6. **DebtsPage.tsx - Marked legacy cross-currency totals (Bug 5)**:
+   - Added ⚠️ warning comments to `netCashBalance`, `cumulativeCashReceivable`, etc. that they mix currencies
+   - Added explicit comments: "لا تستخدمه للعرض أو الحسابات، استخدم currencyBreakdown بدلاً من ذلك"
+   - `netCashBalance` remains in interface for backward compatibility but is never used for display or logic
+
+7. **DebtsPage.tsx - Cleaned unused imports**:
+   - Removed `Label` and `Textarea` imports (only used by deleted simple payment dialog)
+   - Removed `CurrencyDebtSummary` import (only used by deleted code)
+
+8. **MultiCurrencyPaymentModal.tsx - Fixed account info display (Bug 7)**:
+   - Replaced single `netCashBalance $` display with per-currency balance breakdown
+   - Each currency shows its `netBalance` with actual currency symbol from `currencies` prop
+   - Icon/color determined from per-currency breakdown using same logic as DebtsPage account cards
+   - No more hardcoded `$` symbol
+
+9. **Verification**: `bun run lint` — all clean, no errors
+
+Stage Summary:
+- Critical accounting bug fixed: payment flow no longer uses cross-currency `netCashBalance` for direction/amount
+- Account card color determined from per-currency breakdown (not cross-currency sum)
+- Payment button disabled state checks per-currency balances
+- `MultiCurrencyPaymentModal` account info shows per-currency balances with correct symbols
+- Simple payment flow completely removed — all payments go through `MultiCurrencyPaymentModal`
+- `netCashBalance` still exists in data structures for backward compatibility but is clearly marked as unreliable
+- UI Freeze respected: no visual design, colors, layouts, or styling changes

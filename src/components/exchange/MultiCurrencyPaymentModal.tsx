@@ -508,8 +508,6 @@ export function MultiCurrencyPaymentModal({
 
     setIsSubmitting(true);
     try {
-      const currentBalance = accountSummary.netCashBalance;
-      const direction: 'RECEIVABLE' | 'PAYABLE' = currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
       const selectedAllocations = allocations.filter(a => a.selected && a.allocatedAmount > 0);
 
       let totalApplied = 0;
@@ -519,6 +517,11 @@ export function MultiCurrencyPaymentModal({
       for (const allocation of selectedAllocations) {
         const debtsInCurrency = unpaidDebtsByCurrency.get(allocation.currencyId) || [];
         let remainingAllocation = allocation.allocatedAmount;
+
+        // 🔹 تحديد الاتجاه والرصيد حسب عملة هذا التخصيص فقط (لا ندمج عملات)
+        const currencyBalance = accountSummary.currencyBreakdown?.find(cb => cb.currencyId === allocation.currencyId);
+        const currencyNetBalance = currencyBalance?.netBalance ?? 0;
+        const direction: 'RECEIVABLE' | 'PAYABLE' = currencyNetBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
 
         // Find unpaid debts in this currency and pay them
         for (const debt of debtsInCurrency) {
@@ -560,7 +563,7 @@ export function MultiCurrencyPaymentModal({
               date: paymentDate,
               paymentMode: paymentType,
               direction,
-              currentBalance,
+              currentBalance: currencyNetBalance,
             });
             createdPaymentIds.push(payment.id);
             totalApplied += payAmount;
@@ -588,10 +591,13 @@ export function MultiCurrencyPaymentModal({
       // Handle surplus (if total applied in payment currency < total payment amount)
       const actualSurplus = paymentAmount - totalDistributed;
       if (actualSurplus > 0.01 && createdPaymentIds.length > 0) {
-        // 🔹 تحديد اتجاه الفائض:
-        // - currentBalance < 0 (علينا) → دفعنا أكثر → فائض "لنا"
-        // - currentBalance > 0 (لنا) → قبضنا أكثر → فائض "علينا"
-        const overflowDirection: 'RECEIVABLE' | 'PAYABLE' = currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
+        // 🔹 تحديد اتجاه الفائض حسب أول عملة محددة (لا نستخدم رصيد مختلط)
+        const firstSelectedAllocation = selectedAllocations[0];
+        const firstCurrencyBalance = accountSummary.currencyBreakdown?.find(cb => cb.currencyId === firstSelectedAllocation?.currencyId);
+        const firstCurrencyNet = firstCurrencyBalance?.netBalance ?? 0;
+        // - firstCurrencyNet < 0 (علينا) → دفعنا أكثر → فائض "لنا"
+        // - firstCurrencyNet > 0 (لنا) → قبضنا أكثر → فائض "علينا"
+        const overflowDirection: 'RECEIVABLE' | 'PAYABLE' = firstCurrencyNet < 0 ? 'RECEIVABLE' : 'PAYABLE';
 
         const overflowTransactionType: 'INCOME' | 'EXPENSE' = overflowDirection === 'RECEIVABLE' ? 'INCOME' : 'EXPENSE';
 
@@ -674,27 +680,60 @@ export function MultiCurrencyPaymentModal({
         {accountSummary && (
           <div className="space-y-4 mt-4">
             {/* Account Name */}
-            <div className="rounded-xl p-3 bg-muted/50 flex items-center gap-3">
-              <div className={cn(
-                'w-10 h-10 rounded-xl flex items-center justify-center',
-                accountSummary.netCashBalance >= 0
-                  ? 'bg-emerald-100 dark:bg-emerald-900/30'
-                  : 'bg-red-100 dark:bg-red-900/30'
-              )}>
-                {accountSummary.netCashBalance >= 0
-                  ? <ArrowUpRight className="w-5 h-5 text-emerald-600" />
-                  : <ArrowDownRight className="w-5 h-5 text-red-600" />
-                }
-              </div>
-              <div>
-                <p className="font-bold text-foreground">{accountSummary.account?.name || 'غير معروف'}</p>
-                <p className={cn(
-                  'text-sm',
-                  accountSummary.netCashBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
+            <div className="rounded-xl p-3 bg-muted/50">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  'w-10 h-10 rounded-xl flex items-center justify-center',
+                  (() => {
+                    if (!accountSummary.currencyBreakdown || accountSummary.currencyBreakdown.length === 0) return 'bg-gray-100 dark:bg-gray-900/30';
+                    const hasPos = accountSummary.currencyBreakdown.some(cb => cb.netBalance > 0);
+                    const hasNeg = accountSummary.currencyBreakdown.some(cb => cb.netBalance < 0);
+                    const allZero = accountSummary.currencyBreakdown.every(cb => cb.netBalance === 0);
+                    if (allZero) return 'bg-gray-100 dark:bg-gray-900/30';
+                    if (hasPos && !hasNeg) return 'bg-emerald-100 dark:bg-emerald-900/30';
+                    if (hasNeg && !hasPos) return 'bg-red-100 dark:bg-red-900/30';
+                    // مختلط: نستخدم أول رصيد غير صفري
+                    const first = accountSummary.currencyBreakdown.find(cb => cb.netBalance !== 0);
+                    return first && first.netBalance > 0 ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-red-100 dark:bg-red-900/30';
+                  })()
                 )}>
-                  الرصيد: {accountSummary.netCashBalance >= 0 ? '+' : ''}{formatNumber(accountSummary.netCashBalance)} $
-                </p>
+                  {(() => {
+                    if (!accountSummary.currencyBreakdown || accountSummary.currencyBreakdown.length === 0) return <CheckCircle className="w-5 h-5 text-gray-600" />;
+                    const hasPos = accountSummary.currencyBreakdown.some(cb => cb.netBalance > 0);
+                    const hasNeg = accountSummary.currencyBreakdown.some(cb => cb.netBalance < 0);
+                    const allZero = accountSummary.currencyBreakdown.every(cb => cb.netBalance === 0);
+                    if (allZero) return <CheckCircle className="w-5 h-5 text-gray-600" />;
+                    if (hasPos && !hasNeg) return <ArrowUpRight className="w-5 h-5 text-emerald-600" />;
+                    if (hasNeg && !hasPos) return <ArrowDownRight className="w-5 h-5 text-red-600" />;
+                    const first = accountSummary.currencyBreakdown.find(cb => cb.netBalance !== 0);
+                    return first && first.netBalance > 0 ? <ArrowUpRight className="w-5 h-5 text-emerald-600" /> : <ArrowDownRight className="w-5 h-5 text-red-600" />;
+                  })()}
+                </div>
+                <div>
+                  <p className="font-bold text-foreground">{accountSummary.account?.name || 'غير معروف'}</p>
+                </div>
               </div>
+              {/* أرصدة العملات */}
+              {accountSummary.currencyBreakdown && accountSummary.currencyBreakdown.length > 0 && (
+                <div className={cn(
+                  'mt-2 flex flex-wrap gap-x-4 gap-y-1',
+                  accountSummary.currencyBreakdown.length === 1 ? 'flex-row items-center' : 'flex-col'
+                )}>
+                  {accountSummary.currencyBreakdown.map(cb => {
+                    const symbol = currencies.find(c => c.id === cb.currencyId)?.symbol || '';
+                    const isZero = cb.netBalance === 0;
+                    const isPos = cb.netBalance > 0;
+                    return (
+                      <span key={cb.currencyId} className={cn(
+                        'text-sm font-medium',
+                        isZero ? 'text-gray-600 dark:text-gray-400' : isPos ? 'text-emerald-600' : 'text-red-600'
+                      )}>
+                        {isZero ? '0' : `${isPos ? '+' : ''}${formatNumber(cb.netBalance)}`} {symbol}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Payment Currency Selector */}

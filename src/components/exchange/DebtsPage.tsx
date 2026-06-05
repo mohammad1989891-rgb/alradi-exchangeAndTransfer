@@ -9,8 +9,6 @@ import { DebtModal } from './DebtModal';
 import { MultiCurrencyPaymentModal } from './MultiCurrencyPaymentModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import {
   Dialog,
   DialogContent,
@@ -31,7 +29,7 @@ import { formatNumber, formatDate } from '@/lib/format';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import type { Debt, DebtPayment } from '@/lib/supabaseDb';
-import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary, type CurrencyDebtSummary } from '@/lib/supabaseDb';
+import { getAccountDebtSummary, deleteTransaction, updateDebtPayment, type AccountDebtSummary } from '@/lib/supabaseDb';
 import { groupByMonth } from '@/lib/monthlyGrouping';
 
 // واجهة للحركة الموحدة (دين أو دفعة)
@@ -70,8 +68,8 @@ interface CumulativeAccountSummary extends Omit<AccountDebtSummary, 'currencyBre
   cumulativeCashPayable: number;       // إجمالي الديون النقدية علينا
   cumulativeCashPaid: number;          // إجمالي المدفوع من الديون النقدية
   cumulativeCashRemaining: number;     // المتبقي التراكمي = لنا - علينا - مدفوع
-  // صافي الديون النقدية
-  netCashBalance: number;              // صافي النقدية = (لنا - علينا) - مدفوع
+  // صافي الديون النقدية - ⚠️ يدمج عملات مختلفة! لا تستخدمه للعرض أو الحسابات، استخدم currencyBreakdown بدلاً من ذلك
+  netCashBalance: number;              // صافي النقدية = (لنا - علينا) - مدفوع (للتوافق فقط)
   // معلومات إضافية لمعالجة الدفعات الزائدة
   primaryDebtMode: 'CASH' | 'DEFERRED';  // نوع الدين الأساسي
   // الملخص التراكمي حسب العملة
@@ -145,17 +143,8 @@ export function DebtsPage() {
   const [selectedAccountSummary, setSelectedAccountSummary] = useState<CumulativeAccountSummary | null>(null);
   const [accountSummaries, setAccountSummaries] = useState<CumulativeAccountSummary[]>([]);
   const [isLoadingSummaries, setIsLoadingSummaries] = useState(false);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentAmount, setPaymentAmount] = useState('');
-  const [paymentDescription, setPaymentDescription] = useState('');
-  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
-  const [paymentType, setPaymentType] = useState<'CASH' | 'DEFERRED'>('CASH');  // نوع التسديد
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // حالة معالجة الدفعات الزائدة
-  const [showOverpaymentDialog, setShowOverpaymentDialog] = useState(false);
-  const [overpaymentAmount, setOverpaymentAmount] = useState(0);
-  const [pendingPaymentAmount, setPendingPaymentAmount] = useState(0);
+  // حالة نافذة الدفع متعدد العملات
+  const [showMultiCurrencyPaymentModal, setShowMultiCurrencyPaymentModal] = useState(false);
   
   // حالة إظهار/إخفاء تفاصيل الديون
   const [showDebtsDetails, setShowDebtsDetails] = useState(false);
@@ -356,10 +345,12 @@ export function DebtsPage() {
 
     // ============================================
     // 🔹 حساب الديون النقدية (إجمالي لكل العملات - للتوافق)
+    // ⚠️ تحذير: هذه القيم تدمج عملات مختلفة ولا يجب استخدامها للعرض أو الحسابات
+    // 🔸 استخدم currencyBreakdown بدلاً من ذلك
     // ============================================
-    let cashReceivable = 0;   // ديون نقدية لنا
-    let cashPayable = 0;      // ديون نقدية علينا
-    let cashPaid = 0;         // مدفوع من الديون النقدية
+    let cashReceivable = 0;   // ديون نقدية لنا (يدمج عملات مختلفة - للتوافق فقط)
+    let cashPayable = 0;      // ديون نقدية علينا (يدمج عملات مختلفة - للتوافق فقط)
+    let cashPaid = 0;         // مدفوع من الديون النقدية (يدمج عملات مختلفة - للتوافق فقط)
 
     for (const debt of cashDebts) {
       const paid = getPaidAmountForDebt(debt.id);
@@ -374,10 +365,11 @@ export function DebtsPage() {
 
     // ============================================
     // 🔹 حساب الديون الآجلة (إجمالي لكل العملات - للتوافق)
+    // ⚠️ تحذير: هذه القيم تدمج عملات مختلفة ولا يجب استخدامها للعرض أو الحسابات
     // ============================================
-    let deferredReceivable = 0;   // ديون آجلة لنا
-    let deferredPayable = 0;      // ديون آجلة علينا
-    let deferredPaid = 0;         // مدفوع من الديون الآجلة
+    let deferredReceivable = 0;   // ديون آجلة لنا (يدمج عملات مختلفة - للتوافق فقط)
+    let deferredPayable = 0;      // ديون آجلة علينا (يدمج عملات مختلفة - للتوافق فقط)
+    let deferredPaid = 0;         // مدفوع من الديون الآجلة (يدمج عملات مختلفة - للتوافق فقط)
 
     for (const debt of deferredDebts) {
       const paid = getPaidAmountForDebt(debt.id);
@@ -417,12 +409,14 @@ export function DebtsPage() {
     
     // ============================================
     // 🔹 المعادلة الصحيحة للرصيد النهائي (للتوافق)
+    // ⚠️ تحذير: netCashBalance يدمج عملات مختلفة - لا تستخدمه للعرض أو الحسابات
+    // 🔸 استخدم currencyBreakdown[i].netBalance بدلاً من ذلك
     // ============================================
     const netCashBalance = 
-      receivableTransactions    // ديون لنا (موجب)
-      - payableTransactions     // ديون علينا (سالب)
-      + receivablePayments      // دفعات لنا (موجب)
-      - payablePayments;        // دفعات علينا (سالب)
+      receivableTransactions    // ديون لنا (موجب) - يدمج عملات مختلفة!
+      - payableTransactions     // ديون علينا (سالب) - يدمج عملات مختلفة!
+      + receivablePayments      // دفعات لنا (موجب) - يدمج عملات مختلفة!
+      - payablePayments;        // دفعات علينا (سالب) - يدمج عملات مختلفة!
 
     // تحديد نوع الدين الأساسي
     let primaryDebtMode: 'CASH' | 'DEFERRED' = 'CASH';
@@ -540,170 +534,25 @@ export function DebtsPage() {
     });
   }, [accountSummaries, searchQuery, hasDateFilter, fromDate, toDate, debtPayments]);
 
-  // إضافة دفعة جديدة للإجمالي التراكمي
-  const handleAddCumulativePayment = async () => {
-    if (!selectedAccountSummary || !paymentAmount || parseFloat(paymentAmount) <= 0) return;
-
-    const paymentAmountInput = parseFloat(paymentAmount);
-    const currentBalance = selectedAccountSummary.netCashBalance;
-
-    let newBalance: number;
-    if (currentBalance > 0) {
-      newBalance = currentBalance - paymentAmountInput;
-    } else {
-      newBalance = currentBalance + paymentAmountInput;
-    }
-
-    const crossedZero = (currentBalance > 0 && newBalance < 0) || (currentBalance < 0 && newBalance > 0);
-
-    if (crossedZero) {
-      const excess = Math.abs(newBalance);
-      setOverpaymentAmount(excess);
-      setPendingPaymentAmount(paymentAmountInput);
-      setShowOverpaymentDialog(true);
-      return;
-    }
-
-    await executePayment(paymentAmountInput);
+  // ============================================
+  // 🔹 تحديد حالة رصيد الحساب من العملات (لا ندمج عملات مختلفة)
+  // ============================================
+  const getAccountBalanceState = (summary: CumulativeAccountSummary): 'zero' | 'positive' | 'negative' => {
+    const hasPositiveCurrency = summary.currencyBreakdown.some(cb => cb.netBalance > 0);
+    const hasNegativeCurrency = summary.currencyBreakdown.some(cb => cb.netBalance < 0);
+    const allZero = summary.currencyBreakdown.every(cb => cb.netBalance === 0) || summary.currencyBreakdown.length === 0;
+    if (allZero) return 'zero';
+    if (hasPositiveCurrency && !hasNegativeCurrency) return 'positive';
+    if (hasNegativeCurrency && !hasPositiveCurrency) return 'negative';
+    // مختلط: نستخدم اتجاه أول رصيد غير صفري
+    const firstNonZero = summary.currencyBreakdown.find(cb => cb.netBalance !== 0);
+    if (firstNonZero && firstNonZero.netBalance > 0) return 'positive';
+    return 'negative';
   };
 
-  // تنفيذ الدفعة
-  const executePayment = async (amount: number, isOverpayment: boolean = false) => {
-    if (!selectedAccountSummary) return;
-
-    setIsSubmitting(true);
-    try {
-      const currentBalance = selectedAccountSummary.netCashBalance;
-
-      let newBalance: number;
-      if (currentBalance > 0) {
-        newBalance = currentBalance - amount;
-      } else {
-        newBalance = currentBalance + amount;
-      }
-
-      let appliedAmount = amount;
-      let excessAmount = 0;
-
-      const crossedZero = (currentBalance > 0 && newBalance < 0) || (currentBalance < 0 && newBalance > 0);
-
-      if (crossedZero) {
-        appliedAmount = Math.abs(currentBalance);
-        excessAmount = Math.abs(newBalance);
-      }
-
-      const direction = currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
-
-      let addedPaymentId: string | null = null;
-      let unpaidDebtCurrencyId: string | undefined;
-      
-      if (appliedAmount > 0) {
-        // ============================================
-        // 🔹 البحث عن دين غير مدفوع (نقدي أو آجل)
-        // 🔸 الدفعات تُسجل على جميع الديون
-        // 🔸 تأثير الصندوق يُحدد لاحقاً حسب paymentMode
-        // ============================================
-        const allDebts = [...selectedAccountSummary.cashDebts, ...selectedAccountSummary.deferredDebts];
-        const unpaidDebt = allDebts.find(d => {
-          const remaining = getRemainingForDebt(d);
-          return remaining > 0;
-        });
-
-        if (unpaidDebt) {
-          unpaidDebtCurrencyId = unpaidDebt.currencyId;
-          const payment = await addDebtPayment({
-            debtId: unpaidDebt.id,
-            amount: appliedAmount,
-            currencyId: unpaidDebt.currencyId,
-            description: paymentDescription || (excessAmount > 0 ? 'دفعة مع فائض' : undefined),
-            date: paymentDate,
-            paymentMode: paymentType,
-            direction,
-            currentBalance,  // تمرير الرصيد التراكمي لتحديد تأثير الصندوق بشكل صحيح
-          });
-          addedPaymentId = payment.id;
-        }
-      }
-
-      // ============================================
-      // 🔹 معالجة الفائض كحركة مستقلة
-      // 🔸 الفائض "لنا" = دفعنا زيادة = خرج من الصندوق = خصم (INCOME)
-      // 🔸 الفائض "علينا" = قبضنا زيادة = دخل للصندوق = إضافة (EXPENSE)
-      // 🔸 إذا كانت الدفعة كاش → الفائض يؤثر على الصندوق
-      // 🔸 إذا كانت الدفعة آجل → الفائض لا يؤثر على الصندوق
-      // ============================================
-      if (excessAmount > 0 && addedPaymentId) {
-        // 🔹 تحديد اتجاه الفائض:
-        // - currentBalance < 0 (علينا) → دفعنا أكثر → فائض "لنا"
-        // - currentBalance > 0 (لنا) → قبضنا أكثر → فائض "علينا"
-        const overflowDirection = currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
-        
-        // 🔹 تحديد نوع الحركة:
-        // - RECEIVABLE (لنا) → خصم من الصندوق → INCOME
-        // - PAYABLE (علينا) → إضافة للصندوق → EXPENSE
-        // في addTransaction:
-        // - INCOME: vault.balance - amount (خصم)
-        // - EXPENSE: vault.balance + amount (إضافة)
-        const overflowTransactionType: 'INCOME' | 'EXPENSE' = overflowDirection === 'RECEIVABLE' ? 'INCOME' : 'EXPENSE';
-
-        // 🔹 تأثير الفائض على الصندوق حسب نوع الدفعة
-        const overflowPaymentType: 'CASH' | 'DEFERRED' = paymentType;
-
-        const transaction = await addTransaction({
-          accountId: selectedAccountSummary.accountId,
-          currencyId: unpaidDebtCurrencyId || 'cur_usd',
-          type: overflowTransactionType,
-          paymentType: overflowPaymentType,
-          amount: excessAmount,
-          conversionFactor: 1,
-          conversionMethod: 'MULTIPLY',
-          feesType: 'FIXED',
-          feesDirection: 'INCOME',
-          feesAmount: 0,
-          description: overflowDirection === 'RECEIVABLE' ? 'فائض دفعة - لنا' : 'فائض دفعة - علينا',
-          date: new Date().toISOString().split('T')[0],
-          isOverflowTransaction: true,
-          relatedPaymentId: addedPaymentId,
-        });
-
-        if (transaction.success && transaction.data) {
-          const { updateDebtPayment } = await import('@/lib/localDb');
-          await updateDebtPayment(addedPaymentId, {
-            overflowTransactionId: transaction.data.id,
-          });
-        }
-
-        toast({
-          title: 'تم تسجيل الفائض كحركة',
-          description: `تم إضافة حركة "${overflowDirection === 'RECEIVABLE' ? 'لنا' : 'علينا'}" بقيمة ${formatNumber(excessAmount)} ${getCurrencySymbol(unpaidDebtCurrencyId || '')}`,
-        });
-      }
-
-      setPaymentAmount('');
-      setPaymentDescription('');
-      setPaymentDate(new Date().toISOString().split('T')[0]);
-      setShowPaymentModal(false);
-      setShowOverpaymentDialog(false);
-      setOverpaymentAmount(0);
-      setPendingPaymentAmount(0);
-
-      const updatedSummary = await getAccountDebtSummary(selectedAccountSummary.accountId);
-      setSelectedAccountSummary(calculateCumulativeSummary(updatedSummary));
-
-      toast({
-        title: 'تم بنجاح',
-        description: `تم إضافة دفعة بقيمة ${formatNumber(appliedAmount)} ${getCurrencySymbol(unpaidDebtCurrencyId || '')}${excessAmount > 0 ? ` وفائض ${formatNumber(excessAmount)} ${getCurrencySymbol(unpaidDebtCurrencyId || '')}` : ''}`,
-      });
-    } catch (error) {
-      console.error('Error adding payment:', error);
-      toast({
-        title: 'خطأ',
-        description: 'حدث خطأ أثناء إضافة الدفعة',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
+  // هل جميع أرصدة العملات صفرية؟
+  const isAllCurrencyBalancesZero = (summary: CumulativeAccountSummary): boolean => {
+    return summary.currencyBreakdown.every(cb => cb.netBalance === 0) || summary.currencyBreakdown.length === 0;
   };
 
   // ============================================
@@ -891,9 +740,10 @@ export function DebtsPage() {
         <div className="space-y-4">
           <AnimatePresence mode="popLayout">
             {filteredSummaries.map((summary, index) => {
-              const isPositiveBalance = summary.netCashBalance > 0;
-              const isNegativeBalance = summary.netCashBalance < 0;
-              const isZeroBalance = summary.netCashBalance === 0;
+              const balanceState = getAccountBalanceState(summary);
+              const isPositiveBalance = balanceState === 'positive';
+              const isNegativeBalance = balanceState === 'negative';
+              const isZeroBalance = balanceState === 'zero';
               
               return (
                 <motion.div
@@ -1189,14 +1039,14 @@ export function DebtsPage() {
               {/* أزرار الإجراءات */}
               <div className="flex gap-2">
                 <Button
-                  onClick={() => setShowPaymentModal(true)}
+                  onClick={() => setShowMultiCurrencyPaymentModal(true)}
                   className={cn(
                     "flex-1",
-                    selectedAccountSummary.netCashBalance === 0
+                    isAllCurrencyBalancesZero(selectedAccountSummary)
                       ? "bg-gray-300 hover:bg-gray-300 text-gray-500 cursor-not-allowed"
                       : "bg-teal-500 hover:bg-teal-600"
                   )}
-                  disabled={selectedAccountSummary.netCashBalance === 0}
+                  disabled={isAllCurrencyBalancesZero(selectedAccountSummary)}
                 >
                   <CreditCard className="w-4 h-4 ml-2" />
                   إضافة دفعة
@@ -1491,8 +1341,8 @@ export function DebtsPage() {
 
       {/* Multi-Currency Payment Modal */}
       <MultiCurrencyPaymentModal
-        isOpen={showPaymentModal}
-        onClose={() => setShowPaymentModal(false)}
+        isOpen={showMultiCurrencyPaymentModal}
+        onClose={() => setShowMultiCurrencyPaymentModal(false)}
         accountSummary={selectedAccountSummary}
         currencies={currencies}
         debtPayments={debtPayments}
@@ -1573,54 +1423,7 @@ export function DebtsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Overpayment Dialog */}
-      <AlertDialog open={showOverpaymentDialog} onOpenChange={setShowOverpaymentDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="w-5 h-5" />
-              تنبيه: الدفعة أكبر من المطلوب
-            </AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogDescription asChild>
-            <div className="space-y-3">
-              <p>
-                المبلغ المدخل: <span className="font-bold">{formatNumber(pendingPaymentAmount)} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')}</span>
-              </p>
-              <p>
-                المبلغ المطلوب: <span className="font-bold">{formatNumber(Math.abs(selectedAccountSummary?.netCashBalance || 0))} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')}</span>
-              </p>
-              <p>
-                الفائض: <span className="font-bold text-amber-600">{formatNumber(overpaymentAmount)} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')}</span>
-              </p>
-              <div className="mt-4 p-3 rounded-lg bg-muted/50">
-                <p className="text-sm font-medium mb-2">سيتم:</p>
-                <ol className="text-sm list-decimal list-inside space-y-1">
-                  <li>تسديد الدين بالكامل وتصفير الحساب</li>
-                  <li>
-                    إنشاء حركة "{selectedAccountSummary && selectedAccountSummary.netCashBalance >= 0 ? 'علينا' : 'لنا'}" بقيمة {formatNumber(overpaymentAmount)} {getCurrencySymbol(selectedAccountSummary?.currencyBreakdown[0]?.currencyId || '')} (حساب خاص)
-                  </li>
-                </ol>
-              </div>
-            </div>
-          </AlertDialogDescription>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setShowOverpaymentDialog(false);
-              setOverpaymentAmount(0);
-              setPendingPaymentAmount(0);
-            }}>
-              إلغاء العملية
-            </AlertDialogCancel>
-            <AlertDialogAction 
-              onClick={() => executePayment(pendingPaymentAmount, true)}
-              className="bg-amber-500 hover:bg-amber-600"
-            >
-              تنفيذ مع معالجة الفرق
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+
     </div>
   );
 }

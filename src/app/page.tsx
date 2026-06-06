@@ -22,7 +22,7 @@ import { CurrencyExchangeModal } from '@/components/exchange/CurrencyExchangeMod
 import { SplashScreen } from '@/components/exchange/SplashScreen';
 import { LoginPage } from '@/components/exchange/LoginPage';
 import { SupabaseSetup } from '@/components/exchange/SupabaseSetup';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Menu, Search, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -427,9 +427,9 @@ export default function Home() {
   }
   
   return (
-    <main className="min-h-screen bg-background flex flex-col">
+    <main className="h-screen overflow-hidden bg-background flex flex-col">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-md border-b border-border">
+      <header className="z-40 bg-background/95 backdrop-blur-md border-b border-border shrink-0">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Button
@@ -543,17 +543,7 @@ export default function Home() {
       {/* Content */}
       <div className="flex-1 overflow-y-auto pb-20">
         <div className="max-w-lg mx-auto px-4 py-4">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={activeTab}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              {renderPage()}
-            </motion.div>
-          </AnimatePresence>
+          {renderPage()}
         </div>
       </div>
       

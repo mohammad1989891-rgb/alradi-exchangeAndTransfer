@@ -323,21 +323,23 @@ export function ReportsPage() {
   return (
     <div className="space-y-6 pb-4">
       {/* Header — Sticky */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg">
-            <BarChart3 className="w-6 h-6 text-white" />
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-between"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg">
+              <BarChart3 className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">التقارير</h1>
+              <p className="text-sm text-muted-foreground">إحصائيات وتحليلات مفصلة</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">التقارير</h1>
-            <p className="text-sm text-muted-foreground">إحصائيات وتحليلات مفصلة</p>
-          </div>
-        </div>
-      </motion.div>
+        </motion.div>
+      </div>
 
       {/* ملخص سريع */}
       <div className="grid grid-cols-3 gap-3">

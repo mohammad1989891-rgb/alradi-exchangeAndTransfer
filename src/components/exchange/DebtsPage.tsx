@@ -740,30 +740,32 @@ export function DebtsPage() {
   return (
     <div className="space-y-6 pb-4">
       {/* Header — Sticky */}
-      <motion.div
-        initial={{ opacity: 0, y: -10 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="flex items-center justify-between sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg">
-            <AlertCircle className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-foreground">الديون</h1>
-            <p className="text-sm text-muted-foreground">
-              {debtRemaining.unpaidDebtsCount} دين مستحق
-            </p>
-          </div>
-        </div>
-        <Button
-          onClick={() => openDebtModal()}
-          className="gap-2 rounded-full bg-amber-500 hover:bg-amber-600"
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-between"
         >
-          <Plus className="w-4 h-4" />
-          إضافة
-        </Button>
-      </motion.div>
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-500 flex items-center justify-center shadow-lg">
+              <AlertCircle className="w-6 h-6 text-white" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">الديون</h1>
+              <p className="text-sm text-muted-foreground">
+                {debtRemaining.unpaidDebtsCount} دين مستحق
+              </p>
+            </div>
+          </div>
+          <Button
+            onClick={() => openDebtModal()}
+            className="gap-2 rounded-full bg-amber-500 hover:bg-amber-600"
+          >
+            <Plus className="w-4 h-4" />
+            إضافة
+          </Button>
+        </motion.div>
+      </div>
 
       {/* Search & Date Filter */}
       <div className="space-y-3">

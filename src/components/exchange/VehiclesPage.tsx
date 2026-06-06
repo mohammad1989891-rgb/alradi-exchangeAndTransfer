@@ -1131,29 +1131,31 @@ export function VehiclesPage() {
     <>
       <div className="space-y-4">
         {/* Header with Add Button — Sticky */}
-        <motion.div
-          initial={{ opacity: 0, y: -10 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30"
-        >
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center shadow-lg">
-              <Car className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">المركبات</h1>
-              <p className="text-sm text-muted-foreground">إدارة شراكات المركبات</p>
-            </div>
-          </div>
-
-          <Button
-            className="gap-2 bg-primary hover:bg-primary/90"
-            onClick={handleOpenAddVehicleModal}
+        <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="flex items-center justify-between"
           >
-            <Plus className="w-4 h-4" />
-            <span>إضافة مركبة</span>
-          </Button>
-        </motion.div>
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center shadow-lg">
+                <Car className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-foreground">المركبات</h1>
+                <p className="text-sm text-muted-foreground">إدارة شراكات المركبات</p>
+              </div>
+            </div>
+
+            <Button
+              className="gap-2 bg-primary hover:bg-primary/90"
+              onClick={handleOpenAddVehicleModal}
+            >
+              <Plus className="w-4 h-4" />
+              <span>إضافة مركبة</span>
+            </Button>
+          </motion.div>
+        </div>
 
         {/* 🔹 بطاقتا الشركاء - بديل البطاقة الرئيسية */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

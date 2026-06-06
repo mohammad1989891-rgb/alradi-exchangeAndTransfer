@@ -96,3 +96,30 @@ Stage Summary:
 - Multi-currency support preserved (no cross-currency mixing)
 - Real-time updates work via useSupabaseData hook
 - UI Freeze maintained — identical visual design, only location changed
+
+---
+Task ID: 2
+Agent: main
+Task: Move debt summary and details from ReportsPage to top of DebtsPage
+
+Work Log:
+- Read ReportsPage.tsx and DebtsPage.tsx to understand current structure
+- Removed from ReportsPage.tsx: debtRemaining, showDebtDetails state, debtCurrencyMap, receivableByCurrency, payableByCurrency, netByCurrency computations, and the expanded إحصائيات الديون section
+- Replaced with original simpler إحصائيات الديون section (overdue/long-term stats only)
+- Cleaned up ReportsPage imports: removed AnimatePresence, ChevronDown, ChevronUp, Button; kept HandCoins, Scale
+- Added to DebtsPage.tsx: debtCurrencyMap, receivableByCurrency, payableByCurrency, netByCurrency computations with useMemo
+- Added debt summary UI (assets/liabilities/net cards per currency) between search filter and account cards
+- Added expandable debt details (receivable/payable per currency breakdown) with AnimatePresence
+- Added needed imports: ChevronUp, HandCoins, Scale, TrendingUp
+- Used existing showDebtsDetails state (was already declared but unused in UI)
+- Lint passes, dev server responds with HTTP 200
+- Committed: c80020e "refactor: move debt summary and details from reports page to top of debts page"
+- Pushed to GitHub
+
+Stage Summary:
+- DebtsPage now shows: Header → Search/Date Filter → ملخص الديون → تفاصيل الديون → Account Cards
+- ReportsPage only shows overdue/long-term debt statistics (original simpler version)
+- All debt information consolidated in one page for better UX
+- UI Freeze maintained — same design, only location changed
+- Multi-currency support preserved (no cross-currency mixing)
+- Real-time updates work via debtRemaining from useSupabaseData

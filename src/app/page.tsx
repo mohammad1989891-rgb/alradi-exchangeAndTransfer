@@ -23,7 +23,7 @@ import { SplashScreen } from '@/components/exchange/SplashScreen';
 import { LoginPage } from '@/components/exchange/LoginPage';
 import { SupabaseSetup } from '@/components/exchange/SupabaseSetup';
 import { motion } from 'framer-motion';
-import { Menu, Search, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Archive } from 'lucide-react';
+import { Menu, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Archive } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -427,7 +427,7 @@ export default function Home() {
   }
   
   return (
-    <main className="h-screen overflow-hidden bg-background flex flex-col">
+    <main className="h-screen overflow-hidden bg-background flex flex-col overflow-x-hidden">
       {/* Header */}
       <header className="z-40 bg-background/95 backdrop-blur-md border-b border-border shrink-0">
         <div className="max-w-lg mx-auto px-4 py-3 flex items-center justify-between">
@@ -515,13 +515,6 @@ export default function Home() {
             <Button
               variant="ghost"
               size="icon"
-              className="rounded-full"
-            >
-              <Search className="w-5 h-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
               onClick={() => setActiveTab('settings')}
               className="rounded-full"
             >
@@ -541,7 +534,7 @@ export default function Home() {
       </header>
       
       {/* Content */}
-      <div className="flex-1 overflow-y-auto pb-20">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden pb-20">
         <div className="max-w-lg mx-auto px-4 py-4">
           {renderPage()}
         </div>

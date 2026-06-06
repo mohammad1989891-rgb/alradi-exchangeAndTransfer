@@ -35,7 +35,7 @@ export function BottomNav() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
               className={cn(
-                'relative flex flex-col items-center justify-center gap-1 px-3 py-2 rounded-xl transition-all duration-200 min-w-[60px]',
+                'relative flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-xl transition-all duration-200 min-w-0 flex-1',
                 isActive 
                   ? 'text-emerald-500 dark:text-emerald-400' 
                   : 'text-muted-foreground hover:text-foreground'

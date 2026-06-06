@@ -86,7 +86,7 @@ export function RatesTable() {
           </div>
         </CardHeader>
         <CardContent className="p-0">
-          <ScrollArea className="max-h-[500px]">
+          <ScrollArea className="max-h-[500px] w-full overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-muted/50">

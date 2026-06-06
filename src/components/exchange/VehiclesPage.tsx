@@ -1130,11 +1130,11 @@ export function VehiclesPage() {
   return (
     <>
       <div className="space-y-4">
-        {/* Header with Add Button */}
+        {/* Header with Add Button — Sticky */}
         <motion.div
           initial={{ opacity: 0, y: -10 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between"
+          className="flex items-center justify-between sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30"
         >
           <div className="flex items-center gap-3">
             <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-500 flex items-center justify-center shadow-lg">
@@ -1145,8 +1145,8 @@ export function VehiclesPage() {
               <p className="text-sm text-muted-foreground">إدارة شراكات المركبات</p>
             </div>
           </div>
-          
-          <Button 
+
+          <Button
             className="gap-2 bg-primary hover:bg-primary/90"
             onClick={handleOpenAddVehicleModal}
           >

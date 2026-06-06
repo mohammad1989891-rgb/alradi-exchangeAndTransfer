@@ -881,8 +881,8 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-6 pb-4">
-      {/* Header */}
-      <div className="flex items-center gap-3">
+      {/* Header — Sticky */}
+      <div className="flex items-center gap-3 sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30">
         <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
           <Settings className="w-6 h-6 text-primary" />
         </div>

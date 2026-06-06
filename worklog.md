@@ -64,3 +64,35 @@ Stage Summary:
 - TypeScript compilation passes for all modified files
 - ESLint passes with no errors
 - Dev server compiles and runs successfully
+
+---
+Task ID: 1
+Agent: main
+Task: Move debt summary and details from BalancesPage to ReportsPage (إحصائيات الديون)
+
+Work Log:
+- Explored codebase: page.tsx, BalancesPage.tsx, ReportsPage.tsx, useSupabaseData.ts
+- Identified BalancesPage.tsx (lines 162-408) contained the debt section to move
+- Removed debt summary (ملخص الديون), debt details (تفاصيل الديون), and net debt card from BalancesPage.tsx
+- Cleaned up BalancesPage imports: removed useState, AnimatePresence, TrendingUp, ChevronDown, ChevronUp, HandCoins, Scale
+- Fixed TrendingUp reference in balance card header → replaced with DollarSign
+- Removed unused data variables: debtRemaining, transactions, debts, debtPayments, netDeferredDebts, currencyMap, receivableByCurrency, payableByCurrency, netByCurrency
+- Added debtRemaining to ReportsPage useSupabaseData destructuring
+- Added showDebtDetails state to ReportsPage
+- Added debt currency breakdown logic (debtCurrencyMap, receivableByCurrency, payableByCurrency, netByCurrency) with useMemo
+- Expanded existing إحصائيات الديون section in ReportsPage to include:
+  - Section header with expand/collapse button for details
+  - القسم الأول: ملخص الديون (assets + liabilities + net debt cards per currency)
+  - القسم الثاني: تفاصيل الديون (expandable AnimatePresence details per currency)
+  - Separator then existing overdue/long-term statistics
+- Added imports: AnimatePresence, ChevronDown, ChevronUp, Button
+- Verified: lint passes, TypeScript compiles (no errors in modified files), dev server runs cleanly
+- Committed: 3ce9f0a "refactor: move debt summary and details from balances page to reports page"
+- Pushed to GitHub
+
+Stage Summary:
+- BalancesPage is now lighter — only shows total balance + vault cards
+- ReportsPage now contains comprehensive إحصائيات الديون section with all debt data
+- Multi-currency support preserved (no cross-currency mixing)
+- Real-time updates work via useSupabaseData hook
+- UI Freeze maintained — identical visual design, only location changed

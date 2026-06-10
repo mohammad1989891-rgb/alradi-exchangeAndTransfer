@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
 import { useTheme } from 'next-themes';
@@ -246,16 +246,144 @@ export function SettingsPage() {
     }
   };
 
-  // Clear Data
-  const handleClearData = async () => {
+  // Clear Data - Multi-stage protection
+  const [clearStep, setClearStep] = useState<0 | 1 | 2 | 3>(0); // 0=hidden, 1=warning+backup, 2=verify, 3=countdown
+  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+  const [backupCreated, setBackupCreated] = useState(false);
+  const [backupError, setBackupError] = useState(false);
+  const [verificationInput, setVerificationInput] = useState('');
+  const [verificationError, setVerificationError] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [hasPassword, setHasPassword] = useState(false);
+  const [countdown, setCountdown] = useState(3);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Open clear dialog - start at step 1
+  const handleOpenClearDialog = () => {
+    setClearStep(1);
+    setBackupCreated(false);
+    setBackupError(false);
+    setIsCreatingBackup(false);
+    setVerificationInput('');
+    setVerificationError('');
+    setCountdown(3);
+    setIsDeleting(false);
+  };
+
+  // Close clear dialog
+  const handleCloseClearDialog = () => {
+    if (countdownRef.current) {
+      clearInterval(countdownRef.current);
+      countdownRef.current = null;
+    }
+    setClearStep(0);
+    setVerificationInput('');
+    setVerificationError('');
+  };
+
+  // Step 1: Create auto-backup
+  const handleCreateBackup = async () => {
+    setIsCreatingBackup(true);
+    setBackupError(false);
+    try {
+      const data = await exportAllData();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pre-delete-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      setBackupCreated(true);
+    } catch (error) {
+      console.error('Error creating backup:', error);
+      setBackupError(true);
+    } finally {
+      setIsCreatingBackup(false);
+    }
+  };
+
+  // Step 1 → 3 (or 2 if password): Proceed from backup
+  const handleProceedToVerify = async () => {
+    // Check if user has a custom password
+    const userId = localStorage.getItem('currentUserId');
+    let userHasPassword = false;
+    if (userId) {
+      try {
+        const { verifyUserPassword } = await import('@/lib/supabaseDb');
+        const result = await verifyUserPassword(userId, 'admin');
+        userHasPassword = result.hasPassword;
+        setHasPassword(result.hasPassword);
+      } catch {
+        setHasPassword(false);
+      }
+    }
+    // If user has password, go to step 2 for password verification
+    // If no password, skip directly to step 3 (countdown)
+    if (userHasPassword) {
+      setClearStep(2);
+    } else {
+      setClearStep(3);
+      startCountdown();
+    }
+  };
+
+  // Step 2: Verify user password only (no "احذف" text confirmation)
+  const handleVerify = async () => {
+    setIsVerifying(true);
+    setVerificationError('');
+
+    const userId = localStorage.getItem('currentUserId');
+
+    if (hasPassword && userId) {
+      // Verify password
+      try {
+        const { verifyUserPassword } = await import('@/lib/supabaseDb');
+        const result = await verifyUserPassword(userId, verificationInput);
+        if (result.valid) {
+          setClearStep(3);
+          startCountdown();
+        } else {
+          setVerificationError('كلمة المرور غير صحيحة');
+        }
+      } catch {
+        setVerificationError('حدث خطأ أثناء التحقق');
+      }
+    }
+
+    setIsVerifying(false);
+  };
+
+  // Step 3: Start countdown
+  const startCountdown = () => {
+    setCountdown(3);
+    if (countdownRef.current) clearInterval(countdownRef.current);
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => {
+        if (prev <= 1) {
+          if (countdownRef.current) clearInterval(countdownRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Step 3: Execute deletion after countdown
+  const handleExecuteDeletion = async () => {
+    setIsDeleting(true);
     try {
       const result = await clearAllData();
       if (result.success) {
         await refreshLocalData();
         toast({
           title: 'تم المسح',
-          description: result.message,
+          description: 'تم حذف جميع البيانات بنجاح. يمكنك استرجاعها من النسخة الاحتياطية.',
         });
+        handleCloseClearDialog();
       } else {
         toast({
           title: 'خطأ',
@@ -271,9 +399,16 @@ export function SettingsPage() {
         variant: 'destructive',
       });
     } finally {
-      setShowClearDialog(false);
+      setIsDeleting(false);
     }
   };
+
+  // Cleanup countdown on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, []);
 
   // Change Password
   const handleChangePassword = async () => {
@@ -763,7 +898,7 @@ export function SettingsPage() {
               </div>
             </div>
             <Button
-              onClick={() => setShowClearDialog(true)}
+              onClick={handleOpenClearDialog}
               variant="destructive"
               className="w-full"
             >
@@ -1033,30 +1168,238 @@ export function SettingsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Clear Data Confirmation */}
-      <AlertDialog open={showClearDialog} onOpenChange={setShowClearDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="w-5 h-5 text-red-500" />
-              مسح البيانات
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              <span className="block">هل أنت متأكد من مسح جميع البيانات؟</span>
-              <span className="block text-xs mt-2">سيتم حذف جميع الحركات والديون وعمليات الصرافة وإعادة تعيين أرصدة الصناديق.</span>
-              <span className="block text-xs text-emerald-600 dark:text-emerald-400 mt-1">
-                سيتم الحفاظ على الحسابات والعملات.
-              </span>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
-            <AlertDialogAction onClick={handleClearData} className="bg-red-500 hover:bg-red-600">
-              مسح البيانات
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* Clear Data - Multi-stage Protection Dialog */}
+      <Dialog open={clearStep > 0} onOpenChange={(open) => { if (!open) handleCloseClearDialog(); }}>
+        <DialogContent className="max-w-sm" onPointerDownOutside={(e) => e.preventDefault()}>
+          {/* Step 1: Warning + Auto Backup */}
+          {clearStep === 1 && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                  <AlertTriangle className="w-5 h-5" />
+                  مسح البيانات
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-2">
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+                  <p className="text-sm font-medium text-red-700 dark:text-red-400">⚠️ تحذير مهم</p>
+                  <p className="text-xs text-red-600 dark:text-red-400/80 mt-1">
+                    سيتم حذف جميع الحركات والديون وعمليات الصرافة وإعادة تعيين أرصدة الصناديق نهائيًا.
+                  </p>
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                    سيتم الحفاظ على الحسابات والعملات.
+                  </p>
+                </div>
+
+                {/* Auto Backup Section */}
+                <div className="p-3 rounded-xl bg-muted/50">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Download className="w-4 h-4 text-emerald-500" />
+                    <p className="text-sm font-medium">النسخة الاحتياطية التلقائية</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    قبل الحذف، يجب إنشاء نسخة احتياطية تضم جميع البيانات الحالية لاسترجاعها لاحقًا.
+                  </p>
+
+                  {!backupCreated && !backupError && (
+                    <Button
+                      onClick={handleCreateBackup}
+                      disabled={isCreatingBackup}
+                      className="w-full bg-emerald-500 hover:bg-emerald-600"
+                      size="sm"
+                    >
+                      {isCreatingBackup ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                          جاري إنشاء النسخة الاحتياطية...
+                        </>
+                      ) : (
+                        'إنشاء نسخة احتياطية'
+                      )}
+                    </Button>
+                  )}
+
+                  {backupCreated && (
+                    <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-sm">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                      </svg>
+                      <span>تم إنشاء النسخة الاحتياطية وتحميلها بنجاح</span>
+                    </div>
+                  )}
+
+                  {backupError && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-red-500">فشل إنشاء النسخة الاحتياطية</p>
+                      <Button
+                        onClick={handleCreateBackup}
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                      >
+                        إعادة المحاولة
+                      </Button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleCloseClearDialog}
+                    className="flex-1"
+                  >
+                    إلغاء
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleProceedToVerify}
+                    disabled={!backupCreated}
+                    className="flex-1"
+                  >
+                    متابعة
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Step 2: Password Verification Only (shown only when user has a custom password) */}
+          {clearStep === 2 && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2">
+                  <Lock className="w-5 h-5" />
+                  التحقق من الهوية
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-2">
+                <div className="space-y-3">
+                  <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+                    <p className="text-xs text-amber-700 dark:text-amber-400">
+                      يرجى إدخال كلمة المرور الخاصة بك لتأكيد الحذف
+                    </p>
+                  </div>
+                  <div className="relative">
+                    <Input
+                      type={showOldPassword ? 'text' : 'password'}
+                      placeholder="كلمة المرور"
+                      value={verificationInput}
+                      onChange={(e) => { setVerificationInput(e.target.value); setVerificationError(''); }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleVerify(); }}
+                      className="pr-10"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowOldPassword(!showOldPassword)}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                  {verificationError && (
+                    <p className="text-xs text-red-500">{verificationError}</p>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleCloseClearDialog}
+                    className="flex-1"
+                  >
+                    إلغاء
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleVerify}
+                    disabled={isVerifying || !verificationInput.trim()}
+                    className="flex-1"
+                  >
+                    {isVerifying ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                        جاري التحقق...
+                      </>
+                    ) : (
+                      'تأكيد'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Step 3: Countdown before deletion */}
+          {clearStep === 3 && (
+            <>
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-red-600">
+                  <Trash2 className="w-5 h-5" />
+                  تأكيد الحذف النهائي
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-2">
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+                  <p className="text-sm text-red-700 dark:text-red-400">
+                    سيتم حذف جميع البيانات نهائيًا، وقد تم إنشاء نسخة احتياطية قبل الحذف.
+                  </p>
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                    يمكنك استرجاع البيانات لاحقًا من النسخة الاحتياطية.
+                  </p>
+                </div>
+
+                {/* Countdown Display */}
+                <div className="flex flex-col items-center gap-3 py-4">
+                  {countdown > 0 ? (
+                    <>
+                      <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-950/30 flex items-center justify-center border-4 border-red-300 dark:border-red-700">
+                        <span className="text-3xl font-bold text-red-600 dark:text-red-400">{countdown}</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">انتظر حتى ينتهي العد التنازلي...</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-16 h-16 rounded-full bg-red-500 flex items-center justify-center">
+                        <Trash2 className="w-7 h-7 text-white" />
+                      </div>
+                      <p className="text-sm font-medium text-red-600 dark:text-red-400">جاهز للحذف</p>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={handleCloseClearDialog}
+                    className="flex-1"
+                  >
+                    إلغاء
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={handleExecuteDeletion}
+                    disabled={countdown > 0 || isDeleting}
+                    className="flex-1"
+                  >
+                    {isDeleting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                        جاري الحذف...
+                      </>
+                    ) : countdown > 0 ? (
+                      `انتظر ${countdown}...`
+                    ) : (
+                      'تأكيد الحذف'
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

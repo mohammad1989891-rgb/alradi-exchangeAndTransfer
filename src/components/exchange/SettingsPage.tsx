@@ -27,6 +27,10 @@ import {
   EyeOff,
   Archive,
   Loader2,
+  Shield,
+  RotateCcw,
+  Clock,
+  HardDrive,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -59,7 +63,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb } from '@/lib/supabaseDb';
+import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb, createBackup, getBackups, restoreBackup, deleteBackup, checkBackupsTableExists, exportBackupAsJson } from '@/lib/supabaseDb';
 import type { Currency as CurrencyType } from '@/types';
 
 export function SettingsPage() {
@@ -98,6 +102,22 @@ export function SettingsPage() {
   const [isArchiving, setIsArchiving] = useState(false);
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [archiveSetupResult, setArchiveSetupResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Backup System
+  const [backups, setBackups] = useState<Array<{
+    id: string;
+    reason: string;
+    recordCounts: { currencies: number; vaults: number; accounts: number; transactions: number; debts: number; debtPayments: number; currencyExchanges: number };
+    sizeBytes: number;
+    createdAt: Date;
+  }>>([]);
+  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+  const [isCreatingDbBackup, setIsCreatingDbBackup] = useState(false);
+  const [isRestoring, setIsRestoring] = useState<string | null>(null);
+  const [backupsTableExists, setBackupsTableExists] = useState(true);
+  const [isSettingUpBackups, setIsSettingUpBackups] = useState(false);
+  const [backupSetupResult, setBackupSetupResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [showRestoreConfirm, setShowRestoreConfirm] = useState<string | null>(null);
 
   // Load current username on mount
   useEffect(() => {
@@ -585,6 +605,175 @@ export function SettingsPage() {
     }
   };
 
+  // ============================================
+  // Backup System Handlers
+  // ============================================
+
+  // Load backups from database
+  const loadBackups = async () => {
+    setIsLoadingBackups(true);
+    try {
+      const exists = await checkBackupsTableExists();
+      setBackupsTableExists(exists);
+      if (exists) {
+        const data = await getBackups();
+        setBackups(data);
+      }
+    } catch (error) {
+      console.error('Error loading backups:', error);
+    } finally {
+      setIsLoadingBackups(false);
+    }
+  };
+
+  // Create a new backup in the database
+  const handleCreateDbBackup = async () => {
+    setIsCreatingDbBackup(true);
+    try {
+      const result = await createBackup('manual');
+      toast({
+        title: 'تم إنشاء النسخة الاحتياطية',
+        description: `تم حفظ النسخة بنجاح (${formatFileSize(result.sizeBytes)})`,
+      });
+      await loadBackups(); // Refresh list
+    } catch (error) {
+      console.error('Error creating backup:', error);
+      toast({
+        title: 'خطأ',
+        description: 'فشل إنشاء النسخة الاحتياطية. تأكد من إعداد جدول النسخ الاحتياطية.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCreatingDbBackup(false);
+    }
+  };
+
+  // Restore from a backup
+  const handleRestoreFromBackup = async (backupId: string) => {
+    setIsRestoring(backupId);
+    setShowRestoreConfirm(null);
+    try {
+      const result = await restoreBackup(backupId);
+      if (result.success) {
+        await refreshLocalData();
+        toast({
+          title: 'تم الاسترجاع',
+          description: 'تم استرجاع البيانات بنجاح من النسخة الاحتياطية',
+        });
+      } else {
+        toast({
+          title: 'خطأ',
+          description: result.message,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Error restoring backup:', error);
+      toast({
+        title: 'خطأ',
+        description: 'حدث خطأ أثناء استرجاع البيانات',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsRestoring(null);
+    }
+  };
+
+  // Delete a backup
+  const handleDeleteBackup = async (backupId: string) => {
+    try {
+      const result = await deleteBackup(backupId);
+      if (result.success) {
+        setBackups(prev => prev.filter(b => b.id !== backupId));
+        toast({ title: 'تم الحذف', description: 'تم حذف النسخة الاحتياطية' });
+      }
+    } catch (error) {
+      console.error('Error deleting backup:', error);
+      toast({ title: 'خطأ', description: 'فشل حذف النسخة الاحتياطية', variant: 'destructive' });
+    }
+  };
+
+  // Download a backup as JSON file
+  const handleDownloadBackup = async (backupId: string) => {
+    try {
+      const result = await exportBackupAsJson(backupId);
+      if (!result.data) {
+        toast({ title: 'خطأ', description: 'فشل تصدير النسخة الاحتياطية', variant: 'destructive' });
+        return;
+      }
+      const blob = new Blob([result.data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = result.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast({ title: 'تم التحميل', description: 'تم تحميل النسخة الاحتياطية بنجاح' });
+    } catch (error) {
+      console.error('Error downloading backup:', error);
+      toast({ title: 'خطأ', description: 'فشل تحميل النسخة الاحتياطية', variant: 'destructive' });
+    }
+  };
+
+  // Setup backups table
+  const handleSetupBackups = async () => {
+    setIsSettingUpBackups(true);
+    setBackupSetupResult(null);
+    try {
+      const response = await fetch('/api/backup/setup?XTransformPort=3000', { method: 'POST' });
+      const data = await response.json();
+      if (data.success) {
+        setBackupSetupResult({ success: true, message: 'تم إعداد نظام النسخ الاحتياطي بنجاح ✓' });
+        setBackupsTableExists(true);
+        await loadBackups();
+      } else {
+        setBackupSetupResult({
+          success: false,
+          message: data.note || data.error || 'يجب تشغيل SQL يدوياً في Supabase SQL Editor',
+        });
+      }
+    } catch (error) {
+      setBackupSetupResult({ success: false, message: 'خطأ في الاتصال بالخادم' });
+    } finally {
+      setIsSettingUpBackups(false);
+    }
+  };
+
+  // Format file size helper
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Format backup reason in Arabic
+  const formatReason = (reason: string): { label: string; color: string } => {
+    switch (reason) {
+      case 'manual': return { label: 'يدوي', color: 'text-blue-600 dark:text-blue-400' };
+      case 'pre_delete': return { label: 'قبل الحذف', color: 'text-red-600 dark:text-red-400' };
+      case 'pre_archive': return { label: 'قبل الأرشفة', color: 'text-amber-600 dark:text-amber-400' };
+      case 'auto': return { label: 'تلقائي', color: 'text-emerald-600 dark:text-emerald-400' };
+      default: return { label: reason, color: 'text-muted-foreground' };
+    }
+  };
+
+  // Format date in Arabic
+  const formatDate = (date: Date): string => {
+    try {
+      return new Intl.DateTimeFormat('ar-SA', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(date);
+    } catch {
+      return date.toLocaleDateString();
+    }
+  };
+
   const sections = [
     {
       id: 'account',
@@ -897,6 +1086,12 @@ export function SettingsPage() {
                 <p className="text-xs text-muted-foreground">حذف الحركات والديون وعمليات الصرافة</p>
               </div>
             </div>
+            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 mb-3">
+              <div className="flex items-center gap-2">
+                <Shield className="w-4 h-4 text-emerald-500" />
+                <p className="text-xs text-emerald-700 dark:text-emerald-400">يتم إنشاء نسخة احتياطية تلقائيًا قبل الحذف</p>
+              </div>
+            </div>
             <Button
               onClick={handleOpenClearDialog}
               variant="destructive"
@@ -905,6 +1100,191 @@ export function SettingsPage() {
               مسح جميع البيانات
             </Button>
           </div>
+        </div>
+      ),
+    },
+    {
+      id: 'backup-management',
+      title: 'إدارة النسخ المحفوظة',
+      icon: HardDrive,
+      content: (
+        <div className="space-y-4">
+          {/* Setup Backups Table */}
+          {!backupsTableExists && (
+            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                  <HardDrive className="w-5 h-5 text-amber-500" />
+                </div>
+                <div>
+                  <p className="font-medium">إعداد جدول النسخ الاحتياطي</p>
+                  <p className="text-xs text-muted-foreground">يجب إنشاء جدول backups في قاعدة البيانات</p>
+                </div>
+              </div>
+              <Button
+                onClick={handleSetupBackups}
+                disabled={isSettingUpBackups}
+                variant="outline"
+                className="w-full"
+              >
+                {isSettingUpBackups ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+                {isSettingUpBackups ? 'جاري الإعداد...' : 'إعداد جدول النسخ الاحتياطي'}
+              </Button>
+              {backupSetupResult && (
+                <p className={cn('text-xs mt-2', backupSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
+                  {backupSetupResult.message}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Create Backup */}
+          {backupsTableExists && (
+            <div className="p-4 rounded-xl bg-muted/50">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-emerald-500" />
+                </div>
+                <div>
+                  <p className="font-medium">إنشاء نسخة احتياطية</p>
+                  <p className="text-xs text-muted-foreground">حفظ نسخة من جميع البيانات في قاعدة البيانات</p>
+                </div>
+              </div>
+              <Button
+                onClick={handleCreateDbBackup}
+                disabled={isCreatingDbBackup}
+                className="w-full bg-emerald-500 hover:bg-emerald-600"
+              >
+                {isCreatingDbBackup ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin ml-2" />
+                    جاري إنشاء النسخة...
+                  </>
+                ) : (
+                  <>
+                    <Shield className="w-4 h-4 ml-2" />
+                    إنشاء نسخة احتياطية جديدة
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {/* Stored Backups List */}
+          {backupsTableExists && (
+            <div className="p-4 rounded-xl bg-muted/50">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+                    <Clock className="w-5 h-5 text-blue-500" />
+                  </div>
+                  <div>
+                    <p className="font-medium">النسخ المحفوظة</p>
+                    <p className="text-xs text-muted-foreground">
+                      {backups.length > 0 ? `آخر ${backups.length} نسخ (الحد الأقصى 5)` : 'لا توجد نسخ محفوظة'}
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadBackups}
+                  disabled={isLoadingBackups}
+                >
+                  {isLoadingBackups ? <Loader2 className="w-4 h-4 animate-spin" /> : 'تحديث'}
+                </Button>
+              </div>
+
+              {isLoadingBackups && backups.length === 0 ? (
+                <div className="text-center py-4">
+                  <Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" />
+                  <p className="text-xs text-muted-foreground mt-2">جاري تحميل النسخ...</p>
+                </div>
+              ) : backups.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-sm text-muted-foreground">لا توجد نسخ احتياطية محفوظة</p>
+                  <p className="text-xs text-muted-foreground mt-1">أنشئ نسخة جديدة أو احذف بيانات لإنشاء نسخة تلقائية</p>
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {backups.map((backup) => {
+                    const reasonInfo = formatReason(backup.reason);
+                    return (
+                      <div
+                        key={backup.id}
+                        className="p-3 rounded-xl bg-background border border-border/50 space-y-2"
+                      >
+                        {/* Backup Header */}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full bg-muted', reasonInfo.color)}>
+                              {reasonInfo.label}
+                            </span>
+                            <span className="text-xs text-muted-foreground">{formatFileSize(backup.sizeBytes)}</span>
+                          </div>
+                          <span className="text-xs text-muted-foreground">{formatDate(backup.createdAt)}</span>
+                        </div>
+
+                        {/* Record Counts */}
+                        <div className="flex flex-wrap gap-1">
+                          {backup.recordCounts.transactions > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground">
+                              {backup.recordCounts.transactions} حركة
+                            </span>
+                          )}
+                          {backup.recordCounts.debts > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground">
+                              {backup.recordCounts.debts} دين
+                            </span>
+                          )}
+                          {backup.recordCounts.currencyExchanges > 0 && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground">
+                              {backup.recordCounts.currencyExchanges} صرافة
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 text-xs h-7"
+                            onClick={() => handleDownloadBackup(backup.id)}
+                          >
+                            <Download className="w-3 h-3 ml-1" />
+                            تحميل
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 text-xs h-7 text-amber-600 hover:text-amber-700 border-amber-200 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+                            onClick={() => setShowRestoreConfirm(backup.id)}
+                            disabled={isRestoring === backup.id}
+                          >
+                            {isRestoring === backup.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin ml-1" />
+                            ) : (
+                              <RotateCcw className="w-3 h-3 ml-1" />
+                            )}
+                            استرجاع
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="text-xs h-7 text-red-500 hover:text-red-600"
+                            onClick={() => handleDeleteBackup(backup.id)}
+                          >
+                            <Trash2 className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       ),
     },
@@ -1081,6 +1461,33 @@ export function SettingsPage() {
       <div className="text-center py-4">
         <p className="text-xs text-muted-foreground">الإصدار 1.0.0</p>
       </div>
+
+      {/* Restore Backup Confirmation Dialog */}
+      <AlertDialog open={!!showRestoreConfirm} onOpenChange={(open) => { if (!open) setShowRestoreConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-amber-500" />
+              استرجاع البيانات
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              <span className="block">هل أنت متأكد من استرجاع البيانات من هذه النسخة الاحتياطية؟</span>
+              <span className="block text-xs text-amber-600 dark:text-amber-400 mt-2">
+                سيتم استبدال البيانات الحالية ببيانات النسخة الاحتياطية. سيتم إنشاء نسخة احتياطية تلقائية للبيانات الحالية قبل الاسترجاع.
+              </span>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => showRestoreConfirm && handleRestoreFromBackup(showRestoreConfirm)}
+              className="bg-amber-500 hover:bg-amber-600"
+            >
+              استرجاع
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete Currency Confirmation */}
       <AlertDialog open={!!deleteCurrency} onOpenChange={() => setDeleteCurrency(null)}>

@@ -1019,5 +1019,35 @@ export function useSupabaseData() {
       const { getArchivedCounts } = await import('@/lib/supabaseDb');
       return await getArchivedCounts();
     },
+
+    // Backup actions
+    createBackup: async (reason: 'manual' | 'pre_delete' | 'pre_archive' | 'auto' = 'manual') => {
+      const { createBackup } = await import('@/lib/supabaseDb');
+      return await createBackup(reason);
+    },
+    getBackups: async () => {
+      const { getBackups } = await import('@/lib/supabaseDb');
+      return await getBackups();
+    },
+    restoreBackup: async (backupId: string) => {
+      const { restoreBackup } = await import('@/lib/supabaseDb');
+      const result = await restoreBackup(backupId);
+      if (result.success) {
+        await refreshData(false, true);
+      }
+      return result;
+    },
+    deleteBackup: async (backupId: string) => {
+      const { deleteBackup } = await import('@/lib/supabaseDb');
+      return await deleteBackup(backupId);
+    },
+    checkBackupsTableExists: async () => {
+      const { checkBackupsTableExists } = await import('@/lib/supabaseDb');
+      return await checkBackupsTableExists();
+    },
+    exportBackupAsJson: async (backupId: string) => {
+      const { exportBackupAsJson } = await import('@/lib/supabaseDb');
+      return await exportBackupAsJson(backupId);
+    },
   };
 }

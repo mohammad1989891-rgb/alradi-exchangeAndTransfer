@@ -129,3 +129,48 @@ Stage Summary:
 - Auto-archive old records with configurable threshold (3/6/12/24 months)
 - UI Freeze maintained - no visual design changes to existing pages
 - Archive accessible from header button and side menu
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Implement Backup System (نظام النسخ الاحتياطي) with UI Freeze
+
+Work Log:
+- Created `/api/backup/setup/route.ts` - API endpoint to create `backups` table in Supabase
+- Added backup CRUD functions to `supabaseDb.ts`:
+  - `createBackup(reason)` - Creates full data snapshot and stores in `backups` table
+  - `getBackups()` - Lists all backups (newest first)
+  - `getBackupById(id)` - Gets single backup with full data
+  - `restoreBackup(id)` - Restores data from backup (with pre-restore safety backup)
+  - `deleteBackup(id)` - Deletes a specific backup
+  - `cleanupOldBackups(max)` - Auto-deletes old backups, keeps last 5
+  - `checkBackupsTableExists()` - Checks if backups table exists
+  - `exportBackupAsJson(id)` - Exports specific backup as downloadable JSON
+- Modified `clearAllData()` to auto-create backup BEFORE any deletion:
+  - If backup creation fails, deletion is ABORTED (no data deleted without backup)
+  - Backup reason is 'pre_delete'
+  - Auto-cleanup runs after each backup creation
+- Added `BackupRecord` interface for type-safe backup data
+- Added backup actions to `useSupabaseData.ts` hook:
+  - createBackup, getBackups, restoreBackup, deleteBackup
+  - checkBackupsTableExists, exportBackupAsJson
+- Updated `SettingsPage.tsx` with new backup management UI:
+  - Added new "إدارة النسخ المحفوظة" section (HardDrive icon)
+  - Shows setup button if backups table doesn't exist
+  - "إنشاء نسخة احتياطية جديدة" button for manual backup creation
+  - Stored backups list with: reason badge (يدوي/قبل الحذف/تلقائي), size, date, record counts
+  - Per-backup actions: تحميل (download JSON), استرجاع (restore), حذف (delete)
+  - Restore confirmation dialog with safety warning
+  - Added shield badge in "مسح البيانات" section: "يتم إنشاء نسخة احتياطية تلقائيًا قبل الحذف"
+- Lint passes with no new errors
+- Page compiles and renders correctly (verified via Agent Browser)
+- UI Freeze maintained - only additive changes to settings page
+
+Stage Summary:
+- Backup System fully implemented with database storage and auto-management
+- Auto-backup before deletion (ENFORCED: no delete without backup)
+- Keeps last 5 backups, auto-deletes older ones
+- Manual backup creation, restore, download, and delete
+- Pre-restore safety backup creates automatic backup before restoring
+- Backups table needs to be created via /api/backup/setup or manually in Supabase SQL Editor
+- All backup operations are logged to console for debugging

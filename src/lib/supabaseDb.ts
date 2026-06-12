@@ -2585,6 +2585,17 @@ export async function clearAllData(): Promise<{ success: boolean; message: strin
   await initializeDatabase();
   
   try {
+    // 🔴 CRITICAL: Auto-create backup BEFORE any deletion
+    // No data can be deleted without a backup!
+    try {
+      console.log('[Backup] 🔄 Creating pre-delete backup...');
+      const backup = await createBackup('pre_delete');
+      console.log(`[Backup] ✅ Pre-delete backup created: ${backup.id}`);
+    } catch (backupError) {
+      console.error('[Backup] ❌ Failed to create pre-delete backup! ABORTING deletion:', backupError);
+      return { success: false, message: 'فشل إنشاء النسخة الاحتياطية قبل الحذف. لا يمكن حذف البيانات بدون نسخة احتياطية.' };
+    }
+
     // Delete transactions
     await supabase.from('transactions').delete().neq('id', '__never_match__');
     
@@ -2611,6 +2622,405 @@ export async function clearAllData(): Promise<{ success: boolean; message: strin
     console.error('Error clearing data:', error);
     return { success: false, message: 'حدث خطأ أثناء مسح البيانات' };
   }
+}
+
+// ============================================
+// Backup System Functions
+// ============================================
+
+export interface BackupRecord {
+  id: string;
+  reason: 'manual' | 'pre_delete' | 'pre_archive' | 'auto';
+  data: Record<string, unknown>;
+  recordCounts: {
+    currencies: number;
+    vaults: number;
+    accounts: number;
+    transactions: number;
+    debts: number;
+    debtPayments: number;
+    currencyExchanges: number;
+  };
+  sizeBytes: number;
+  createdAt: Date;
+}
+
+function rowToBackupRecord(row: Record<string, unknown>): BackupRecord {
+  const obj = toCamelCase<BackupRecord>(row);
+  obj.createdAt = new Date(obj.createdAt as unknown as string);
+  return obj;
+}
+
+const MAX_BACKUPS = 5;
+
+/**
+ * Create a backup snapshot of all data.
+ * Stores the full data snapshot in the `backups` table.
+ * Auto-cleans old backups to keep only the last MAX_BACKUPS.
+ */
+export async function createBackup(reason: 'manual' | 'pre_delete' | 'pre_archive' | 'auto' = 'manual'): Promise<BackupRecord> {
+  await initializeDatabase();
+
+  // 1. Export all data (reuse exportAllData logic inline for JSON storage)
+  const [currencyRows, vaultRows, accountRows, transactionRows, debtRows, paymentRows, exchangeRows] = await Promise.all([
+    supabase.from('currencies').select('*'),
+    supabase.from('vaults').select('*'),
+    supabase.from('accounts').select('*'),
+    supabase.from('transactions').select('*'),
+    supabase.from('debts').select('*'),
+    supabase.from('debt_payments').select('*'),
+    supabase.from('currency_exchanges').select('*'),
+  ]);
+
+  const backupData = {
+    currencies: currencyRows.data || [],
+    vaults: vaultRows.data || [],
+    accounts: accountRows.data || [],
+    transactions: transactionRows.data || [],
+    debts: debtRows.data || [],
+    debtPayments: paymentRows.data || [],
+    currencyExchanges: exchangeRows.data || [],
+  };
+
+  const recordCounts = {
+    currencies: backupData.currencies.length,
+    vaults: backupData.vaults.length,
+    accounts: backupData.accounts.length,
+    transactions: backupData.transactions.length,
+    debts: backupData.debts.length,
+    debtPayments: backupData.debtPayments.length,
+    currencyExchanges: backupData.currencyExchanges.length,
+  };
+
+  // Calculate size in bytes
+  const dataJson = JSON.stringify(backupData);
+  const sizeBytes = new Blob([dataJson]).size;
+
+  // 2. Generate backup ID
+  const id = 'bkp_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+
+  // 3. Insert backup record
+  const { error: insertError } = await supabase.from('backups').insert([{
+    id,
+    reason,
+    data: backupData,
+    record_counts: recordCounts,
+    size_bytes: sizeBytes,
+    created_at: new Date().toISOString(),
+  }]);
+
+  if (insertError) {
+    console.error('[Backup] ❌ Failed to create backup:', insertError);
+    throw new Error('فشل إنشاء النسخة الاحتياطية: ' + insertError.message);
+  }
+
+  console.log(`[Backup] ✅ Backup created: ${id} (${reason}, ${sizeBytes} bytes)`);
+
+  // 4. Auto-cleanup: keep only last MAX_BACKUPS
+  await cleanupOldBackups();
+
+  // 5. Return the backup record
+  const result: BackupRecord = {
+    id,
+    reason,
+    data: backupData as unknown as Record<string, unknown>,
+    recordCounts: recordCounts,
+    sizeBytes,
+    createdAt: new Date(),
+  };
+
+  return result;
+}
+
+/**
+ * Get all backups, ordered by creation date (newest first).
+ */
+export async function getBackups(): Promise<BackupRecord[]> {
+  await initializeDatabase();
+  if (!tablesExist) return [];
+
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase
+      .from('backups')
+      .select('id, reason, record_counts, size_bytes, created_at')
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+
+  if (result === null) {
+    console.error('[Backup] ❌ getBackups: failed after retries');
+    return [];
+  }
+
+  return (result || []).map(row => rowToBackupRecord(row as Record<string, unknown>));
+}
+
+/**
+ * Get a single backup by ID (including full data).
+ */
+export async function getBackupById(backupId: string): Promise<BackupRecord | null> {
+  await initializeDatabase();
+  if (!tablesExist) return null;
+
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase
+      .from('backups')
+      .select('*')
+      .eq('id', backupId)
+      .single();
+    if (error) throw error;
+    return data;
+  });
+
+  if (result === null) return null;
+  return rowToBackupRecord(result as Record<string, unknown>);
+}
+
+/**
+ * Restore data from a specific backup.
+ * This will:
+ * 1. Create a pre-restore backup (safety net)
+ * 2. Clear current data
+ * 3. Import backup data
+ * 4. Recalculate vault balances
+ */
+export async function restoreBackup(backupId: string): Promise<{ success: boolean; message: string }> {
+  await initializeDatabase();
+
+  try {
+    // 1. Get backup data
+    const backup = await getBackupById(backupId);
+    if (!backup) {
+      return { success: false, message: 'النسخة الاحتياطية غير موجودة' };
+    }
+
+    // 2. Create a safety backup before restoring
+    try {
+      await createBackup('auto'); // Safety net before restore
+    } catch (e) {
+      console.warn('[Backup] ⚠️ Failed to create pre-restore safety backup:', e);
+      // Continue anyway — don't block the restore
+    }
+
+    // 3. Get the full backup data (with all rows)
+    const result = await fetchWithRetry(async () => {
+      const { data, error } = await supabase
+        .from('backups')
+        .select('data')
+        .eq('id', backupId)
+        .single();
+      if (error) throw error;
+      return data;
+    });
+
+    if (!result || !result.data) {
+      return { success: false, message: 'فشل قراءة بيانات النسخة الاحتياطية' };
+    }
+
+    const backupData = result.data as {
+      currencies?: Record<string, unknown>[];
+      vaults?: Record<string, unknown>[];
+      accounts?: Record<string, unknown>[];
+      transactions?: Record<string, unknown>[];
+      debts?: Record<string, unknown>[];
+      debtPayments?: Record<string, unknown>[];
+      currencyExchanges?: Record<string, unknown>[];
+    };
+
+    // 4. Clear existing data (transactions, debts, payments, exchanges only)
+    await Promise.all([
+      supabase.from('transactions').delete().neq('id', '__never_match__'),
+      supabase.from('debt_payments').delete().neq('id', '__never_match__'),
+      supabase.from('debts').delete().neq('id', '__never_match__'),
+      supabase.from('currency_exchanges').delete().neq('id', '__never_match__'),
+    ]);
+
+    // 5. Restore data from backup
+    // Currencies: upsert
+    if (backupData.currencies && backupData.currencies.length > 0) {
+      for (const row of backupData.currencies) {
+        const { data: existing } = await supabase.from('currencies').select('id').eq('id', row.id);
+        if (existing && existing.length > 0) {
+          await supabase.from('currencies').update(row).eq('id', row.id);
+        } else {
+          await supabase.from('currencies').insert([row]);
+        }
+      }
+    }
+
+    // Vaults: upsert
+    if (backupData.vaults && backupData.vaults.length > 0) {
+      for (const row of backupData.vaults) {
+        const { data: existing } = await supabase.from('vaults').select('id').eq('id', row.id);
+        if (existing && existing.length > 0) {
+          await supabase.from('vaults').update(row).eq('id', row.id);
+        } else {
+          await supabase.from('vaults').insert([row]);
+        }
+      }
+    }
+
+    // Accounts: upsert
+    if (backupData.accounts && backupData.accounts.length > 0) {
+      for (const row of backupData.accounts) {
+        const { data: existing } = await supabase.from('accounts').select('id').eq('id', row.id);
+        if (existing && existing.length > 0) {
+          await supabase.from('accounts').update(row).eq('id', row.id);
+        } else {
+          await supabase.from('accounts').insert([row]);
+        }
+      }
+    }
+
+    // Transactions: insert
+    if (backupData.transactions && backupData.transactions.length > 0) {
+      // Insert in batches of 50 to avoid payload size limits
+      const batchSize = 50;
+      for (let i = 0; i < backupData.transactions.length; i += batchSize) {
+        const batch = backupData.transactions.slice(i, i + batchSize);
+        await supabase.from('transactions').insert(batch);
+      }
+    }
+
+    // Debts: insert
+    if (backupData.debts && backupData.debts.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < backupData.debts.length; i += batchSize) {
+        const batch = backupData.debts.slice(i, i + batchSize);
+        await supabase.from('debts').insert(batch);
+      }
+    }
+
+    // Debt Payments: insert
+    if (backupData.debtPayments && backupData.debtPayments.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < backupData.debtPayments.length; i += batchSize) {
+        const batch = backupData.debtPayments.slice(i, i + batchSize);
+        await supabase.from('debt_payments').insert(batch);
+      }
+    }
+
+    // Currency Exchanges: insert
+    if (backupData.currencyExchanges && backupData.currencyExchanges.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < backupData.currencyExchanges.length; i += batchSize) {
+        const batch = backupData.currencyExchanges.slice(i, i + batchSize);
+        await supabase.from('currency_exchanges').insert(batch);
+      }
+    }
+
+    // 6. Recalculate vault balances
+    await recalculateAllVaultBalances();
+
+    console.log(`[Backup] ✅ Restored from backup: ${backupId}`);
+    return { success: true, message: 'تم استرجاع البيانات بنجاح من النسخة الاحتياطية' };
+  } catch (error) {
+    console.error('[Backup] ❌ Restore failed:', error);
+    return { success: false, message: 'حدث خطأ أثناء استرجاع البيانات: ' + (error instanceof Error ? error.message : 'خطأ غير معروف') };
+  }
+}
+
+/**
+ * Delete a specific backup by ID.
+ */
+export async function deleteBackup(backupId: string): Promise<{ success: boolean; message: string }> {
+  await initializeDatabase();
+
+  const { error } = await supabase.from('backups').delete().eq('id', backupId);
+  if (error) {
+    return { success: false, message: 'فشل حذف النسخة الاحتياطية' };
+  }
+
+  return { success: true, message: 'تم حذف النسخة الاحتياطية' };
+}
+
+/**
+ * Auto-cleanup: Keep only the last MAX_BACKUPS.
+ * Deletes the oldest backups if there are more than MAX_BACKUPS.
+ */
+export async function cleanupOldBackups(maxBackups: number = MAX_BACKUPS): Promise<number> {
+  await initializeDatabase();
+
+  // Get all backup IDs ordered by creation date (newest first)
+  const { data: allBackups } = await supabase
+    .from('backups')
+    .select('id, created_at')
+    .order('created_at', { ascending: false });
+
+  if (!allBackups || allBackups.length <= maxBackups) {
+    return 0; // No cleanup needed
+  }
+
+  // Delete the oldest ones
+  const idsToDelete = allBackups.slice(maxBackups).map(b => b.id);
+  const { error } = await supabase.from('backups').delete().in('id', idsToDelete);
+
+  if (error) {
+    console.error('[Backup] ❌ Failed to cleanup old backups:', error);
+    return 0;
+  }
+
+  console.log(`[Backup] 🧹 Cleaned up ${idsToDelete.length} old backups (keeping last ${maxBackups})`);
+  return idsToDelete.length;
+}
+
+/**
+ * Check if the backups table exists by trying to query it.
+ */
+export async function checkBackupsTableExists(): Promise<boolean> {
+  try {
+    const { error } = await supabase.from('backups').select('id').limit(1);
+    if (error) {
+      // If error contains "does not exist" or "could not find", table doesn't exist
+      const msg = error.message.toLowerCase();
+      if (msg.includes('does not exist') || msg.includes('could not find') || msg.includes('relation')) {
+        return false;
+      }
+      // Other errors (RLS, etc.) - table exists but access issue
+      return true;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Export a specific backup as a downloadable JSON blob.
+ */
+export async function exportBackupAsJson(backupId: string): Promise<{ data: string | null; filename: string }> {
+  const backup = await getBackupById(backupId);
+  if (!backup) {
+    return { data: null, filename: '' };
+  }
+
+  // Get full data
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase
+      .from('backups')
+      .select('data, record_counts, reason, created_at')
+      .eq('id', backupId)
+      .single();
+    if (error) throw error;
+    return data;
+  });
+
+  if (!result) {
+    return { data: null, filename: '' };
+  }
+
+  const exportData = {
+    version: '1.0.0',
+    exportedAt: new Date().toISOString(),
+    backupId,
+    backupReason: result.reason,
+    backupCreatedAt: result.created_at,
+    ...result.data,
+  };
+
+  const filename = `backup-${backupId}-${new Date(result.created_at).toISOString().split('T')[0]}.json`;
+  return { data: JSON.stringify(exportData, null, 2), filename };
 }
 
 // ============================================

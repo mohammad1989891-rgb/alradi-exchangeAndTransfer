@@ -326,3 +326,24 @@ Stage Summary:
 - Fallback: if no password, clear SQL provided for manual execution in Supabase SQL Editor
 - UI Freeze maintained - only additive changes (password inputs added, no design changes)
 - All new text in Arabic matching existing UI language
+---
+Task ID: 1
+Agent: Main Agent
+Task: Fix three server connection errors in Settings page (backup, storage, archive)
+
+Work Log:
+- Diagnosed root causes of all three errors:
+  1. Backup Setup: handleSetupBackups() called fetch('/api/backup/setup') but the fetch was failing with "Failed to fetch" network error
+  2. Storage Management: StorageDashboard used useSupabaseData() which created a second hook instance that could set initError/tablesMissing
+  3. Archive Setup: handleSetupArchive() called fetch('/api/archive/setup') but the fetch was failing with "Failed to fetch" network error
+- Fixed backup setup by replacing API route call with direct Supabase client operations (checkBackupsTableExists, test insert, SQL fallback)
+- Fixed archive setup by replacing API route call with direct Supabase client operations (check is_archived column in each table, SQL fallback)
+- Fixed StorageDashboard by removing useSupabaseData() dependency, using useAppStore() + direct getDebtPayments() fetch instead
+- Added supabase import to SettingsPage.tsx for direct client operations
+- Pushed fixes to GitHub (auto-deploys to Vercel)
+
+Stage Summary:
+- All three Settings page errors resolved
+- UI Freeze maintained (no design changes)
+- Changes committed as 67048ee
+- Vercel deployment: https://alradi-exchange-and-transfer.vercel.app

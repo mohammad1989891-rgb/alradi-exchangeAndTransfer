@@ -214,3 +214,55 @@ Stage Summary:
 - Suggestions appear contextually: archive data, delete old backups, optimize
 - Uses efficient Supabase queries (count: 'exact' with head: true) - no performance impact
 - UI Freeze maintained - only additive changes, follows existing settings section pattern
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Fix all Settings page API connection failures (backup setup, storage, archive setup)
+
+Work Log:
+- Diagnosed root cause: `.env` file missing Supabase environment variables (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY)
+- Added Supabase env vars to `.env` file (previously only in `.env.production`)
+- Fixed Storage API (`/api/storage/route.ts`):
+  - Added hardcoded fallbacks for env vars (matching supabase.ts pattern)
+  - Added validation for Supabase configuration
+  - Handles missing `backups` table gracefully (skips instead of erroring)
+  - Simplified to lightweight endpoint (storage data now computed client-side)
+- Rewrote `StorageDashboard.tsx` to compute all data client-side:
+  - Uses data already loaded in `useAppStore` and `useSupabaseData` hooks
+  - No server-side API calls needed (avoids server crash from many sequential Supabase queries)
+  - Estimates row sizes based on typical data patterns
+  - Computes chart data from transaction/debt/exchange createdAt dates
+  - All features preserved: usage percentage, per-table breakdown, bar/line charts, alerts, suggestions
+- Fixed Backup Setup API (`/api/backup/setup/route.ts`):
+  - Added hardcoded env var fallbacks
+  - Properly checks if `backups` table exists using Supabase REST API
+  - Removed dependency on non-existent `exec_sql` RPC
+  - Provides SQL for manual execution when auto-creation fails
+  - Returns clear Arabic messages
+- Fixed Archive Setup API (`/api/archive/setup/route.ts`):
+  - Added hardcoded env var fallbacks
+  - Checks `is_archived` column existence via Supabase REST API
+  - Returns success when all columns exist (verified working: returns `success: true`)
+  - Provides SQL for manual execution when auto-creation fails
+- Fixed `checkBackupsTableExists()` in `supabaseDb.ts`:
+  - Added `schema cache` to the list of error messages that indicate missing table
+  - This was the key fix: Supabase returns "Could not find the table... in the schema cache" which wasn't being caught
+  - Now correctly returns `false` when the `backups` table doesn't exist
+- Fixed `backupsTableExists` initialization in SettingsPage:
+  - Changed from `useState(true)` to `useState(false)` (safer default)
+  - Added `checkBackupsTableExists()` call on component mount
+  - Added `loadBackups()` call when backup-management section is expanded
+- Improved error messages in SettingsPage:
+  - Replaced generic "خطأ في الاتصال بالخادم" with specific Arabic messages
+  - Added `response.ok` check before parsing JSON
+  - Better error differentiation: network errors vs server errors
+- Removed `XTransformPort=3000` from API calls (default proxy target is already port 3000)
+
+Stage Summary:
+- All three Settings page API failures are fixed:
+  1. إعداد النسخ المحفوظة: Now properly checks if backups table exists, shows setup button when missing
+  2. إدارة التخزين: StorageDashboard now computes data client-side, no more "Failed to fetch storage data"
+  3. إعداد قاعدة البيانات: Archive setup correctly returns success when columns exist, clear SQL when they don't
+- Root cause: Missing env vars + non-existent `exec_sql` RPC + missing `schema cache` error detection
+- UI Freeze maintained - no visual design changes

@@ -2973,8 +2973,8 @@ export async function checkBackupsTableExists(): Promise<boolean> {
     const { error } = await supabase.from('backups').select('id').limit(1);
     if (error) {
       // If error contains "does not exist" or "could not find", table doesn't exist
-      const msg = error.message.toLowerCase();
-      if (msg.includes('does not exist') || msg.includes('could not find') || msg.includes('relation')) {
+      const msg = (error.message || '').toLowerCase();
+      if (msg.includes('does not exist') || msg.includes('could not find') || msg.includes('relation') || msg.includes('schema cache')) {
         return false;
       }
       // Other errors (RLS, etc.) - table exists but access issue

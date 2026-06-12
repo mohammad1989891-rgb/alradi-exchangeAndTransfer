@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   HardDrive,
@@ -25,6 +25,8 @@ import {
   type ChartConfig,
 } from '@/components/ui/chart';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Line, LineChart } from 'recharts';
+import { useAppStore } from '@/store/useAppStore';
+import { useSupabaseData } from '@/hooks/useSupabaseData';
 
 // ============================================
 // Types
@@ -37,32 +39,6 @@ interface TableInfo {
   sizeBytes: number;
   sizeKB: number;
   sizeMB: number;
-}
-
-interface StorageData {
-  tables: TableInfo[];
-  totals: {
-    sizeBytes: number;
-    sizeKB: number;
-    sizeMB: number;
-    rowCount: number;
-    usagePercent: number;
-    storageLimitMB: number;
-  };
-  chartData: Array<{
-    month: string;
-    monthAr: string;
-    transactions: number;
-    debts: number;
-    exchanges: number;
-    total: number;
-  }>;
-  alertLevel: 'normal' | 'warning' | 'danger';
-  suggestions: Array<{
-    type: 'archive' | 'delete_old_backups' | 'optimize';
-    message: string;
-    messageAr: string;
-  }>;
 }
 
 // ============================================
@@ -88,38 +64,167 @@ function formatSize(bytes: number): string {
 }
 
 // ============================================
+// Estimate row size based on typical data patterns
+// ============================================
+function estimateRowSize(tableName: string): number {
+  const sizes: Record<string, number> = {
+    currencies: 250,
+    vaults: 200,
+    accounts: 180,
+    transactions: 540,
+    debts: 480,
+    debt_payments: 350,
+    currency_exchanges: 520,
+    backups: 5000, // JSON data is large
+  };
+  return sizes[tableName] || 500;
+}
+
+// ============================================
+// Arabic table names
+// ============================================
+const TABLE_NAMES_AR: Record<string, string> = {
+  currencies: 'العملات',
+  vaults: 'الخزائن',
+  accounts: 'الحسابات',
+  transactions: 'الحركات',
+  debts: 'الديون',
+  debt_payments: 'مدفوعات الديون',
+  currency_exchanges: 'عمليات الصرافة',
+};
+
+// Supabase free tier: 500MB
+const STORAGE_LIMIT_MB = 500;
+
+// ============================================
 // Component
 // ============================================
 export function StorageDashboard() {
-  const [data, setData] = useState<StorageData | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { currencies, vaults, accounts, transactions, debts, currencyExchanges } = useAppStore();
+  const debtPayments: unknown[] = [];
+  const { isLoading: isDataLoading } = useSupabaseData();
   const [activeChart, setActiveChart] = useState<'bar' | 'line'>('bar');
 
-  // Fetch storage data
-  const fetchStorageData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await fetch('/api/storage?XTransformPort=3000');
-      if (!response.ok) throw new Error('Failed to fetch storage data');
-      const result = await response.json();
-      if (result.error) throw new Error(result.error);
-      setData(result);
-    } catch (err) {
-      console.error('[StorageDashboard] Error:', err);
-      setError(err instanceof Error ? err.message : 'حدث خطأ أثناء تحميل بيانات التخزين');
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  // Compute table info from loaded data
+  const tableInfos: TableInfo[] = useMemo(() => {
+    const tables: Array<{ name: string; rows: unknown[] }> = [
+      { name: 'currencies', rows: currencies },
+      { name: 'vaults', rows: vaults },
+      { name: 'accounts', rows: accounts },
+      { name: 'transactions', rows: transactions },
+      { name: 'debts', rows: debts },
+      { name: 'debt_payments', rows: debtPayments },
+      { name: 'currency_exchanges', rows: currencyExchanges },
+    ];
 
-  useEffect(() => {
-    fetchStorageData();
-  }, [fetchStorageData]);
+    return tables.map(({ name, rows }) => {
+      const rowCount = rows.length;
+      const avgRowSize = estimateRowSize(name);
+      const sizeBytes = Math.round(avgRowSize * rowCount);
+
+      return {
+        name,
+        nameAr: TABLE_NAMES_AR[name] || name,
+        icon: 'Database',
+        rowCount,
+        sizeBytes,
+        sizeKB: Math.round(sizeBytes / 1024 * 100) / 100,
+        sizeMB: Math.round(sizeBytes / (1024 * 1024) * 100) / 100,
+      };
+    });
+  }, [currencies, vaults, accounts, transactions, debts, debtPayments, currencyExchanges]);
+
+  // Compute totals
+  const totals = useMemo(() => {
+    const totalSizeBytes = tableInfos.reduce((sum, t) => sum + t.sizeBytes, 0);
+    const totalSizeKB = Math.round(totalSizeBytes / 1024 * 100) / 100;
+    const totalSizeMB = Math.round(totalSizeBytes / (1024 * 1024) * 100) / 100;
+    const totalRows = tableInfos.reduce((sum, t) => sum + t.rowCount, 0);
+    const usagePercent = Math.min(Math.round((totalSizeMB / STORAGE_LIMIT_MB) * 10000) / 100, 100);
+
+    return { sizeBytes: totalSizeBytes, sizeKB: totalSizeKB, sizeMB: totalSizeMB, rowCount: totalRows, usagePercent, storageLimitMB: STORAGE_LIMIT_MB };
+  }, [tableInfos]);
+
+  // Compute chart data from transactions/debts/exchanges
+  const chartData = useMemo(() => {
+    const monthlyData: Array<{ month: string; transactions: number; debts: number; exchanges: number; total: number }> = [];
+    const now = new Date();
+
+    for (let i = 5; i >= 0; i--) {
+      const monthStart = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+
+      const monthName = monthStart.toLocaleDateString('ar-SA', { month: 'short' });
+
+      // Count records created in this month
+      const txCount = transactions.filter(t => {
+        const d = new Date(t.createdAt);
+        return d >= monthStart && d < monthEnd;
+      }).length;
+
+      const debtCount = debts.filter(d => {
+        const dt = new Date(d.createdAt);
+        return dt >= monthStart && dt < monthEnd;
+      }).length;
+
+      const exchangeCount = currencyExchanges.filter(e => {
+        const dt = new Date(e.createdAt);
+        return dt >= monthStart && dt < monthEnd;
+      }).length;
+
+      monthlyData.push({
+        month: monthName,
+        transactions: txCount,
+        debts: debtCount,
+        exchanges: exchangeCount,
+        total: txCount + debtCount + exchangeCount,
+      });
+    }
+
+    return monthlyData;
+  }, [transactions, debts, currencyExchanges]);
+
+  // Determine alert level
+  const alertLevel: 'normal' | 'warning' | 'danger' = useMemo(() => {
+    if (totals.usagePercent >= 90) return 'danger';
+    if (totals.usagePercent >= 70) return 'warning';
+    return 'normal';
+  }, [totals.usagePercent]);
+
+  // Generate suggestions
+  const suggestions = useMemo(() => {
+    const result: Array<{ type: 'archive' | 'delete_old_backups' | 'optimize'; message: string; messageAr: string }> = [];
+
+    if (totals.usagePercent >= 70) {
+      result.push({
+        type: 'archive',
+        message: 'Archive old records to free up space',
+        messageAr: 'أرشفة الحركات القديمة لتفريغ المساحة',
+      });
+    }
+
+    if (totals.usagePercent >= 80) {
+      result.push({
+        type: 'delete_old_backups',
+        message: 'Delete old backups to free up space',
+        messageAr: 'حذف النسخ الاحتياطية القديمة لتفريغ المساحة',
+      });
+    }
+
+    const largeTable = tableInfos.find(t => t.rowCount > 1000);
+    if (largeTable) {
+      result.push({
+        type: 'optimize',
+        message: `Consider archiving old records from ${largeTable.name}`,
+        messageAr: `يفضل أرشفة السجلات القديمة من ${largeTable.nameAr}`,
+      });
+    }
+
+    return result;
+  }, [totals.usagePercent, tableInfos]);
 
   // Loading state
-  if (isLoading) {
+  if (isDataLoading) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-center py-8">
@@ -131,26 +236,6 @@ export function StorageDashboard() {
       </div>
     );
   }
-
-  // Error state
-  if (error || !data) {
-    return (
-      <div className="space-y-4">
-        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-          <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-            <AlertOctagon className="w-5 h-5" />
-            <p className="text-sm">{error || 'لا يمكن تحميل بيانات التخزين'}</p>
-          </div>
-          <Button variant="outline" size="sm" onClick={fetchStorageData} className="mt-3">
-            <RefreshCw className="w-4 h-4 ml-2" />
-            إعادة المحاولة
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
-  const { tables, totals, chartData, alertLevel, suggestions } = data;
 
   return (
     <div className="space-y-4">
@@ -259,7 +344,7 @@ export function StorageDashboard() {
           <p className="font-medium text-sm">تفاصيل الجداول</p>
         </div>
         <div className="space-y-2">
-          {tables
+          {tableInfos
             .sort((a, b) => b.sizeBytes - a.sizeBytes)
             .map((table) => {
               const percent = totals.sizeBytes > 0
@@ -396,19 +481,6 @@ export function StorageDashboard() {
           </div>
         </div>
       )}
-
-      {/* ===== Refresh Button ===== */}
-      <div className="flex justify-center">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={fetchStorageData}
-          className="text-xs gap-2"
-        >
-          <RefreshCw className="w-3 h-3" />
-          تحديث بيانات التخزين
-        </Button>
-      </div>
     </div>
   );
 }

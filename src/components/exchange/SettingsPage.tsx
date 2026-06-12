@@ -115,7 +115,7 @@ export function SettingsPage() {
   const [isLoadingBackups, setIsLoadingBackups] = useState(false);
   const [isCreatingDbBackup, setIsCreatingDbBackup] = useState(false);
   const [isRestoring, setIsRestoring] = useState<string | null>(null);
-  const [backupsTableExists, setBackupsTableExists] = useState(true);
+  const [backupsTableExists, setBackupsTableExists] = useState(false);
   const [isSettingUpBackups, setIsSettingUpBackups] = useState(false);
   const [backupSetupResult, setBackupSetupResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState<string | null>(null);
@@ -126,7 +126,16 @@ export function SettingsPage() {
     if (savedUsername) {
       setCurrentUsername(savedUsername);
     }
+    // Also check if backups table exists on mount
+    checkBackupsTableExists().then(exists => {
+      setBackupsTableExists(exists);
+    }).catch(() => {
+      setBackupsTableExists(false);
+    });
   }, []);
+
+  // Check backups table existence when backup-management section is expanded
+  // (handled in the section toggle click handler below)
 
   // Statistics
   const stats = {
@@ -589,10 +598,13 @@ export function SettingsPage() {
     setIsSettingUp(true);
     setArchiveSetupResult(null);
     try {
-      const response = await fetch('/api/archive/setup?XTransformPort=3000', { method: 'POST' });
+      const response = await fetch('/api/archive/setup', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       const data = await response.json();
       if (data.success) {
-        setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓' });
+        setArchiveSetupResult({ success: true, message: data.message || 'تم إعداد نظام الأرشفة بنجاح ✓' });
       } else {
         setArchiveSetupResult({
           success: false,
@@ -600,7 +612,13 @@ export function SettingsPage() {
         });
       }
     } catch (error) {
-      setArchiveSetupResult({ success: false, message: 'خطأ في الاتصال بالخادم' });
+      console.error('Archive setup error:', error);
+      setArchiveSetupResult({ 
+        success: false, 
+        message: error instanceof Error && error.message.includes('Failed to fetch')
+          ? 'لا يمكن الاتصال بالخادم. تأكد من تشغيل التطبيق.'
+          : 'خطأ في إعداد نظام الأرشفة. حاول مرة أخرى.' 
+      });
     } finally {
       setIsSettingUp(false);
     }
@@ -723,10 +741,13 @@ export function SettingsPage() {
     setIsSettingUpBackups(true);
     setBackupSetupResult(null);
     try {
-      const response = await fetch('/api/backup/setup?XTransformPort=3000', { method: 'POST' });
+      const response = await fetch('/api/backup/setup', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
       const data = await response.json();
       if (data.success) {
-        setBackupSetupResult({ success: true, message: 'تم إعداد نظام النسخ الاحتياطي بنجاح ✓' });
+        setBackupSetupResult({ success: true, message: data.message || 'تم إعداد نظام النسخ الاحتياطي بنجاح ✓' });
         setBackupsTableExists(true);
         await loadBackups();
       } else {
@@ -736,7 +757,13 @@ export function SettingsPage() {
         });
       }
     } catch (error) {
-      setBackupSetupResult({ success: false, message: 'خطأ في الاتصال بالخادم' });
+      console.error('Backup setup error:', error);
+      setBackupSetupResult({ 
+        success: false, 
+        message: error instanceof Error && error.message.includes('Failed to fetch')
+          ? 'لا يمكن الاتصال بالخادم. تأكد من تشغيل التطبيق.'
+          : 'خطأ في إعداد نظام النسخ الاحتياطية. حاول مرة أخرى.' 
+      });
     } finally {
       setIsSettingUpBackups(false);
     }
@@ -1428,7 +1455,14 @@ export function SettingsPage() {
             >
               {/* Section Header */}
               <button
-                onClick={() => setExpandedSection(isExpanded ? null : section.id)}
+                onClick={() => {
+                  const newSection = isExpanded ? null : section.id;
+                  setExpandedSection(newSection);
+                  // Load backups when backup-management section is expanded
+                  if (newSection === 'backup-management') {
+                    loadBackups();
+                  }
+                }}
                 className="w-full flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
               >
                 <div className="flex items-center gap-3">

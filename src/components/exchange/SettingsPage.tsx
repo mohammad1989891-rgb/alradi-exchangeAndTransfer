@@ -65,6 +65,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb, createBackup, getBackups, restoreBackup, deleteBackup, checkBackupsTableExists, exportBackupAsJson } from '@/lib/supabaseDb';
 import type { Currency as CurrencyType } from '@/types';
+import { StorageDashboard } from '@/components/exchange/StorageDashboard';
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
@@ -1391,6 +1392,12 @@ export function SettingsPage() {
           </div>
         </div>
       ),
+    },
+    {
+      id: 'storage',
+      title: 'إدارة التخزين',
+      icon: Database,
+      content: <StorageDashboard />,
     },
   ];
 

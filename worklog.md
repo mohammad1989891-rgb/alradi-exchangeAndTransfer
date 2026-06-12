@@ -174,3 +174,43 @@ Stage Summary:
 - Pre-restore safety backup creates automatic backup before restoring
 - Backups table needs to be created via /api/backup/setup or manually in Supabase SQL Editor
 - All backup operations are logged to console for debugging
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Implement Storage Management Dashboard (نظام إدارة حجم البيانات) with UI Freeze
+
+Work Log:
+- Created `/api/storage/route.ts` API endpoint that:
+  - Uses Supabase JS client with `count: 'exact'` for reliable row counting
+  - Estimates table sizes by sampling rows and calculating JSON serialization sizes
+  - Gets monthly chart data (last 6 months) for transactions, debts, and exchanges
+  - Calculates storage usage percentage (against 500MB Supabase free tier limit)
+  - Determines alert level: normal (<70%), warning (70-90%), danger (>90%)
+  - Generates optimization suggestions based on usage and record counts
+  - Returns structured JSON with tables, totals, chartData, alertLevel, suggestions
+- Created `StorageDashboard.tsx` component with:
+  - Storage usage overview with progress bar and 70%/90% threshold markers
+  - Per-table breakdown showing row counts and sizes with mini progress bars
+  - Interactive charts: Bar chart (transactions per month) and Line chart (data growth)
+  - Uses shadcn/ui ChartContainer with Recharts for professional chart rendering
+  - Alert banners: warning (amber) at 70%, danger (red) at 90% usage
+  - Optimization suggestions with contextual icons (archive, delete, optimize)
+  - Refresh button for manual data reload
+  - Loading state with spinner and error state with retry
+- Integrated StorageDashboard into SettingsPage as new "إدارة التخزين" section
+  - Added import for StorageDashboard component
+  - Added section with Database icon
+  - UI Freeze maintained - uses same section/accordion pattern as other settings
+- Fixed API route: initially used raw fetch with content-range header (returned 0 counts due to gateway header stripping), switched to Supabase JS client with `count: 'exact'` for reliable counting
+- Fixed API route: added hardcoded Supabase URL and anon key as fallback (matching existing supabase.ts pattern)
+- Lint passes with no errors
+- API verified working: returns 29 rows across 8 tables, 0% usage, 6 months of chart data
+
+Stage Summary:
+- Storage Management Dashboard fully implemented and integrated into Settings page
+- Shows storage usage percentage, per-table breakdown with sizes, and interactive charts
+- Alerts trigger at 70% (warning) and 90% (danger) thresholds
+- Suggestions appear contextually: archive data, delete old backups, optimize
+- Uses efficient Supabase queries (count: 'exact' with head: true) - no performance impact
+- UI Freeze maintained - only additive changes, follows existing settings section pattern

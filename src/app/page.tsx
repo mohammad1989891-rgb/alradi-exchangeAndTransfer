@@ -19,11 +19,12 @@ import { AccountStatementModal } from '@/components/exchange/AccountStatementMod
 import { CurrencyModal } from '@/components/exchange/CurrencyModal';
 import { OpeningBalanceModal } from '@/components/exchange/OpeningBalanceModal';
 import { CurrencyExchangeModal } from '@/components/exchange/CurrencyExchangeModal';
+import { ArchiveModal } from '@/components/exchange/ArchiveModal';
 import { SplashScreen } from '@/components/exchange/SplashScreen';
 import { LoginPage } from '@/components/exchange/LoginPage';
 import { SupabaseSetup } from '@/components/exchange/SupabaseSetup';
 import { motion } from 'framer-motion';
-import { Menu, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Archive } from 'lucide-react';
+import { Menu, Loader2, Settings, LogOut, Wifi, WifiOff, Cloud, CloudOff, RefreshCw, Archive as ArchiveIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -149,7 +150,6 @@ export default function Home() {
       t: localData.displayTransactions.length,
       d: localData.displayDebts.length,
       e: localData.displayCurrencyExchanges.length,
-      sa: localData.showArchived,
     });
   }, [
     localData.isInitialized,
@@ -159,7 +159,6 @@ export default function Home() {
     localData.displayTransactions.length,
     localData.displayDebts.length,
     localData.displayCurrencyExchanges.length,
-    localData.showArchived,
   ]);
 
   useEffect(() => {
@@ -464,15 +463,15 @@ export default function Home() {
             {/* Supabase Connection Status Indicator + Sync Button */}
             {localData.isInitialized && !localData.isLoading && (
               <div className="flex items-center gap-1">
-                {/* Archive Toggle */}
+                {/* Archive Viewer Button */}
                 <Button
-                  variant={localData.showArchived ? 'default' : 'ghost'}
+                  variant="ghost"
                   size="icon"
                   className="rounded-full h-8 w-8"
-                  onClick={() => localData.setShowArchived(!localData.showArchived)}
-                  title={localData.showArchived ? 'إخفاء الأرشيف' : 'عرض الأرشيف'}
+                  onClick={() => useAppStore.getState().openArchiveModal()}
+                  title="عرض الأرشيف"
                 >
-                  <Archive className="w-4 h-4" />
+                  <ArchiveIcon className="w-4 h-4" />
                 </Button>
                 <Button
                   variant="ghost"
@@ -560,6 +559,9 @@ export default function Home() {
       
       {/* Opening Balance Modal */}
       <OpeningBalanceModal />
+      
+      {/* Archive Modal */}
+      <ArchiveModal />
       
       {/* Currency Exchange Modal */}
       <CurrencyExchangeModal />

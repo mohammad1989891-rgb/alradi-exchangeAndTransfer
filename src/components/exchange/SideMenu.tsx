@@ -16,6 +16,7 @@ import {
   PiggyBank,
   ShieldCheck,
   Car,
+  Archive,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -62,10 +63,17 @@ const menuItems = [
     icon: BarChart3,
     color: 'bg-green-500',
   },
+  {
+    id: 'archive',
+    title: 'عرض الأرشيف',
+    description: 'استعراض وتصدير واسترجاع البيانات المؤرشفة',
+    icon: Archive,
+    color: 'bg-amber-500',
+  },
 ];
 
 export function SideMenu() {
-  const { isSideMenuOpen, closeSideMenu, openVaultQuery, openAccountStatement, openCurrencyModal, openOpeningBalanceModal, setActiveTab } = useAppStore();
+  const { isSideMenuOpen, closeSideMenu, openVaultQuery, openAccountStatement, openCurrencyModal, openOpeningBalanceModal, setActiveTab, openArchiveModal } = useAppStore();
 
   const handleMenuClick = (id: string) => {
     switch (id) {
@@ -87,6 +95,11 @@ export function SideMenu() {
       case 'reports':
         setActiveTab('reports');
         break;
+      case 'archive':
+        closeSideMenu();
+        // Small delay to let Sheet close before opening Dialog
+        setTimeout(() => openArchiveModal(), 300);
+        return; // Don't call closeSideMenu again
     }
     closeSideMenu();
   };

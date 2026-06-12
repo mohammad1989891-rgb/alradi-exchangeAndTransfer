@@ -77,6 +77,7 @@ interface AppState {
   // Additional modals for compatibility
   isExchangeRateModalOpen: boolean;
   isExportImportModalOpen: boolean;
+  isArchiveModalOpen: boolean;
   editingTransaction: Transaction | null;
   editingDebt: Debt | null;
   editingAccount: Account | null;
@@ -109,6 +110,8 @@ interface AppState {
   closeExchangeRateModal: () => void;
   openExportImportModal: () => void;
   closeExportImportModal: () => void;
+  openArchiveModal: () => void;
+  closeArchiveModal: () => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -219,6 +222,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // Additional modals for compatibility
   isExchangeRateModalOpen: false,
   isExportImportModalOpen: false,
+  isArchiveModalOpen: false,
   editingTransaction: null,
   editingDebt: null,
   editingAccount: null,
@@ -251,4 +255,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeExchangeRateModal: () => set({ isExchangeRateModalOpen: false, editingCurrencyForExchangeRate: null }),
   openExportImportModal: () => set({ isExportImportModalOpen: true }),
   closeExportImportModal: () => set({ isExportImportModalOpen: false }),
+  openArchiveModal: () => set({ isArchiveModalOpen: true }),
+  closeArchiveModal: () => set({ isArchiveModalOpen: false }),
 }));

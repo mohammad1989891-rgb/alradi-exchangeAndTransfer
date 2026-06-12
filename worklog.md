@@ -97,3 +97,35 @@ Stage Summary:
 - UI shows opening balance date in both VaultCard and OpeningBalanceModal
 - Date picker allows users to set the effective date for opening balance
 - Backward compatible: if opening_balance_date is null, all operations are included
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Develop archive system: lazy-load, filter, export, restore, performance optimization
+
+Work Log:
+- Modified supabaseDb.ts getters to filter `is_archived = false` by default (getTransactions, getDebts, getDebtPayments, getCurrencyExchanges)
+- Added new archive-specific query functions with pagination and filtering: getArchivedTransactions, getArchivedDebts, getArchivedDebtPayments, getArchivedCurrencyExchanges
+- Added exportArchivedData() - exports all archived records as JSON
+- Added restoreArchivedRecords() - unarchives specific records back to active
+- Added ArchiveFilters and ArchiveDataResult types for type-safe querying
+- Modified useSupabaseData.ts: changed all data loading to use `includeArchived: false` (active only)
+- Simplified display data: since we only load active data, no need for client-side archive filtering
+- Updated useAppStore.ts: added isArchiveModalOpen, openArchiveModal, closeArchiveModal state
+- Created ArchiveModal.tsx component with: tab-based navigation (4 tabs), date/account/currency filters, lazy loading, select/restore, JSON export, auto-archive
+- Updated SideMenu.tsx: added "عرض الأرشيف" menu item with Archive icon
+- Updated page.tsx: replaced archive toggle button with archive viewer button, added ArchiveModal component
+- Fixed Dialog→Sheet issue: Dialog was closing immediately due to Radix onOpenChange behavior; switched to Sheet which stays open
+- Added 400ms delay on data loading to let Sheet animation complete before state updates
+- Used useAppStore for accounts/currencies instead of useSupabaseData (avoids duplicate hook instances)
+- Used window.dispatchEvent for data refresh after restore/auto-archive
+
+Stage Summary:
+- Archive system now loads ONLY active data on startup (performance improvement)
+- Archived data is lazy-loaded only when user opens the archive viewer
+- Supports filtering by date range, account, and currency
+- JSON export for archived data backup
+- Restore specific records from archive to active tables
+- Auto-archive old records with configurable threshold (3/6/12/24 months)
+- UI Freeze maintained - no visual design changes to existing pages
+- Archive accessible from header button and side menu

@@ -178,11 +178,11 @@ export function useSupabaseData() {
         getActiveCurrencies(),
         getVaults(),
         getAccounts(),
-        getTransactions({ includeArchived: true }), // Always load ALL data for calculations
-        getDebts({ includeArchived: true }), // Always load ALL data for calculations
-        getDebtPayments(undefined, { includeArchived: true }), // Always load ALL data
+        getTransactions({ includeArchived: false }), // Only load ACTIVE data — archive is lazy-loaded
+        getDebts({ includeArchived: false }), // Only load ACTIVE data
+        getDebtPayments(undefined, { includeArchived: false }), // Only load ACTIVE data
         getTotalBalanceInUSD(),
-        getCurrencyExchanges({ includeArchived: true }), // Always load ALL data
+        getCurrencyExchanges({ includeArchived: false }), // Only load ACTIVE data
       ]);
 
       if (!mountedRef.current) return;
@@ -250,7 +250,7 @@ export function useSupabaseData() {
 
   const refreshTransactions = useCallback(async () => {
     try {
-      const txData = await getTransactions({ includeArchived: true });
+      const txData = await getTransactions({ includeArchived: false });
       if (!mountedRef.current) return;
       setTransactions(txData);
     } catch (error) {
@@ -261,8 +261,8 @@ export function useSupabaseData() {
   const refreshDebts = useCallback(async () => {
     try {
       const [debtData, debtPaymentsData] = await Promise.all([
-        getDebts({ includeArchived: true }),
-        getDebtPayments(undefined, { includeArchived: true }),
+        getDebts({ includeArchived: false }),
+        getDebtPayments(undefined, { includeArchived: false }),
       ]);
       if (!mountedRef.current) return;
       setDebts(debtData);
@@ -275,7 +275,7 @@ export function useSupabaseData() {
 
   const refreshDebtPayments = useCallback(async () => {
     try {
-      const debtPaymentsData = await getDebtPayments(undefined, { includeArchived: true });
+      const debtPaymentsData = await getDebtPayments(undefined, { includeArchived: false });
       if (!mountedRef.current) return;
       setDebtPayments(debtPaymentsData);
       // debtRemaining is now computed client-side via useMemo
@@ -286,7 +286,7 @@ export function useSupabaseData() {
 
   const refreshCurrencyExchanges = useCallback(async () => {
     try {
-      const exchangeData = await getCurrencyExchanges({ includeArchived: true });
+      const exchangeData = await getCurrencyExchanges({ includeArchived: false });
       if (!mountedRef.current) return;
       setCurrencyExchanges(exchangeData);
     } catch (error) {
@@ -629,28 +629,25 @@ export function useSupabaseData() {
   }, [debts, debtPayments]);
 
   // ============================================
-  // Display-filtered data (based on showArchived)
-  // Calculations always use ALL data
+  // Display-filtered data
+  // Since we now only load active data by default,
+  // display data = loaded data (no archive filtering needed)
   // ============================================
   const displayTransactions = useMemo(() => {
-    if (showArchived) return transactions;
-    return transactions.filter(t => !t.isArchived);
-  }, [transactions, showArchived]);
+    return transactions;
+  }, [transactions]);
 
   const displayDebts = useMemo(() => {
-    if (showArchived) return debts;
-    return debts.filter(d => !d.isArchived);
-  }, [debts, showArchived]);
+    return debts;
+  }, [debts]);
 
   const displayDebtPayments = useMemo(() => {
-    if (showArchived) return debtPayments;
-    return debtPayments.filter(p => !p.isArchived);
-  }, [debtPayments, showArchived]);
+    return debtPayments;
+  }, [debtPayments]);
 
   const displayCurrencyExchanges = useMemo(() => {
-    if (showArchived) return currencyExchanges;
-    return currencyExchanges.filter(e => !e.isArchived);
-  }, [currencyExchanges, showArchived]);
+    return currencyExchanges;
+  }, [currencyExchanges]);
 
   // ============================================
   // Manual retry function

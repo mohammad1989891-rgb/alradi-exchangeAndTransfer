@@ -1366,13 +1366,16 @@ export async function deleteAccount(id: string): Promise<void> {
 // Transaction Functions
 // ============================================
 
-export async function getTransactions(_options?: { includeArchived?: boolean }): Promise<Transaction[]> {
+export async function getTransactions(options?: { includeArchived?: boolean }): Promise<Transaction[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  // Always load ALL data — archive filtering is done client-side
-  // This avoids errors if is_archived column doesn't exist yet
+  const includeArchived = options?.includeArchived ?? false;
   const result = await fetchWithRetry(async () => {
-    const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false });
+    let query = supabase.from('transactions').select('*').order('date', { ascending: false });
+    if (!includeArchived) {
+      query = query.eq('is_archived', false);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   });
@@ -1380,7 +1383,7 @@ export async function getTransactions(_options?: { includeArchived?: boolean }):
     console.error('[Supabase] ❌ getTransactions: failed after retries, returning []');
     return [];
   }
-  console.log('[Supabase] 📊 Transactions loaded:', result?.length ?? 0);
+  console.log('[Supabase] 📊 Transactions loaded:', result?.length ?? 0, includeArchived ? '(incl. archived)' : '(active only)');
   return (result || []).map(rowToTransaction);
 }
 
@@ -1585,12 +1588,16 @@ export async function deleteTransaction(id: string): Promise<void> {
 // Debt Functions
 // ============================================
 
-export async function getDebts(_options?: { includeArchived?: boolean }): Promise<Debt[]> {
+export async function getDebts(options?: { includeArchived?: boolean }): Promise<Debt[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  // Always load ALL data — archive filtering is done client-side
+  const includeArchived = options?.includeArchived ?? false;
   const result = await fetchWithRetry(async () => {
-    const { data, error } = await supabase.from('debts').select('*').order('date', { ascending: false });
+    let query = supabase.from('debts').select('*').order('date', { ascending: false });
+    if (!includeArchived) {
+      query = query.eq('is_archived', false);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   });
@@ -1921,13 +1928,17 @@ export async function deleteDebt(id: string): Promise<void> {
 // Debt Payment Functions
 // ============================================
 
-export async function getDebtPayments(debtId?: string, _options?: { includeArchived?: boolean }): Promise<DebtPayment[]> {
+export async function getDebtPayments(debtId?: string, options?: { includeArchived?: boolean }): Promise<DebtPayment[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  // Always load ALL data — archive filtering is done client-side
+  const includeArchived = options?.includeArchived ?? false;
   if (debtId) {
     const result = await fetchWithRetry(async () => {
-      const { data, error } = await supabase.from('debt_payments').select('*').eq('debt_id', debtId);
+      let query = supabase.from('debt_payments').select('*').eq('debt_id', debtId);
+      if (!includeArchived) {
+        query = query.eq('is_archived', false);
+      }
+      const { data, error } = await query;
       if (error) throw error;
       return data;
     });
@@ -1938,7 +1949,11 @@ export async function getDebtPayments(debtId?: string, _options?: { includeArchi
     return (result || []).map(rowToDebtPayment);
   }
   const result = await fetchWithRetry(async () => {
-    const { data, error } = await supabase.from('debt_payments').select('*').order('date', { ascending: false });
+    let query = supabase.from('debt_payments').select('*').order('date', { ascending: false });
+    if (!includeArchived) {
+      query = query.eq('is_archived', false);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   });
@@ -2614,12 +2629,16 @@ function calculateUsdValue(
   }
 }
 
-export async function getCurrencyExchanges(_options?: { includeArchived?: boolean }): Promise<CurrencyExchange[]> {
+export async function getCurrencyExchanges(options?: { includeArchived?: boolean }): Promise<CurrencyExchange[]> {
   await initializeDatabase();
   if (!tablesExist) return [];
-  // Always load ALL data — archive filtering is done client-side
+  const includeArchived = options?.includeArchived ?? false;
   const result = await fetchWithRetry(async () => {
-    const { data, error } = await supabase.from('currency_exchanges').select('*');
+    let query = supabase.from('currency_exchanges').select('*');
+    if (!includeArchived) {
+      query = query.eq('is_archived', false);
+    }
+    const { data, error } = await query;
     if (error) throw error;
     return data;
   });
@@ -3469,4 +3488,242 @@ export async function getArchivedCounts(): Promise<{ transactions: number; debts
     debtPayments: result.paymentResult.count || 0,
     currencyExchanges: result.exchangeResult.count || 0,
   };
+}
+
+// ============================================
+// 🔸 Archive Viewer: Lazy-load archived data with filters
+// 🔸 Only loads when user opens the archive modal
+// 🔸 Supports date, account, currency filtering + pagination
+// ============================================
+
+export interface ArchiveFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  accountId?: string;
+  currencyId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export interface ArchiveDataResult<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export async function getArchivedTransactions(filters: ArchiveFilters = {}): Promise<ArchiveDataResult<Transaction>> {
+  await initializeDatabase();
+  if (!tablesExist) return { data: [], total: 0, page: 1, pageSize: 50, totalPages: 0 };
+
+  const { dateFrom, dateTo, accountId, currencyId, page = 1, pageSize = 50 } = filters;
+
+  const result = await fetchWithRetry(async () => {
+    let query = supabase.from('transactions')
+      .select('*', { count: 'exact' })
+      .eq('is_archived', true)
+      .order('date', { ascending: false });
+
+    if (dateFrom) query = query.gte('date', dateFrom);
+    if (dateTo) query = query.lte('date', dateTo);
+    if (accountId) query = query.eq('account_id', accountId);
+    if (currencyId) query = query.eq('currency_id', currencyId);
+
+    // Pagination
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    return { data, count };
+  });
+
+  if (result === null) return { data: [], total: 0, page, pageSize, totalPages: 0 };
+
+  return {
+    data: (result.data || []).map(rowToTransaction),
+    total: result.count || 0,
+    page,
+    pageSize,
+    totalPages: Math.ceil((result.count || 0) / pageSize),
+  };
+}
+
+export async function getArchivedDebts(filters: ArchiveFilters = {}): Promise<ArchiveDataResult<Debt>> {
+  await initializeDatabase();
+  if (!tablesExist) return { data: [], total: 0, page: 1, pageSize: 50, totalPages: 0 };
+
+  const { dateFrom, dateTo, accountId, currencyId, page = 1, pageSize = 50 } = filters;
+
+  const result = await fetchWithRetry(async () => {
+    let query = supabase.from('debts')
+      .select('*', { count: 'exact' })
+      .eq('is_archived', true)
+      .order('date', { ascending: false });
+
+    if (dateFrom) query = query.gte('date', dateFrom);
+    if (dateTo) query = query.lte('date', dateTo);
+    if (accountId) query = query.eq('account_id', accountId);
+    if (currencyId) query = query.eq('currency_id', currencyId);
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    return { data, count };
+  });
+
+  if (result === null) return { data: [], total: 0, page, pageSize, totalPages: 0 };
+
+  return {
+    data: (result.data || []).map(rowToDebt),
+    total: result.count || 0,
+    page,
+    pageSize,
+    totalPages: Math.ceil((result.count || 0) / pageSize),
+  };
+}
+
+export async function getArchivedDebtPayments(filters: ArchiveFilters = {}): Promise<ArchiveDataResult<DebtPayment>> {
+  await initializeDatabase();
+  if (!tablesExist) return { data: [], total: 0, page: 1, pageSize: 50, totalPages: 0 };
+
+  const { dateFrom, dateTo, currencyId, page = 1, pageSize = 50 } = filters;
+
+  const result = await fetchWithRetry(async () => {
+    let query = supabase.from('debt_payments')
+      .select('*', { count: 'exact' })
+      .eq('is_archived', true)
+      .order('date', { ascending: false });
+
+    if (dateFrom) query = query.gte('date', dateFrom);
+    if (dateTo) query = query.lte('date', dateTo);
+    if (currencyId) query = query.eq('currency_id', currencyId);
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    return { data, count };
+  });
+
+  if (result === null) return { data: [], total: 0, page, pageSize, totalPages: 0 };
+
+  return {
+    data: (result.data || []).map(rowToDebtPayment),
+    total: result.count || 0,
+    page,
+    pageSize,
+    totalPages: Math.ceil((result.count || 0) / pageSize),
+  };
+}
+
+export async function getArchivedCurrencyExchanges(filters: ArchiveFilters = {}): Promise<ArchiveDataResult<CurrencyExchange>> {
+  await initializeDatabase();
+  if (!tablesExist) return { data: [], total: 0, page: 1, pageSize: 50, totalPages: 0 };
+
+  const { dateFrom, dateTo, currencyId, page = 1, pageSize = 50 } = filters;
+
+  const result = await fetchWithRetry(async () => {
+    let query = supabase.from('currency_exchanges')
+      .select('*', { count: 'exact' })
+      .eq('is_archived', true)
+      .eq('is_deleted', false)
+      .order('date', { ascending: false });
+
+    if (dateFrom) query = query.gte('date', dateFrom);
+    if (dateTo) query = query.lte('date', dateTo);
+    if (currencyId) {
+      query = query.or(`outgoing_currency_id.eq.${currencyId},incoming_currency_id.eq.${currencyId}`);
+    }
+
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+    query = query.range(from, to);
+
+    const { data, error, count } = await query;
+    if (error) throw error;
+    return { data, count };
+  });
+
+  if (result === null) return { data: [], total: 0, page, pageSize, totalPages: 0 };
+
+  return {
+    data: (result.data || []).map(rowToCurrencyExchange),
+    total: result.count || 0,
+    page,
+    pageSize,
+    totalPages: Math.ceil((result.count || 0) / pageSize),
+  };
+}
+
+// ============================================
+// 🔸 Export all archived data as JSON
+// ============================================
+
+export async function exportArchivedData(): Promise<{
+  version: string;
+  exportedAt: string;
+  type: 'archive';
+  transactions: Transaction[];
+  debts: Debt[];
+  debtPayments: DebtPayment[];
+  currencyExchanges: CurrencyExchange[];
+}> {
+  await initializeDatabase();
+  if (!tablesExist) {
+    return { version: '1.0', exportedAt: new Date().toISOString(), type: 'archive', transactions: [], debts: [], debtPayments: [], currencyExchanges: [] };
+  }
+
+  // Load ALL archived data (no pagination)
+  const [txResult, debtResult, paymentResult, exchangeResult] = await Promise.all([
+    fetchWithRetry(async () => {
+      const { data, error } = await supabase.from('transactions').select('*').eq('is_archived', true);
+      if (error) throw error;
+      return data;
+    }),
+    fetchWithRetry(async () => {
+      const { data, error } = await supabase.from('debts').select('*').eq('is_archived', true);
+      if (error) throw error;
+      return data;
+    }),
+    fetchWithRetry(async () => {
+      const { data, error } = await supabase.from('debt_payments').select('*').eq('is_archived', true);
+      if (error) throw error;
+      return data;
+    }),
+    fetchWithRetry(async () => {
+      const { data, error } = await supabase.from('currency_exchanges').select('*').eq('is_archived', true).eq('is_deleted', false);
+      if (error) throw error;
+      return data;
+    }),
+  ]);
+
+  return {
+    version: '1.0',
+    exportedAt: new Date().toISOString(),
+    type: 'archive',
+    transactions: (txResult || []).map(rowToTransaction),
+    debts: (debtResult || []).map(rowToDebt),
+    debtPayments: (paymentResult || []).map(rowToDebtPayment),
+    currencyExchanges: (exchangeResult || []).map(rowToCurrencyExchange),
+  };
+}
+
+// ============================================
+// 🔸 Restore specific archived records to active
+// ============================================
+
+export async function restoreArchivedRecords(
+  table: 'transactions' | 'debts' | 'debt_payments' | 'currency_exchanges',
+  ids: string[]
+): Promise<void> {
+  // This is the same as unarchiveRecords — sets is_archived = false
+  await unarchiveRecords(table, ids);
 }

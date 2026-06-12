@@ -8,6 +8,7 @@ import type { Vault, Currency } from '@/lib/supabaseDb';
 import { useAppStore } from '@/store/useAppStore';
 import { useSYPSettings } from '@/store/useSYPSettings';
 import { isSYPCurrency, formatSYPDualDisplay, getSypPerUnitRate } from '@/lib/syp-conversion';
+import { format } from 'date-fns';
 
 interface VaultCardProps {
   vault: Vault;
@@ -138,12 +139,19 @@ export function VaultCard({ vault, index }: VaultCardProps) {
           <div className="mb-3 pb-3 border-b border-border/30">
             <div className="flex items-center justify-between">
               <span className="text-xs text-muted-foreground">رصيد أول المدة</span>
-              <span className={cn(
-                'text-sm font-medium',
-                openingBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
-              )}>
-                {openingBalance >= 0 ? '' : '-'}{formatNumber(Math.abs(openingBalance))} {currency?.symbol}
-              </span>
+              <div className="flex flex-col items-end gap-0.5">
+                <span className={cn(
+                  'text-sm font-medium',
+                  openingBalance >= 0 ? 'text-emerald-600' : 'text-red-600'
+                )}>
+                  {openingBalance >= 0 ? '' : '-'}{formatNumber(Math.abs(openingBalance))} {currency?.symbol}
+                </span>
+                {vault.openingBalanceDate && (
+                  <span className="text-[10px] text-muted-foreground">
+                    منذ {format(new Date(vault.openingBalanceDate), 'yyyy/MM/dd')}
+                  </span>
+                )}
+              </div>
               {openingBalanceDualDisplay && (
                 <p className="text-[10px] text-muted-foreground mt-0.5">{openingBalanceDualDisplay}</p>
               )}

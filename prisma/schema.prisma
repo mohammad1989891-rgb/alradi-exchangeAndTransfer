@@ -30,12 +30,13 @@ model Currency {
 
 // صناديق العملات (الأرصدة)
 model Vault {
-  id              String   @id @default(cuid())
-  currencyId      String
-  balance         Float    @default(0)
-  openingBalance  Float    @default(0) // رصيد أول المدة
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                String    @id @default(cuid())
+  currencyId        String
+  balance           Float     @default(0)
+  openingBalance    Float     @default(0) // رصيد أول المدة
+  openingBalanceDate DateTime? // تاريخ رصيد أول المدة
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
   
   // العلاقات
   currency    Currency @relation(fields: [currencyId], references: [id], onDelete: Cascade)

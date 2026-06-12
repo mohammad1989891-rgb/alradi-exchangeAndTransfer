@@ -8,6 +8,7 @@ export interface AccountVault {
   currencyId: string;
   balance: number;
   openingBalance: number;
+  openingBalanceDate: Date | null;
   isDefault: boolean;
   currency?: import('@/lib/supabaseDb').Currency;
   account?: import('@/lib/supabaseDb').Account;

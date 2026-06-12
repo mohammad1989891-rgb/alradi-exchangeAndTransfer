@@ -20,6 +20,7 @@ import {
   updateCurrencyExchangeRate,
   updateCurrencyConversionMethod,
   updateVaultOpeningBalance,
+  recalculateVaultBalance as recalculateVaultBalanceFn,
   addAccount,
   updateAccount,
   deleteAccount,
@@ -826,13 +827,23 @@ export function useSupabaseData() {
     },
 
     // Vault actions
-    updateVaultOpeningBalance: async (currencyId: string, balance: number): Promise<Vault | null> => {
+    updateVaultOpeningBalance: async (currencyId: string, balance: number, date?: Date | null): Promise<Vault | null> => {
       try {
-        const result = await updateVaultOpeningBalance(currencyId, balance);
+        const result = await updateVaultOpeningBalance(currencyId, balance, date);
         await refreshData();
         return result;
       } catch (error) {
         console.error('Error updating vault balance:', error);
+        throw error;
+      }
+    },
+    recalculateVaultBalance: async (currencyId: string): Promise<Vault | null> => {
+      try {
+        const result = await recalculateVaultBalanceFn(currencyId);
+        await refreshData();
+        return result;
+      } catch (error) {
+        console.error('Error recalculating vault balance:', error);
         throw error;
       }
     },

@@ -139,6 +139,7 @@ export interface Vault {
   currencyId: string;
   balance: number;
   openingBalance: number;
+  openingBalanceDate: Date | null;
   createdAt: Date;
   updatedAt: Date;
   currency?: Currency;
@@ -387,6 +388,9 @@ function rowToVault(row: Record<string, unknown>): Vault {
   const obj = toCamelCase<Vault>(row);
   obj.createdAt = new Date(obj.createdAt as unknown as string);
   obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  if (obj.openingBalanceDate) {
+    obj.openingBalanceDate = new Date(obj.openingBalanceDate as unknown as string);
+  }
   return obj;
 }
 
@@ -478,6 +482,7 @@ function vaultToRow(vault: Partial<Vault>): Record<string, unknown> {
   const row = toSnakeCase<Record<string, unknown>>(vault as Record<string, unknown>);
   if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
   if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  if (row.opening_balance_date) row.opening_balance_date = dateToIso(row.opening_balance_date as Date);
   return row;
 }
 
@@ -1102,41 +1107,179 @@ export async function getVaults(): Promise<Vault[]> {
   return (result || []).map(rowToVault);
 }
 
-export async function updateVaultBalance(currencyId: string, balanceDelta: number): Promise<Vault | null> {
+/**
+ * Recalculate vault balance from opening_balance + all vault-affecting operations after opening_balance_date
+ * Formula: balance = opening_balance + sum(post-date operations)
+ *
+ * Operations that affect vault:
+ * 1. TRANSACTIONS: Complete, cash, not archived
+ * 2. DEBTS: Cash mode debts
+ * 3. DEBT PAYMENTS: Cash mode payments
+ * 4. CURRENCY EXCHANGES: Not deleted
+ */
+export async function recalculateVaultBalance(currencyId: string): Promise<Vault | null> {
   await initializeDatabase();
-  
+
+  // Get the vault
   const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', currencyId);
-  if (vaultRows && vaultRows.length > 0) {
-    const vault = rowToVault(vaultRows[0]);
-    const newBalance = vault.balance + balanceDelta;
-    const { error } = await supabase.from('vaults').update({
-      balance: newBalance,
-      updated_at: new Date().toISOString(),
-    }).eq('id', vault.id);
-    if (error) throw new Error(error.message);
-    
-    const { data: updatedRow } = await supabase.from('vaults').select('*').eq('id', vault.id).single();
-    return updatedRow ? rowToVault(updatedRow) : null;
+  if (!vaultRows || vaultRows.length === 0) return null;
+  const vault = rowToVault(vaultRows[0]);
+
+  const openingBalance = vault.openingBalance || 0;
+  const openingDate = vault.openingBalanceDate;
+
+  let delta = 0;
+
+  // Build date filter - only operations AFTER opening_balance_date
+  const dateFilter = openingDate ? openingDate.toISOString() : null;
+
+  // 1. TRANSACTIONS: Complete, cash (overflow transactions use currencyId directly)
+  let transactionQuery = supabase.from('transactions').select('*')
+    .eq('is_complete', true)
+    .eq('payment_type', 'CASH');
+
+  if (dateFilter) {
+    transactionQuery = transactionQuery.gt('date', dateFilter);
   }
-  return null;
+
+  const { data: transactions } = await transactionQuery;
+  if (transactions) {
+    for (const tx of transactions) {
+      const txObj = rowToTransaction(tx);
+      // Determine which vault this transaction affects
+      const vaultCurrencyId = txObj.isOverflowTransaction ? txObj.currencyId : (txObj.baseCurrencyId || txObj.currencyId);
+
+      if (vaultCurrencyId === currencyId) {
+        // INCOME: vault decreases (money goes out)
+        // EXPENSE: vault increases (money comes in)
+        if (txObj.type === 'INCOME') {
+          delta -= txObj.amount;
+        } else {
+          delta += txObj.amount;
+        }
+      }
+    }
+  }
+
+  // 2. DEBTS: Cash mode debts affect vault
+  let debtQuery = supabase.from('debts').select('*')
+    .eq('debt_mode', 'CASH');
+
+  if (dateFilter) {
+    debtQuery = debtQuery.gt('date', dateFilter);
+  }
+
+  const { data: debts } = await debtQuery;
+  if (debts) {
+    for (const d of debts) {
+      const debtObj = rowToDebt(d);
+      if (debtObj.currencyId === currencyId) {
+        // PAYABLE (علينا): vault increases (we receive money)
+        // RECEIVABLE (لنا): vault decreases (we give money out)
+        if (debtObj.debtType === 'PAYABLE') {
+          delta += debtObj.amount;
+        } else {
+          delta -= debtObj.amount;
+        }
+      }
+    }
+  }
+
+  // 3. DEBT PAYMENTS: Cash mode
+  let paymentQuery = supabase.from('debt_payments').select('*')
+    .eq('payment_mode', 'CASH');
+
+  if (dateFilter) {
+    paymentQuery = paymentQuery.gt('date', dateFilter);
+  }
+
+  const { data: payments } = await paymentQuery;
+  if (payments) {
+    for (const p of payments) {
+      const paymentObj = rowToDebtPayment(p);
+      if (paymentObj.currencyId === currencyId) {
+        // Debt payment direction logic:
+        // RECEIVABLE (لنا): vault decreases (money goes out to pay toward our receivable)
+        // PAYABLE (علينا): vault increases (money comes in to pay toward our payable)
+        const direction = paymentObj.paymentDirection || 'RECEIVABLE';
+        if (direction === 'PAYABLE') {
+          delta += paymentObj.amount;
+        } else {
+          delta -= paymentObj.amount;
+        }
+      }
+    }
+  }
+
+  // 4. CURRENCY EXCHANGES: Not deleted
+  let exchangeQuery = supabase.from('currency_exchanges').select('*')
+    .eq('is_deleted', false);
+
+  if (dateFilter) {
+    exchangeQuery = exchangeQuery.gt('date', dateFilter);
+  }
+
+  const { data: exchanges } = await exchangeQuery;
+  if (exchanges) {
+    for (const ex of exchanges) {
+      const exchangeObj = rowToCurrencyExchange(ex);
+      // Outgoing: vault decreases
+      if (exchangeObj.outgoingCurrencyId === currencyId) {
+        delta -= exchangeObj.outgoingAmount;
+      }
+      // Incoming: vault increases
+      if (exchangeObj.incomingCurrencyId === currencyId) {
+        delta += exchangeObj.incomingAmount;
+      }
+    }
+  }
+
+  // Compute new balance
+  const newBalance = openingBalance + delta;
+
+  // Update vault
+  const { error } = await supabase.from('vaults').update({
+    balance: newBalance,
+    updated_at: new Date().toISOString(),
+  }).eq('id', vault.id);
+
+  if (error) throw new Error(error.message);
+
+  const { data: updatedRow } = await supabase.from('vaults').select('*').eq('id', vault.id).single();
+  return updatedRow ? rowToVault(updatedRow) : null;
 }
 
-export async function updateVaultOpeningBalance(currencyId: string, openingBalance: number): Promise<Vault | null> {
+export async function updateVaultBalance(_currencyId: string, _balanceDelta: number): Promise<Vault | null> {
+  // Deprecated: Balance is now computed from opening_balance + post-date operations
+  // Just recalculate
+  return await recalculateVaultBalance(_currencyId);
+}
+
+export async function updateVaultOpeningBalance(
+  currencyId: string,
+  openingBalance: number,
+  openingBalanceDate?: Date | null
+): Promise<Vault | null> {
   await initializeDatabase();
-  
+
   const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', currencyId);
   if (vaultRows && vaultRows.length > 0) {
     const vault = rowToVault(vaultRows[0]);
-    const diff = openingBalance - (vault.openingBalance || 0);
-    const { error } = await supabase.from('vaults').update({
+
+    const updateData: Record<string, unknown> = {
       opening_balance: openingBalance,
-      balance: vault.balance + diff,
       updated_at: new Date().toISOString(),
-    }).eq('id', vault.id);
+    };
+
+    if (openingBalanceDate !== undefined) {
+      updateData.opening_balance_date = openingBalanceDate ? openingBalanceDate.toISOString() : null;
+    }
+
+    const { error } = await supabase.from('vaults').update(updateData).eq('id', vault.id);
     if (error) throw new Error(error.message);
-    
-    const { data: updatedRow } = await supabase.from('vaults').select('*').eq('id', vault.id).single();
-    return updatedRow ? rowToVault(updatedRow) : null;
+
+    // Recalculate balance using the new opening balance + post-date operations
+    return await recalculateVaultBalance(currencyId);
   }
   return null;
 }
@@ -1319,18 +1462,10 @@ export async function addTransaction(data: {
   const { error } = await supabase.from('transactions').insert([transactionToRow(transaction)]);
   if (error) throw new Error(error.message);
   
-  // Update vault for complete cash transactions
+  // Recalculate vault balance for complete cash transactions
   if (isComplete && data.paymentType === 'CASH') {
-    const vaultCurrencyId = data.baseCurrencyId || data.currencyId;
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', vaultCurrencyId);
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      const newBalance = data.type === 'INCOME' ? vault.balance - data.amount : vault.balance + data.amount;
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
-    }
+    const vaultCurrencyId = data.isOverflowTransaction ? data.currencyId : (data.baseCurrencyId || data.currencyId);
+    await recalculateVaultBalance(vaultCurrencyId);
   }
   
   return transaction;
@@ -1354,20 +1489,6 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
   const effectiveFeesDirection = data.feesDirection ?? old.feesDirection;
   const effectiveType = data.type ?? old.type;
   const effectivePaymentType = data.paymentType ?? old.paymentType;
-  
-  // Reverse old vault effect if old was complete and cash
-  if (oldIsComplete && old.paymentType === 'CASH') {
-    const oldVaultCurrencyId = old.baseCurrencyId || old.currencyId;
-    const { data: oldVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', oldVaultCurrencyId);
-    if (oldVaultRows && oldVaultRows.length > 0) {
-      const oldVault = rowToVault(oldVaultRows[0]);
-      const reversed = old.type === 'INCOME' ? oldVault.balance + old.amount : oldVault.balance - old.amount;
-      await supabase.from('vaults').update({
-        balance: reversed,
-        updated_at: now.toISOString(),
-      }).eq('id', oldVault.id);
-    }
-  }
   
   // 🔸 إذا تم تمرير finalBalance يدويًا، نستخدمه مباشرة (للحركات غير المكتملة)
   const calculatedFinal = calculateFinalBalance(
@@ -1404,19 +1525,19 @@ export async function updateTransaction(id: string, data: Partial<Transaction>):
     transactionToRow(updateObj as Partial<Transaction>)
   ).eq('id', id);
   if (updateError) throw new Error(updateError.message);
-  
-  // Apply new vault effect if new is complete and cash
+
+  // Recalculate vault balance for affected currencies
+  const affectedCurrencyIds = new Set<string>();
+  if (oldIsComplete && old.paymentType === 'CASH') {
+    const oldVaultCurrencyId = old.isOverflowTransaction ? old.currencyId : (old.baseCurrencyId || old.currencyId);
+    affectedCurrencyIds.add(oldVaultCurrencyId);
+  }
   if (newIsComplete && effectivePaymentType === 'CASH') {
-    const vaultCurrencyId = (data.baseCurrencyId ?? data.currencyId) ?? (old.baseCurrencyId || old.currencyId);
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', vaultCurrencyId);
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      const newBalance = effectiveType === 'INCOME' ? vault.balance - effectiveAmount : vault.balance + effectiveAmount;
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
-    }
+    const newVaultCurrencyId = (data.isOverflowTransaction ? data.currencyId : (data.baseCurrencyId ?? data.currencyId)) ?? (old.isOverflowTransaction ? old.currencyId : (old.baseCurrencyId || old.currencyId));
+    affectedCurrencyIds.add(newVaultCurrencyId);
+  }
+  for (const cid of affectedCurrencyIds) {
+    await recalculateVaultBalance(cid);
   }
   
   const { data: updatedRow, error: refetchError } = await supabase.from('transactions').select('*').eq('id', id).single();
@@ -1432,30 +1553,10 @@ export async function deleteTransaction(id: string): Promise<void> {
   
   const transaction = rowToTransaction(txRow);
   
-  // Reverse vault effect for complete cash transactions
-  if ((transaction.isComplete !== false) && transaction.paymentType === 'CASH') {
-    const vaultCurrencyId = transaction.isOverflowTransaction
-      ? transaction.currencyId
-      : (transaction.baseCurrencyId || transaction.currencyId);
-    
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', vaultCurrencyId);
-    
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      
-      if (transaction.type === 'INCOME') {
-        newBalance = vault.balance + transaction.amount;
-      } else {
-        newBalance = vault.balance - transaction.amount;
-      }
-      
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: new Date().toISOString(),
-      }).eq('id', vault.id);
-    }
-  }
+  // Determine vault currency ID for recalculation
+  const vaultCurrencyId = transaction.isOverflowTransaction
+    ? transaction.currencyId
+    : (transaction.baseCurrencyId || transaction.currencyId);
   
   // If overflow transaction linked to a payment, remove the reference
   if (transaction.isOverflowTransaction && transaction.relatedPaymentId) {
@@ -1473,6 +1574,11 @@ export async function deleteTransaction(id: string): Promise<void> {
   
   const { error } = await supabase.from('transactions').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  
+  // Recalculate vault balance after deletion
+  if ((transaction.isComplete !== false) && transaction.paymentType === 'CASH') {
+    await recalculateVaultBalance(vaultCurrencyId);
+  }
 }
 
 // ============================================
@@ -1535,25 +1641,9 @@ export async function addDebt(data: {
   const { error } = await supabase.from('debts').insert([debtToRow(debt)]);
   if (error) throw new Error(error.message);
   
-  // Vault effect for CASH debts
+  // Recalculate vault balance for CASH debts
   if (debtMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', data.currencyId);
-    
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      
-      if (debtType === 'PAYABLE') {
-        newBalance = vault.balance + data.amount;
-      } else {
-        newBalance = vault.balance - data.amount;
-      }
-      
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
-    }
+    await recalculateVaultBalance(data.currencyId);
   }
   
   return debt;
@@ -1600,24 +1690,9 @@ export async function editDebtWithVaultReversal(id: string, newData: {
   if (!oldDebtRow) throw new Error('الدين غير موجود');
   const oldDebt = rowToDebt(oldDebtRow);
 
-  // عكس تأثير الدين القديم على الصندوق
-  if (oldDebt.debtMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', oldDebt.currencyId);
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      // عكس: لنا كان خصم → نعيد، علينا كان إضافة → نخصم
-      if (oldDebt.debtType === 'PAYABLE') {
-        newBalance = vault.balance - oldDebt.amount;
-      } else {
-        newBalance = vault.balance + oldDebt.amount;
-      }
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
-    }
-  }
+  const oldCurrencyId = oldDebt.currencyId;
+
+  // عكس تأثير الدين القديم على الصندوق - NO LONGER needed, recalculateVaultBalance handles it
 
   // 🔸 الخطوة 2: حساب finalBalance الجديد
   const newAmount = newData.amount ?? oldDebt.amount;
@@ -1654,23 +1729,15 @@ export async function editDebtWithVaultReversal(id: string, newData: {
   ).eq('id', id);
   if (updateError) throw new Error(updateError.message);
 
-  // 🔸 الخطوة 3: تطبيق تأثير الدين الجديد على الصندوق
-  if (newDebtMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', newCurrencyId);
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      // لنا + كاش → خصم من الصندوق
-      // علينا + كاش → إضافة للصندوق
-      if (newDebtType === 'PAYABLE') {
-        newBalance = vault.balance + newAmount;
-      } else {
-        newBalance = vault.balance - newAmount;
-      }
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
+  // Recalculate vault balances for old and new currencies (if changed)
+  const affectedCurrencyIds = new Set<string>();
+  affectedCurrencyIds.add(oldCurrencyId);
+  if (newCurrencyId !== oldCurrencyId) {
+    affectedCurrencyIds.add(newCurrencyId);
+  }
+  if (oldDebt.debtMode === 'CASH' || newDebtMode === 'CASH') {
+    for (const cid of affectedCurrencyIds) {
+      await recalculateVaultBalance(cid);
     }
   }
 
@@ -1732,25 +1799,9 @@ export async function editDebtPaymentWithVaultReversal(id: string, newData: {
 
   const oldPaymentMode = oldPayment.paymentMode || 'CASH';
   const oldPaymentDirection = oldPayment.paymentDirection || debt?.debtType || 'RECEIVABLE';
+  const oldCurrencyId = oldPayment.currencyId;
 
-  // عكس تأثير الدفعة القديمة على الصندوق
-  if (oldPaymentMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', oldPayment.currencyId);
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      // عكس: لنا كان خصم → نعيد، علينا كان إضافة → نخصم
-      if (oldPaymentDirection === 'RECEIVABLE') {
-        newBalance = vault.balance + oldPayment.amount;
-      } else {
-        newBalance = vault.balance - oldPayment.amount;
-      }
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
-    }
-  }
+  // عكس تأثير الدفعة القديمة على الصندوق - NO LONGER needed, recalculateVaultBalance handles it
 
   // 🔸 الخطوة 2: تحديث سجل الدفعة
   const newAmount = newData.amount ?? oldPayment.amount;
@@ -1773,23 +1824,15 @@ export async function editDebtPaymentWithVaultReversal(id: string, newData: {
   ).eq('id', id);
   if (updateError) throw new Error(updateError.message);
 
-  // 🔸 الخطوة 3: تطبيق تأثير الدفعة الجديدة على الصندوق
-  if (newPaymentMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', newCurrencyId);
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      // لنا + كاش → خصم من الصندوق
-      // علينا + كاش → إضافة للصندوق
-      if (newPaymentDirection === 'RECEIVABLE') {
-        newBalance = vault.balance - newAmount;
-      } else {
-        newBalance = vault.balance + newAmount;
-      }
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
+  // Recalculate vault balances for old and new currencies (if changed)
+  const affectedCurrencyIds = new Set<string>();
+  affectedCurrencyIds.add(oldCurrencyId);
+  if (newCurrencyId !== oldCurrencyId) {
+    affectedCurrencyIds.add(newCurrencyId);
+  }
+  if (oldPaymentMode === 'CASH' || newPaymentMode === 'CASH') {
+    for (const cid of affectedCurrencyIds) {
+      await recalculateVaultBalance(cid);
     }
   }
 
@@ -1828,25 +1871,12 @@ export async function deleteDebt(id: string): Promise<void> {
   
   const debt = rowToDebt(debtRow);
   
+  // Collect affected currency IDs for recalculation
+  const affectedCurrencyIds = new Set<string>();
+  
   // Reverse vault effect for CASH debts
   if (debt.debtMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', debt.currencyId);
-    
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newBalance = vault.balance;
-      
-      if (debt.debtType === 'PAYABLE') {
-        newBalance = vault.balance - debt.amount;
-      } else {
-        newBalance = vault.balance + debt.amount;
-      }
-      
-      await supabase.from('vaults').update({
-        balance: newBalance,
-        updated_at: new Date().toISOString(),
-      }).eq('id', vault.id);
-    }
+    affectedCurrencyIds.add(debt.currencyId);
   }
   
   // Process related payments
@@ -1855,26 +1885,9 @@ export async function deleteDebt(id: string): Promise<void> {
   
   for (const payment of payments) {
     const paymentMode = payment.paymentMode || 'CASH';
-    const paymentDirection = payment.paymentDirection || debt.debtType || 'RECEIVABLE';
     
     if (paymentMode === 'CASH') {
-      const { data: paymentVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', payment.currencyId);
-      
-      if (paymentVaultRows && paymentVaultRows.length > 0) {
-        const paymentVault = rowToVault(paymentVaultRows[0]);
-        let newPaymentBalance = paymentVault.balance;
-        
-        if (paymentDirection === 'RECEIVABLE') {
-          newPaymentBalance = paymentVault.balance + payment.amount;
-        } else {
-          newPaymentBalance = paymentVault.balance - payment.amount;
-        }
-        
-        await supabase.from('vaults').update({
-          balance: newPaymentBalance,
-          updated_at: new Date().toISOString(),
-        }).eq('id', paymentVault.id);
-      }
+      affectedCurrencyIds.add(payment.currencyId);
     }
     
     // Handle overflow transaction linked to payment
@@ -1883,27 +1896,9 @@ export async function deleteDebt(id: string): Promise<void> {
       
       if (overflowRow) {
         const overflowTransaction = rowToTransaction(overflowRow);
-        
         if (overflowTransaction.paymentType === 'CASH') {
-          const { data: overflowVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', overflowTransaction.currencyId);
-          
-          if (overflowVaultRows && overflowVaultRows.length > 0) {
-            const overflowVault = rowToVault(overflowVaultRows[0]);
-            let newOverflowBalance = overflowVault.balance;
-            
-            if (overflowTransaction.type === 'INCOME') {
-              newOverflowBalance = overflowVault.balance + overflowTransaction.amount;
-            } else {
-              newOverflowBalance = overflowVault.balance - overflowTransaction.amount;
-            }
-            
-            await supabase.from('vaults').update({
-              balance: newOverflowBalance,
-              updated_at: new Date().toISOString(),
-            }).eq('id', overflowVault.id);
-          }
+          affectedCurrencyIds.add(overflowTransaction.currencyId);
         }
-        
         await supabase.from('transactions').delete().eq('id', payment.overflowTransactionId);
       }
     }
@@ -1915,6 +1910,11 @@ export async function deleteDebt(id: string): Promise<void> {
   // Delete debt
   const { error } = await supabase.from('debts').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  
+  // Recalculate vault balances for all affected currencies
+  for (const cid of affectedCurrencyIds) {
+    await recalculateVaultBalance(cid);
+  }
 }
 
 // ============================================
@@ -2017,33 +2017,9 @@ export async function addDebtPayment(data: {
     }).eq('id', data.debtId);
   }
   
-  // Vault effect for CASH payments
+  // Recalculate vault balance for CASH payments
   if (paymentMode === 'CASH') {
-    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', data.currencyId);
-    
-    if (vaultRows && vaultRows.length > 0) {
-      const vault = rowToVault(vaultRows[0]);
-      let newVaultBalance = vault.balance;
-      
-      if (data.currentBalance !== undefined) {
-        if (data.currentBalance < 0) {
-          newVaultBalance = vault.balance - data.amount;
-        } else {
-          newVaultBalance = vault.balance + data.amount;
-        }
-      } else {
-        if (paymentDirection === 'RECEIVABLE') {
-          newVaultBalance = vault.balance - data.amount;
-        } else {
-          newVaultBalance = vault.balance + data.amount;
-        }
-      }
-      
-      await supabase.from('vaults').update({
-        balance: newVaultBalance,
-        updated_at: now.toISOString(),
-      }).eq('id', vault.id);
-    }
+    await recalculateVaultBalance(data.currencyId);
   }
   
   return payment;
@@ -2060,28 +2036,14 @@ export async function deleteDebtPayment(id: string): Promise<void> {
   const { data: debtRow } = await supabase.from('debts').select('*').eq('id', payment.debtId).single();
   const debt = debtRow ? rowToDebt(debtRow) : null;
   
+  // Collect affected currency IDs for recalculation
+  const affectedCurrencyIds = new Set<string>();
+  
   if (debt) {
     const paymentMode = payment.paymentMode || 'CASH';
-    const paymentDirection = payment.paymentDirection || debt.debtType || 'RECEIVABLE';
     
     if (paymentMode === 'CASH') {
-      const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', payment.currencyId);
-      
-      if (vaultRows && vaultRows.length > 0) {
-        const vault = rowToVault(vaultRows[0]);
-        let newBalance = vault.balance;
-        
-        if (paymentDirection === 'RECEIVABLE') {
-          newBalance = vault.balance + payment.amount;
-        } else {
-          newBalance = vault.balance - payment.amount;
-        }
-        
-        await supabase.from('vaults').update({
-          balance: newBalance,
-          updated_at: new Date().toISOString(),
-        }).eq('id', vault.id);
-      }
+      affectedCurrencyIds.add(payment.currencyId);
     }
     
     // Handle overflow transaction
@@ -2091,23 +2053,7 @@ export async function deleteDebtPayment(id: string): Promise<void> {
         const overflowTransaction = rowToTransaction(overflowRow);
         
         if (overflowTransaction.paymentType === 'CASH') {
-          const { data: overflowVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', overflowTransaction.currencyId);
-          
-          if (overflowVaultRows && overflowVaultRows.length > 0) {
-            const overflowVault = rowToVault(overflowVaultRows[0]);
-            let newOverflowBalance = overflowVault.balance;
-            
-            if (overflowTransaction.type === 'INCOME') {
-              newOverflowBalance = overflowVault.balance - overflowTransaction.amount;
-            } else {
-              newOverflowBalance = overflowVault.balance + overflowTransaction.amount;
-            }
-            
-            await supabase.from('vaults').update({
-              balance: newOverflowBalance,
-              updated_at: new Date().toISOString(),
-            }).eq('id', overflowVault.id);
-          }
+          affectedCurrencyIds.add(overflowTransaction.currencyId);
         }
         
         await supabase.from('transactions').delete().eq('id', payment.overflowTransactionId);
@@ -2131,6 +2077,11 @@ export async function deleteDebtPayment(id: string): Promise<void> {
   // Delete payment
   const { error } = await supabase.from('debt_payments').delete().eq('id', id);
   if (error) throw new Error(error.message);
+  
+  // Recalculate vault balances for all affected currencies
+  for (const cid of affectedCurrencyIds) {
+    await recalculateVaultBalance(cid);
+  }
 }
 
 // ============================================
@@ -2592,10 +2543,26 @@ export async function importAllData(
       }
     }
     
+    // After importing all data, recalculate vault balances
+    await recalculateAllVaultBalances();
+    
     return { success: true, message: 'تم استيراد البيانات بنجاح' };
   } catch (error) {
     console.error('Error importing data:', error);
     return { success: false, message: 'حدث خطأ أثناء استيراد البيانات' };
+  }
+}
+
+/**
+ * Recalculate all vault balances after import
+ * Called after importing all data to ensure consistency
+ */
+export async function recalculateAllVaultBalances(): Promise<void> {
+  await initializeDatabase();
+  const { data: vaultRows } = await supabase.from('vaults').select('*');
+  const vaults = (vaultRows || []).map(rowToVault);
+  for (const vault of vaults) {
+    await recalculateVaultBalance(vault.currencyId);
   }
 }
 
@@ -2613,12 +2580,13 @@ export async function clearAllData(): Promise<{ success: boolean; message: strin
     // Delete currency exchanges
     await supabase.from('currency_exchanges').delete().neq('id', '__never_match__');
     
-    // Reset vault balances to opening balance
+    // Reset vault balances - recalculate from opening balance (now 0 operations remain)
     const { data: vaultRows } = await supabase.from('vaults').select('*');
     const vaults = (vaultRows || []).map(rowToVault);
     for (const vault of vaults) {
       await supabase.from('vaults').update({
         balance: vault.openingBalance || 0,
+        opening_balance_date: null,
         updated_at: new Date().toISOString(),
       }).eq('id', vault.id);
     }
@@ -2745,24 +2713,10 @@ export async function addCurrencyExchange(data: {
   
   const { error } = await supabase.from('currency_exchanges').insert([currencyExchangeToRow(exchange)]);
   if (error) throw new Error(error.message);
-  
-  // Update vault balances
-  if (outgoingVault) {
-    await supabase.from('vaults').update({
-      balance: outgoingVault.balance - data.outgoingAmount,
-      updated_at: now.toISOString(),
-    }).eq('id', outgoingVault.id);
-  }
-  
-  const { data: incomingVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', data.incomingCurrencyId);
-  const incomingVault = incomingVaultRows && incomingVaultRows.length > 0 ? rowToVault(incomingVaultRows[0]) : null;
-  
-  if (incomingVault) {
-    await supabase.from('vaults').update({
-      balance: incomingVault.balance + data.incomingAmount,
-      updated_at: now.toISOString(),
-    }).eq('id', incomingVault.id);
-  }
+
+  // Recalculate vault balances for both currencies
+  await recalculateVaultBalance(data.outgoingCurrencyId);
+  await recalculateVaultBalance(data.incomingCurrencyId);
   
   return exchange;
 }
@@ -2779,31 +2733,16 @@ export async function deleteCurrencyExchange(id: string): Promise<void> {
   
   const now = new Date();
   
-  // Reverse effect on vaults
-  const { data: outgoingVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', exchange.outgoingCurrencyId);
-  if (outgoingVaultRows && outgoingVaultRows.length > 0) {
-    const outgoingVault = rowToVault(outgoingVaultRows[0]);
-    await supabase.from('vaults').update({
-      balance: outgoingVault.balance + exchange.outgoingAmount,
-      updated_at: now.toISOString(),
-    }).eq('id', outgoingVault.id);
-  }
-  
-  const { data: incomingVaultRows } = await supabase.from('vaults').select('*').eq('currency_id', exchange.incomingCurrencyId);
-  if (incomingVaultRows && incomingVaultRows.length > 0) {
-    const incomingVault = rowToVault(incomingVaultRows[0]);
-    await supabase.from('vaults').update({
-      balance: incomingVault.balance - exchange.incomingAmount,
-      updated_at: now.toISOString(),
-    }).eq('id', incomingVault.id);
-  }
-  
   // Soft delete
   const { error } = await supabase.from('currency_exchanges').update({
     is_deleted: true,
     updated_at: now.toISOString(),
   }).eq('id', id);
   if (error) throw new Error(error.message);
+
+  // Recalculate vault balances for both currencies
+  await recalculateVaultBalance(exchange.outgoingCurrencyId);
+  await recalculateVaultBalance(exchange.incomingCurrencyId);
 }
 
 export async function getExchangeStats(): Promise<{

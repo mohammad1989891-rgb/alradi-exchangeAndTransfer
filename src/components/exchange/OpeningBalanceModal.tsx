@@ -11,6 +11,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   Select,
   SelectContent,
@@ -20,7 +22,8 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Wallet, Save, Trash2 } from 'lucide-react';
+import { Wallet, Save, Trash2, CalendarIcon } from 'lucide-react';
+import { format } from 'date-fns';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,6 +48,7 @@ export function OpeningBalanceModal() {
   
   const [selectedVaultId, setSelectedVaultId] = useState<string>('');
   const [openingBalance, setOpeningBalance] = useState<string>('0');
+  const [openingBalanceDate, setOpeningBalanceDate] = useState<Date | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
@@ -54,9 +58,11 @@ export function OpeningBalanceModal() {
       if (editingVault) {
         setSelectedVaultId(editingVault.currencyId);
         setOpeningBalance(String(editingVault.openingBalance || 0));
+        setOpeningBalanceDate(editingVault.openingBalanceDate ? new Date(editingVault.openingBalanceDate) : undefined);
       } else {
         setSelectedVaultId('');
         setOpeningBalance('0');
+        setOpeningBalanceDate(undefined);
       }
     }
   }, [isOpeningBalanceModalOpen, editingVault]);
@@ -69,7 +75,7 @@ export function OpeningBalanceModal() {
     
     setIsLoading(true);
     try {
-      await updateVaultOpeningBalance(selectedVaultId, parseFloat(openingBalance) || 0);
+      await updateVaultOpeningBalance(selectedVaultId, parseFloat(openingBalance) || 0, openingBalanceDate || null);
       closeOpeningBalanceModal();
     } catch (error) {
       console.error('Error saving opening balance:', error);
@@ -83,7 +89,7 @@ export function OpeningBalanceModal() {
     
     setIsLoading(true);
     try {
-      await updateVaultOpeningBalance(selectedVaultId, 0);
+      await updateVaultOpeningBalance(selectedVaultId, 0, null);
       setShowDeleteConfirm(false);
       closeOpeningBalanceModal();
     } catch (error) {
@@ -151,6 +157,33 @@ export function OpeningBalanceModal() {
               </div>
             </div>
             
+            {/* Opening Balance Date */}
+            <div>
+              <label className="text-sm text-muted-foreground mb-2 block">تاريخ رصيد أول المدة</label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    className={cn(
+                      'w-full flex items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background',
+                      'hover:bg-accent hover:text-accent-foreground',
+                      !openingBalanceDate && 'text-muted-foreground'
+                    )}
+                  >
+                    {openingBalanceDate ? format(openingBalanceDate, 'yyyy/MM/dd') : 'اختر التاريخ'}
+                    <CalendarIcon className="h-4 w-4 opacity-50" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={openingBalanceDate}
+                    onSelect={setOpeningBalanceDate}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+            
             {/* Current Balance Preview */}
             {selectedVault && (
               <div className="rounded-xl bg-muted/50 p-4">
@@ -163,13 +196,20 @@ export function OpeningBalanceModal() {
                   </div>
                   <div className="flex justify-between items-center">
                     <span className="text-sm text-muted-foreground">رصيد أول المدة الحالي</span>
-                    <span className={cn(
-                      'font-semibold',
-                      (selectedVault.openingBalance || 0) > 0 ? 'text-emerald-600' : 
-                      (selectedVault.openingBalance || 0) < 0 ? 'text-red-600' : ''
-                    )}>
-                      {formatNumber(selectedVault.openingBalance || 0)} {selectedCurrency?.symbol}
-                    </span>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <span className={cn(
+                        'font-semibold',
+                        (selectedVault.openingBalance || 0) > 0 ? 'text-emerald-600' : 
+                        (selectedVault.openingBalance || 0) < 0 ? 'text-red-600' : ''
+                      )}>
+                        {formatNumber(selectedVault.openingBalance || 0)} {selectedCurrency?.symbol}
+                      </span>
+                      {selectedVault.openingBalanceDate && (
+                        <span className="text-[10px] text-muted-foreground">
+                          منذ {format(new Date(selectedVault.openingBalanceDate), 'yyyy/MM/dd')}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="border-t border-border pt-2 mt-2">
                     <div className="flex justify-between items-center">

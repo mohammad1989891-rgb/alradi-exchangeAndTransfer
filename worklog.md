@@ -42,3 +42,58 @@ Stage Summary:
 - Also available at: https://my-project-xi-one-81.vercel.app (newer project)
 - Multi-stage data deletion protection feature applied before deployment
 - GitHub token expired - user needs to update it for future auto-deploys from GitHub pushes
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Implement Opening Balance System with recalculateVaultBalance()
+
+Work Log:
+- Added `opening_balance_date` column to Supabase vaults table via Management API (ALTER TABLE)
+- Updated Prisma schema with `openingBalanceDate DateTime?` field and ran `bun run db:push`
+- Updated Vault interface in supabaseDb.ts: added `openingBalanceDate: Date | null`
+- Updated rowToVault: handles openingBalanceDate date conversion
+- Updated vaultToRow: handles opening_balance_date ISO serialization
+- Created `recalculateVaultBalance(currencyId)` function - the CORE of the system:
+  - Formula: balance = opening_balance + sum(post-date operations)
+  - Sums 4 operation types: transactions (complete, cash), debts (cash), debt payments (cash), currency exchanges (not deleted)
+  - Filters by opening_balance_date using `gt` (greater than) to exclude operations ON the date
+  - If opening_balance_date is null, includes ALL operations (backward compatible)
+- Replaced ALL imperative vault balance updates with recalculateVaultBalance():
+  1. addTransaction() - recalculate for complete cash transactions
+  2. updateTransaction() - recalculate for affected old and new currency IDs
+  3. deleteTransaction() - recalculate after deletion
+  4. addDebt() - recalculate for CASH debts
+  5. editDebtWithVaultReversal() - recalculate for old and new currency IDs
+  6. deleteDebt() - collect affected currency IDs and recalculate after deletion
+  7. addDebtPayment() - recalculate for CASH payments
+  8. editDebtPaymentWithVaultReversal() - recalculate for old and new currency IDs
+  9. deleteDebtPayment() - collect affected currency IDs and recalculate after deletion
+  10. addCurrencyExchange() - recalculate for both outgoing and incoming currencies
+  11. deleteCurrencyExchange() - recalculate for both currencies
+- Updated updateVaultOpeningBalance() to accept optional `openingBalanceDate` parameter
+- Updated updateVaultBalance() to call recalculateVaultBalance() (deprecated wrapper)
+- Added recalculateAllVaultBalances() for use after data import
+- Updated importAllData() to call recalculateAllVaultBalances() after import
+- Updated clearAllData() to reset opening_balance_date to null
+- Updated useSupabaseData hook:
+  - updateVaultOpeningBalance now accepts (currencyId, balance, date?)
+  - Added recalculateVaultBalance exposed function
+- Updated OpeningBalanceModal.tsx:
+  - Added date picker using Calendar + Popover components
+  - Added openingBalanceDate state initialized from editingVault
+  - Save and delete now pass date parameter
+  - Current balance preview shows opening balance date
+- Updated VaultCard.tsx:
+  - Shows "منذ yyyy/MM/dd" below opening balance when date is set
+  - Used date-fns format() for consistent date display
+- Updated types/index.ts: added openingBalanceDate to AccountVault interface
+- Verified: lint passes, build succeeds, dev server compiles and serves pages
+
+Stage Summary:
+- Opening Balance System fully implemented with date-aware recalculation
+- All vault balance updates now use recalculateVaultBalance() instead of imperative deltas
+- Vault balance = opening_balance + all operations after opening_balance_date
+- UI shows opening balance date in both VaultCard and OpeningBalanceModal
+- Date picker allows users to set the effective date for opening balance
+- Backward compatible: if opening_balance_date is null, all operations are included

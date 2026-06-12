@@ -347,3 +347,26 @@ Stage Summary:
 - UI Freeze maintained (no design changes)
 - Changes committed as 67048ee
 - Vercel deployment: https://alradi-exchange-and-transfer.vercel.app
+
+---
+Task ID: 8
+Agent: Main Agent
+Task: Fix sidebar/drawer overflow on mobile devices (UI Freeze)
+
+Work Log:
+- Diagnosed issue: SideMenu and ArchiveModal sheets used fixed pixel widths that overflow on mobile screens
+- SideMenu.tsx: `w-[320px] sm:w-[350px]` → changed to `w-[80vw] sm:w-[350px] max-w-[350px] overflow-x-hidden`
+- ArchiveModal.tsx: `w-[400px] sm:w-[540px]` → changed to `w-[85vw] sm:w-[540px] max-w-[540px] overflow-x-hidden`
+- Verified no horizontal overflow on mobile (375px viewport): scrollWidth = clientWidth = 375px
+- Verified archive modal displays all interactive elements properly on mobile
+- Verified side menu displays all menu items properly on mobile
+- Verified desktop viewport still works correctly with sm: breakpoint widths
+- Lint passes with no errors
+- Base Sheet component already had: fixed positioning, overlay (bg-black/50), slide animations, close button
+
+Stage Summary:
+- Both sheets now use viewport-relative widths on mobile (80vw/85vw) and fixed widths on desktop
+- Added max-w constraints to prevent oversizing on tablets
+- Added overflow-x-hidden to prevent any horizontal scroll within sheets
+- No design/color/shape changes - only positioning and behavior fixes
+- All existing features preserved: overlay, animations, close button, responsive layout

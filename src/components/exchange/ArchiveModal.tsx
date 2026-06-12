@@ -351,7 +351,7 @@ export function ArchiveModal() {
 
   return (
     <Sheet open={isArchiveModalOpen} onOpenChange={(open) => { if (!open) closeArchiveModal(); }}>
-      <SheetContent side="left" className="w-[400px] sm:w-[540px] max-h-screen overflow-y-auto p-0" dir="rtl">
+      <SheetContent side="left" className="w-[85vw] sm:w-[540px] max-w-[540px] max-h-screen overflow-y-auto overflow-x-hidden p-0" dir="rtl">
         <SheetHeader className="px-6 pt-6 pb-2 shrink-0">
           <SheetTitle className="flex items-center gap-3 text-xl">
             <div className="p-2 rounded-lg bg-amber-500/10">

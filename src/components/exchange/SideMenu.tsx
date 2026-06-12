@@ -107,7 +107,7 @@ export function SideMenu() {
   return (
     <>
       <Sheet open={isSideMenuOpen} onOpenChange={closeSideMenu}>
-        <SheetContent side="right" className="w-[320px] sm:w-[350px]">
+        <SheetContent side="right" className="w-[80vw] sm:w-[350px] max-w-[350px] overflow-x-hidden">
           <SheetHeader>
             <SheetTitle className="text-xl">القائمة الرئيسية</SheetTitle>
           </SheetHeader>

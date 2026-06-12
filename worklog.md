@@ -266,3 +266,63 @@ Stage Summary:
   3. إعداد قاعدة البيانات: Archive setup correctly returns success when columns exist, clear SQL when they don't
 - Root cause: Missing env vars + non-existent `exec_sql` RPC + missing `schema cache` error detection
 - UI Freeze maintained - no visual design changes
+
+---
+Task ID: 1
+Agent: Bug Fix Agent
+Task: Fix three server connection errors in Settings page (backup setup, storage, archive setup)
+
+Work Log:
+- Root cause analysis:
+  - `backups` table does NOT exist in Supabase
+  - `is_archived` columns do NOT exist in Supabase tables
+  - `/api/backup/setup` and `/api/archive/setup` routes tried to create them using `exec_sql` RPC which DOESN'T EXIST in Supabase
+  - `StorageDashboard` component had `debtPayments: unknown[] = []` hardcoded as empty instead of getting from useSupabaseData
+- Fix 1: Updated `/api/backup/setup/route.ts`:
+  - Changed `POST` to accept `NextRequest` and parse `dbPassword` from request body
+  - When `dbPassword` is provided, uses `pg` package with dynamic import to connect directly to Supabase PostgreSQL
+  - Connection string pattern: `postgresql://postgres.hdlpvtuplwthqcksaynt:{password}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`
+  - Uses same pattern as `/api/setup-supabase/route.ts` (ssl, timeouts, cleanup)
+  - If no password provided, returns `needPassword: true` with SQL for manual execution
+  - Friendly Arabic error messages for auth failures, timeouts, connection errors
+- Fix 2: Updated `/api/archive/setup/route.ts`:
+  - Same pattern: accepts `dbPassword` in request body
+  - When provided, uses `pg` to add `is_archived` columns and indexes directly
+  - Also adds `opening_balance_date` column to vaults if missing
+  - Falls back to providing SQL for manual execution when no password
+  - Friendly Arabic error messages
+- Fix 3: Updated `SettingsPage.tsx`:
+  - Added `dbPassword` and `showDbPassword` state variables
+  - Added localStorage persistence for dbPassword (saves on change, loads on mount)
+  - Added password input field with eye toggle in "إعداد جدول النسخ الاحتياطي" section (before setup button)
+  - Added password input field with eye toggle in "إعداد قاعدة البيانات" section (before setup button)
+  - Both inputs share the same `dbPassword` state (entered once, used in both)
+  - Helper text: "كلمة مرور قاعدة البيانات من Supabase (تُحفظ محلياً لسهولة الاستخدام)"
+  - Setup buttons disabled when no password provided
+  - Updated fetch calls to pass `dbPassword` in JSON body with Content-Type header
+- Fix 4: Updated `StorageDashboard.tsx`:
+  - Changed `debtPayments` from hardcoded `unknown[] = []` to get from `useSupabaseData()` hook
+  - Combined `isLoading` and `debtPayments` into single hook call
+  - Added `initError` and `tablesMissing` from useSupabaseData
+  - Added error state UI: shows Arabic error message when data fails to load
+  - Error message differentiates between missing tables and other init errors
+- Fix 5: Updated `supabase/migration.sql`:
+  - Added `backups` table definition (id, reason, data, record_counts, size_bytes, created_at)
+  - Added `is_archived` boolean columns to transactions, debts, debt_payments, currency_exchanges
+  - Added `opening_balance_date` to vaults
+  - Added indexes for archive system (backups, is_archived, type)
+  - Added RLS enable + policy for backups table
+  - Added backups to realtime publication
+  - All using IF NOT EXISTS / IF NOT EXISTS for safe re-runs
+- Lint passes with no errors
+- Dev server compiles and serves pages correctly
+
+Stage Summary:
+- All three server connection errors fixed:
+  1. إدارة النسخ المحفوظة: Now uses pg package with dbPassword to create backups table directly
+  2. إدارة التخزين: StorageDashboard now gets debtPayments from useSupabaseData hook + shows error state
+  3. إعداد قاعدة البيانات: Now uses pg package with dbPassword to add is_archived columns directly
+- Users enter their Supabase DB password once (persisted in localStorage) to enable automatic table/column creation
+- Fallback: if no password, clear SQL provided for manual execution in Supabase SQL Editor
+- UI Freeze maintained - only additive changes (password inputs added, no design changes)
+- All new text in Arabic matching existing UI language

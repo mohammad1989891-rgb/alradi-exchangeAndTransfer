@@ -101,8 +101,7 @@ const STORAGE_LIMIT_MB = 500;
 // ============================================
 export function StorageDashboard() {
   const { currencies, vaults, accounts, transactions, debts, currencyExchanges } = useAppStore();
-  const debtPayments: unknown[] = [];
-  const { isLoading: isDataLoading } = useSupabaseData();
+  const { debtPayments, isLoading: isDataLoading, initError, tablesMissing } = useSupabaseData();
   const [activeChart, setActiveChart] = useState<'bar' | 'line'>('bar');
 
   // Compute table info from loaded data
@@ -231,6 +230,27 @@ export function StorageDashboard() {
           <div className="flex items-center gap-3 text-muted-foreground">
             <RefreshCw className="w-5 h-5 animate-spin" />
             <span>جاري تحليل التخزين...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Error state
+  if (initError || tablesMissing) {
+    return (
+      <div className="space-y-4">
+        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+          <div className="flex items-center gap-2">
+            <AlertOctagon className="w-5 h-5 text-red-500 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-red-700 dark:text-red-400">فشل في تحميل بيانات التخزين</p>
+              <p className="text-xs text-red-600 dark:text-red-500 mt-1">
+                {tablesMissing
+                  ? 'بعض الجداول غير موجودة في قاعدة البيانات. يرجى إعداد قاعدة البيانات أولاً.'
+                  : initError || 'حدث خطأ أثناء تحميل البيانات'}
+              </p>
+            </div>
           </div>
         </div>
       </div>

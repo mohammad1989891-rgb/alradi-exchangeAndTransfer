@@ -1,10 +1,10 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 // ============================================
 // Archive Setup API
 // 🔸 Checks if is_archived column exists and adds it if possible
-// 🔸 Uses Supabase REST API (not exec_sql RPC which doesn't exist)
+// 🔸 Accepts dbPassword to use pg package for direct SQL execution
 // 🔸 Falls back to providing SQL for manual execution
 // ============================================
 
@@ -34,10 +34,22 @@ CREATE INDEX IF NOT EXISTS idx_debt_payments_is_archived ON debt_payments(is_arc
 
 CREATE INDEX IF NOT EXISTS idx_currency_exchanges_date ON currency_exchanges(date);
 CREATE INDEX IF NOT EXISTS idx_currency_exchanges_is_archived ON currency_exchanges(is_archived);
+
+-- Add opening_balance_date to vaults if missing
+ALTER TABLE vaults ADD COLUMN IF NOT EXISTS opening_balance_date TIMESTAMPTZ;
 `;
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   try {
+    // Parse request body for dbPassword
+    let dbPassword = '';
+    try {
+      const body = await request.json();
+      dbPassword = body.dbPassword || '';
+    } catch {
+      // No body or invalid JSON, continue without password
+    }
+
     // Validate configuration
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       return NextResponse.json({
@@ -73,7 +85,7 @@ export async function POST() {
             results[table] = 'الجدول غير موجود — يجب إعداد قاعدة البيانات أولاً';
             allExist = false;
           } else if (errMsg.includes('column') || errMsg.includes('is_archived')) {
-            results[table] = 'عمود is_archived غير موجود — يحاج إضافة يدوية';
+            results[table] = 'عمود is_archived غير موجود — يحتاج إضافة';
             allExist = false;
           } else {
             // Might be RLS or other error — assume column might exist
@@ -95,38 +107,76 @@ export async function POST() {
       });
     }
 
-    // Try to execute the migration SQL via exec_sql RPC (may not exist)
-    if (process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    // If dbPassword is provided, use pg to add columns directly
+    if (dbPassword) {
       try {
-        const sqlResponse = await fetch(`${SUPABASE_URL}/rest/v1/rpc/exec_sql`, {
-          method: 'POST',
-          headers: {
-            apikey: SUPABASE_SERVICE_KEY,
-            Authorization: `Bearer ${SUPABASE_SERVICE_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ query: MIGRATION_SQL }),
+        const { Client } = await import('pg');
+        const projectRef = 'hdlpvtuplwthqcksaynt';
+        const connectionString = `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`;
+
+        const client = new Client({
+          connectionString,
+          ssl: { rejectUnauthorized: false },
+          connectionTimeoutMillis: 10000,
+          query_timeout: 30000,
+          statement_timeout: 30000,
         });
 
-        if (sqlResponse.ok) {
+        try {
+          const connectPromise = client.connect();
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(() => reject(new Error('انتهت مهلة الاتصال — تأكد من أن قاعدة البيانات متاحة وكلمة المرور صحيحة')), 15000);
+          });
+          await Promise.race([connectPromise, timeoutPromise]);
+
+          // Execute the migration SQL
+          await client.query(MIGRATION_SQL);
+
+          await client.end();
+
           return NextResponse.json({
             success: true,
             message: 'تم إضافة أعمدة الأرشفة والفهارس بنجاح ✓',
           });
+        } catch (dbError) {
+          try {
+            const endPromise = client.end();
+            const cleanupTimeout = new Promise<void>((resolve) => setTimeout(() => resolve(), 3000));
+            await Promise.race([endPromise, cleanupTimeout]);
+          } catch {}
+          throw dbError;
         }
-      } catch {
-        // exec_sql RPC doesn't exist, fall through to manual instructions
+      } catch (pgError) {
+        const pgMessage = pgError instanceof Error ? pgError.message : 'Unknown error';
+        let friendlyMessage = pgMessage;
+        if (pgMessage.includes('password authentication failed')) {
+          friendlyMessage = 'كلمة مرور قاعدة البيانات غير صحيحة';
+        } else if (pgMessage.includes('ENOTFOUND') || pgMessage.includes('tenant/user')) {
+          friendlyMessage = 'فشل الاتصال — تأكد من صحة كلمة مرور قاعدة البيانات';
+        } else if (pgMessage.includes('مهلة الاتصال') || pgMessage.includes('timeout')) {
+          friendlyMessage = 'انتهت مهلة الاتصال — تأكد من صحة كلمة المرور وأن قاعدة البيانات متاحة';
+        } else if (pgMessage.includes('3D000') || pgMessage.includes('database')) {
+          friendlyMessage = 'قاعدة البيانات غير موجودة — تأكد من أن الجداول الأساسية موجودة أولاً';
+        }
+        return NextResponse.json({
+          success: false,
+          error: friendlyMessage,
+          results,
+          migrationSQL: MIGRATION_SQL.trim(),
+          note: 'فشل الاتصال المباشر بقاعدة البيانات. يمكنك تشغيل SQL التالي يدوياً في Supabase SQL Editor.',
+        });
       }
     }
 
-    // Cannot create automatically — provide SQL for manual execution
+    // No password provided — provide SQL for manual execution
     return NextResponse.json({
       success: false,
       results,
       migrationSQL: MIGRATION_SQL.trim(),
+      needPassword: true,
       note: allExist
         ? 'جميع الأعمدة موجودة. لا حاجة لعملية ترحيل.'
-        : 'لا يمكن إضافة الأعمدة تلقائياً. قم بتشغيل SQL التالي في Supabase SQL Editor لإضافة أعمدة الأرشفة والفهارس.',
+        : 'لا يمكن إضافة الأعمدة تلقائياً بدون كلمة مرور قاعدة البيانات. أدخل كلمة مرور قاعدة البيانات أو قم بتشغيل SQL التالي يدوياً في Supabase SQL Editor.',
     });
   } catch (error) {
     return NextResponse.json({

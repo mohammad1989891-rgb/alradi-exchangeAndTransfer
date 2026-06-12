@@ -98,6 +98,10 @@ export function SettingsPage() {
   const [newUsername, setNewUsername] = useState('');
   const [isChangingUsername, setIsChangingUsername] = useState(false);
 
+  // Database Password (for backup & archive setup)
+  const [dbPassword, setDbPassword] = useState('');
+  const [showDbPassword, setShowDbPassword] = useState(false);
+
   // Archive
   const [archiveMonths, setArchiveMonths] = useState(6);
   const [isArchiving, setIsArchiving] = useState(false);
@@ -132,7 +136,21 @@ export function SettingsPage() {
     }).catch(() => {
       setBackupsTableExists(false);
     });
+    // Load saved database password
+    const savedDbPassword = localStorage.getItem('dbPassword');
+    if (savedDbPassword) {
+      setDbPassword(savedDbPassword);
+    }
   }, []);
+
+  // Save database password to localStorage when it changes
+  useEffect(() => {
+    if (dbPassword) {
+      localStorage.setItem('dbPassword', dbPassword);
+    } else {
+      localStorage.removeItem('dbPassword');
+    }
+  }, [dbPassword]);
 
   // Check backups table existence when backup-management section is expanded
   // (handled in the section toggle click handler below)
@@ -598,7 +616,11 @@ export function SettingsPage() {
     setIsSettingUp(true);
     setArchiveSetupResult(null);
     try {
-      const response = await fetch('/api/archive/setup', { method: 'POST' });
+      const response = await fetch('/api/archive/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbPassword }),
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -741,7 +763,11 @@ export function SettingsPage() {
     setIsSettingUpBackups(true);
     setBackupSetupResult(null);
     try {
-      const response = await fetch('/api/backup/setup', { method: 'POST' });
+      const response = await fetch('/api/backup/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbPassword }),
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }
@@ -1149,6 +1175,23 @@ export function SettingsPage() {
                   <p className="text-xs text-muted-foreground">يجب إنشاء جدول backups في قاعدة البيانات</p>
                 </div>
               </div>
+              <div className="relative mb-3">
+                <Input
+                  type={showDbPassword ? 'text' : 'password'}
+                  placeholder="كلمة مرور قاعدة البيانات (Supabase)"
+                  value={dbPassword}
+                  onChange={(e) => setDbPassword(e.target.value)}
+                  className="pr-10"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowDbPassword(!showDbPassword)}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                >
+                  {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase لإنشاء الجدول تلقائياً (تُحفظ محلياً)</p>
               <Button
                 onClick={handleSetupBackups}
                 disabled={isSettingUpBackups}
@@ -1156,7 +1199,7 @@ export function SettingsPage() {
                 className="w-full"
               >
                 {isSettingUpBackups ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
-                {isSettingUpBackups ? 'جاري الإعداد...' : 'إعداد جدول النسخ الاحتياطي'}
+                {isSettingUpBackups ? 'جاري الإعداد...' : dbPassword ? 'إعداد جدول النسخ الاحتياطي' : 'محاولة الإعداد (أدخل كلمة المرور للإنشاء التلقائي)'}
               </Button>
               {backupSetupResult && (
                 <p className={cn('text-xs mt-2', backupSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
@@ -1402,6 +1445,23 @@ export function SettingsPage() {
                 <p className="text-xs text-muted-foreground">إضافة عمود الأرشفة والفهارس لتحسين الأداء</p>
               </div>
             </div>
+            <div className="relative mb-3">
+              <Input
+                type={showDbPassword ? 'text' : 'password'}
+                placeholder="كلمة مرور قاعدة البيانات (اختياري - للإنشاء التلقائي)"
+                value={dbPassword}
+                onChange={(e) => setDbPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowDbPassword(!showDbPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase للإنشاء التلقائي، أو اتركها فارغة للتحقق فقط</p>
             <Button
               onClick={handleSetupArchive}
               disabled={isSettingUp}

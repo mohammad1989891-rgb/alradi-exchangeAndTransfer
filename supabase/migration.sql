@@ -199,6 +199,31 @@ CREATE TABLE IF NOT EXISTS vehicles_settings (
 );
 
 -- ============================================
+-- Backups Table (for Backup System)
+-- ============================================
+CREATE TABLE IF NOT EXISTS backups (
+  id TEXT PRIMARY KEY,
+  reason TEXT NOT NULL DEFAULT 'manual',
+  data JSONB NOT NULL,
+  record_counts JSONB DEFAULT '{}',
+  size_bytes INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ============================================
+-- Archive columns (is_archived) for existing tables
+-- ============================================
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
+ALTER TABLE debts ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
+ALTER TABLE debt_payments ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
+ALTER TABLE currency_exchanges ADD COLUMN IF NOT EXISTS is_archived boolean DEFAULT false;
+
+-- ============================================
+-- Opening balance date for vaults
+-- ============================================
+ALTER TABLE vaults ADD COLUMN IF NOT EXISTS opening_balance_date TIMESTAMPTZ;
+
+-- ============================================
 -- Indexes for performance
 -- ============================================
 CREATE INDEX IF NOT EXISTS idx_vaults_currency_id ON vaults(currency_id);
@@ -213,6 +238,15 @@ CREATE INDEX IF NOT EXISTS idx_debt_payments_debt_id ON debt_payments(debt_id);
 CREATE INDEX IF NOT EXISTS idx_currency_exchanges_date ON currency_exchanges(date DESC);
 CREATE INDEX IF NOT EXISTS idx_vehicle_transactions_vehicle_id ON vehicle_transactions(vehicle_id);
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+-- Indexes for archive system
+CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_backups_reason ON backups(reason);
+CREATE INDEX IF NOT EXISTS idx_transactions_is_archived ON transactions(is_archived);
+CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+CREATE INDEX IF NOT EXISTS idx_debts_is_archived ON debts(is_archived);
+CREATE INDEX IF NOT EXISTS idx_debt_payments_is_archived ON debt_payments(is_archived);
+CREATE INDEX IF NOT EXISTS idx_currency_exchanges_is_archived ON currency_exchanges(is_archived);
 
 -- ============================================
 -- Row Level Security (RLS) Policies
@@ -233,6 +267,7 @@ ALTER TABLE vehicles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicle_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE shared_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vehicles_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE backups ENABLE ROW LEVEL SECURITY;
 
 -- Drop existing policies first (safe re-run)
 DROP POLICY IF EXISTS "Allow all on currencies" ON currencies;
@@ -247,6 +282,7 @@ DROP POLICY IF EXISTS "Allow all on vehicles" ON vehicles;
 DROP POLICY IF EXISTS "Allow all on vehicle_transactions" ON vehicle_transactions;
 DROP POLICY IF EXISTS "Allow all on shared_transactions" ON shared_transactions;
 DROP POLICY IF EXISTS "Allow all on vehicles_settings" ON vehicles_settings;
+DROP POLICY IF EXISTS "Allow all on backups" ON backups;
 
 -- Also drop policies from old naming convention
 DROP POLICY IF EXISTS "Allow all operations on currencies" ON currencies;
@@ -261,6 +297,7 @@ DROP POLICY IF EXISTS "Allow all operations on vehicles" ON vehicles;
 DROP POLICY IF EXISTS "Allow all operations on vehicle_transactions" ON vehicle_transactions;
 DROP POLICY IF EXISTS "Allow all operations on shared_transactions" ON shared_transactions;
 DROP POLICY IF EXISTS "Allow all operations on vehicles_settings" ON vehicles_settings;
+DROP POLICY IF EXISTS "Allow all operations on backups" ON backups;
 
 -- Create policies that allow all operations for authenticated and anon users
 CREATE POLICY "Allow all on currencies" ON currencies FOR ALL USING (true) WITH CHECK (true);
@@ -275,6 +312,7 @@ CREATE POLICY "Allow all on vehicles" ON vehicles FOR ALL USING (true) WITH CHEC
 CREATE POLICY "Allow all on vehicle_transactions" ON vehicle_transactions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on shared_transactions" ON shared_transactions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on vehicles_settings" ON vehicles_settings FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
 -- Enable Realtime for all tables
@@ -291,6 +329,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE vehicles;
 ALTER PUBLICATION supabase_realtime ADD TABLE vehicle_transactions;
 ALTER PUBLICATION supabase_realtime ADD TABLE shared_transactions;
 ALTER PUBLICATION supabase_realtime ADD TABLE vehicles_settings;
+ALTER PUBLICATION supabase_realtime ADD TABLE backups;
 
 -- ============================================
 -- Insert default admin user

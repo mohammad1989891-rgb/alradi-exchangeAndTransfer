@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import {
   HardDrive,
@@ -26,7 +26,8 @@ import {
 } from '@/components/ui/chart';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Line, LineChart } from 'recharts';
 import { useAppStore } from '@/store/useAppStore';
-import { useSupabaseData } from '@/hooks/useSupabaseData';
+import { getDebtPayments } from '@/lib/supabaseDb';
+import type { DebtPayment, CurrencyExchange } from '@/lib/supabaseDb';
 
 // ============================================
 // Types
@@ -101,8 +102,30 @@ const STORAGE_LIMIT_MB = 500;
 // ============================================
 export function StorageDashboard() {
   const { currencies, vaults, accounts, transactions, debts, currencyExchanges } = useAppStore();
-  const { debtPayments, isLoading: isDataLoading, initError, tablesMissing } = useSupabaseData();
+  const [debtPayments, setDebtPayments] = useState<DebtPayment[]>([]);
+  const [isLoadingPayments, setIsLoadingPayments] = useState(true);
   const [activeChart, setActiveChart] = useState<'bar' | 'line'>('bar');
+
+  // Fetch debt payments separately (not in app store)
+  useEffect(() => {
+    let cancelled = false;
+    const fetchDebtPayments = async () => {
+      try {
+        const data = await getDebtPayments();
+        if (!cancelled) {
+          setDebtPayments(data);
+        }
+      } catch (error) {
+        console.error('Error fetching debt payments for storage dashboard:', error);
+      } finally {
+        if (!cancelled) {
+          setIsLoadingPayments(false);
+        }
+      }
+    };
+    fetchDebtPayments();
+    return () => { cancelled = true; };
+  }, []);
 
   // Compute table info from loaded data
   const tableInfos: TableInfo[] = useMemo(() => {
@@ -166,7 +189,7 @@ export function StorageDashboard() {
         return dt >= monthStart && dt < monthEnd;
       }).length;
 
-      const exchangeCount = currencyExchanges.filter(e => {
+      const exchangeCount = (currencyExchanges as CurrencyExchange[]).filter(e => {
         const dt = new Date(e.createdAt);
         return dt >= monthStart && dt < monthEnd;
       }).length;
@@ -223,34 +246,13 @@ export function StorageDashboard() {
   }, [totals.usagePercent, tableInfos]);
 
   // Loading state
-  if (isDataLoading) {
+  if (isLoadingPayments) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-center py-8">
           <div className="flex items-center gap-3 text-muted-foreground">
             <RefreshCw className="w-5 h-5 animate-spin" />
             <span>جاري تحليل التخزين...</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // Error state
-  if (initError || tablesMissing) {
-    return (
-      <div className="space-y-4">
-        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
-          <div className="flex items-center gap-2">
-            <AlertOctagon className="w-5 h-5 text-red-500 shrink-0" />
-            <div>
-              <p className="text-sm font-medium text-red-700 dark:text-red-400">فشل في تحميل بيانات التخزين</p>
-              <p className="text-xs text-red-600 dark:text-red-500 mt-1">
-                {tablesMissing
-                  ? 'بعض الجداول غير موجودة في قاعدة البيانات. يرجى إعداد قاعدة البيانات أولاً.'
-                  : initError || 'حدث خطأ أثناء تحميل البيانات'}
-              </p>
-            </div>
           </div>
         </div>
       </div>

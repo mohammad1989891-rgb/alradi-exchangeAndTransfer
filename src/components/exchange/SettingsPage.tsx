@@ -64,6 +64,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb, createBackup, getBackups, restoreBackup, deleteBackup, checkBackupsTableExists, exportBackupAsJson } from '@/lib/supabaseDb';
+import { supabase } from '@/lib/supabase';
 import type { Currency as CurrencyType } from '@/types';
 import { StorageDashboard } from '@/components/exchange/StorageDashboard';
 
@@ -611,35 +612,50 @@ export function SettingsPage() {
     }
   };
 
-  // Setup Archive Database
+  // Setup Archive Database — works directly with Supabase client (no API route needed)
   const handleSetupArchive = async () => {
     setIsSettingUp(true);
     setArchiveSetupResult(null);
     try {
-      const response = await fetch('/api/archive/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dbPassword }),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const data = await response.json();
-      if (data.success) {
-        setArchiveSetupResult({ success: true, message: data.message || 'تم إعداد نظام الأرشفة بنجاح ✓' });
+      // Check if is_archived column exists by trying to query with it
+      const { error: txError } = await supabase.from('transactions').select('id').eq('is_archived', false).limit(1);
+      const { error: debtError } = await supabase.from('debts').select('id').eq('is_archived', false).limit(1);
+      const { error: paymentError } = await supabase.from('debt_payments').select('id').eq('is_archived', false).limit(1);
+      const { error: exchangeError } = await supabase.from('currency_exchanges').select('id').eq('is_archived', false).limit(1);
+
+      const hasAllColumns = !txError && !debtError && !paymentError && !exchangeError;
+
+      if (hasAllColumns) {
+        setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓ عمود is_archived موجود في جميع الجداول.' });
       } else {
+        // Some columns are missing — provide SQL for manual execution
+        const missingTables: string[] = [];
+        if (txError) missingTables.push('transactions');
+        if (debtError) missingTables.push('debts');
+        if (paymentError) missingTables.push('debt_payments');
+        if (exchangeError) missingTables.push('currency_exchanges');
+
+        const sql = `-- أضف عمود الأرشفة للجداول الناقصة
+${missingTables.map(t => `ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;`).join('\n')}
+
+-- أضف فهارس لتحسين الأداء
+CREATE INDEX IF NOT EXISTS idx_transactions_is_archived ON transactions(is_archived);
+CREATE INDEX IF NOT EXISTS idx_debts_is_archived ON debts(is_archived);
+CREATE INDEX IF NOT EXISTS idx_debt_payments_is_archived ON debt_payments(is_archived);
+CREATE INDEX IF NOT EXISTS idx_currency_exchanges_is_archived ON currency_exchanges(is_archived);
+CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
+
         setArchiveSetupResult({
           success: false,
-          message: data.note || data.error || 'يجب تشغيل SQL يدوياً في Supabase SQL Editor',
+          message: `عمود is_archived غير موجود في: ${missingTables.join(', ')}. يرجى تشغيل SQL التالي في Supabase SQL Editor:\n\n${sql}`,
         });
       }
     } catch (error) {
       console.error('Archive setup error:', error);
       setArchiveSetupResult({ 
         success: false, 
-        message: error instanceof Error && error.message.includes('Failed to fetch')
-          ? 'لا يمكن الاتصال بالخادم. تأكد من تشغيل التطبيق.'
-          : 'خطأ في إعداد نظام الأرشفة. حاول مرة أخرى.' 
+        message: 'خطأ في إعداد نظام الأرشفة. حاول مرة أخرى.' 
       });
     } finally {
       setIsSettingUp(false);
@@ -758,37 +774,64 @@ export function SettingsPage() {
     }
   };
 
-  // Setup backups table
+  // Setup backups table — works directly with Supabase client (no API route needed)
   const handleSetupBackups = async () => {
     setIsSettingUpBackups(true);
     setBackupSetupResult(null);
     try {
-      const response = await fetch('/api/backup/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dbPassword }),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      // First check if the table already exists
+      const exists = await checkBackupsTableExists();
+      if (exists) {
+        setBackupSetupResult({ success: true, message: 'جدول النسخ الاحتياطي موجود بالفعل ✓' });
+        setBackupsTableExists(true);
+        await loadBackups();
+        return;
       }
-      const data = await response.json();
-      if (data.success) {
-        setBackupSetupResult({ success: true, message: data.message || 'تم إعداد نظام النسخ الاحتياطي بنجاح ✓' });
+
+      // Try to create the backups table by inserting a test record
+      // This will fail if the table doesn't exist, confirming we need manual SQL
+      const testId = 'bkp_test_' + Date.now();
+      const { error: insertError } = await supabase.from('backups').insert([{
+        id: testId,
+        reason: 'test',
+        data: {},
+        record_counts: {},
+        size_bytes: 0,
+        created_at: new Date().toISOString(),
+      }]);
+
+      if (!insertError) {
+        // Table exists! Clean up test record
+        await supabase.from('backups').delete().eq('id', testId);
+        setBackupSetupResult({ success: true, message: 'تم إعداد جدول النسخ الاحتياطي بنجاح ✓' });
         setBackupsTableExists(true);
         await loadBackups();
       } else {
+        // Table doesn't exist — provide SQL for manual creation
+        const sql = `-- إنشاء جدول النسخ الاحتياطي
+CREATE TABLE IF NOT EXISTS backups (
+  id TEXT PRIMARY KEY,
+  reason TEXT NOT NULL DEFAULT 'manual',
+  data JSONB NOT NULL,
+  record_counts JSONB DEFAULT '{}',
+  size_bytes BIGINT DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- تفعيل RLS والسماح بجميع العمليات
+ALTER TABLE backups ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Allow all operations on backups" ON backups FOR ALL USING (true) WITH CHECK (true);`;
+
         setBackupSetupResult({
           success: false,
-          message: data.note || data.error || 'يجب تشغيل SQL يدوياً في Supabase SQL Editor',
+          message: `لا يمكن إنشاء الجدول تلقائياً. يرجى تشغيل SQL التالي في Supabase SQL Editor:\n\n${sql}`,
         });
       }
     } catch (error) {
       console.error('Backup setup error:', error);
       setBackupSetupResult({ 
         success: false, 
-        message: error instanceof Error && error.message.includes('Failed to fetch')
-          ? 'لا يمكن الاتصال بالخادم. تأكد من تشغيل التطبيق.'
-          : 'خطأ في إعداد نظام النسخ الاحتياطية. حاول مرة أخرى.' 
+        message: 'خطأ في إعداد نظام النسخ الاحتياطية. حاول مرة أخرى.' 
       });
     } finally {
       setIsSettingUpBackups(false);

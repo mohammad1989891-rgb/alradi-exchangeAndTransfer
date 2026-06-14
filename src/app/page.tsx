@@ -84,10 +84,11 @@ export default function Home() {
   };
   
   // Handle successful login
-  const handleLogin = (userId: string) => {
+  const handleLogin = (userId: string, username?: string, role?: string) => {
     setCurrentUserId(userId);
     localStorage.setItem('currentUserId', userId);
-    localStorage.setItem('currentUsername', 'admin');
+    localStorage.setItem('currentUsername', username || 'admin');
+    localStorage.setItem('currentUserRole', role || 'admin');
     setAppState('app');
   };
   
@@ -95,6 +96,7 @@ export default function Home() {
   const handleLogout = () => {
     localStorage.removeItem('currentUserId');
     localStorage.removeItem('currentUsername');
+    localStorage.removeItem('currentUserRole');
     setCurrentUserId(null);
     setAppState('login');
     toast({

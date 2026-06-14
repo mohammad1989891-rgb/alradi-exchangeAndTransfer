@@ -10,7 +10,7 @@ import { loginUser, initializeDefaultUser } from '@/lib/supabaseDb';
 import { Loader2, Eye, EyeOff, Lock, User } from 'lucide-react';
 
 interface LoginPageProps {
-  onLogin: (userId: string) => void;
+  onLogin: (userId: string, username?: string, role?: string) => void;
 }
 
 export function LoginPage({ onLogin }: LoginPageProps) {
@@ -52,7 +52,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           title: 'مرحباً بك',
           description: `تم تسجيل الدخول بنجاح`,
         });
-        onLogin(result.user.id);
+        onLogin(result.user.id, result.user.username, result.user.role);
       } else {
         toast({
           title: 'خطأ في تسجيل الدخول',

@@ -158,11 +158,14 @@ const db = new Dexie('ExchangeAppDB');
 // ============================================
 // User Model - للمستخدمين وتسجيل الدخول
 // ============================================
+export type UserRole = 'admin' | 'user';
+
 export interface User {
   id: string;
   username: string;
   password: string;  // سيتم تخزينها مشفرة
   name?: string;
+  role: UserRole;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -2424,6 +2427,7 @@ export async function initializeDefaultUser(): Promise<User> {
       username: 'admin',
       password: hashPassword('admin'),
       name: 'المدير',
+      role: 'admin',
       createdAt: now,
       updatedAt: now,
     };
@@ -2507,10 +2511,55 @@ export async function changeUsername(userId: string, newUsername: string): Promi
 }
 
 // تحديث بيانات المستخدم
-export async function updateUser(userId: string, data: { name?: string }): Promise<User | null> {
+export async function updateUser(userId: string, data: { name?: string; role?: UserRole }): Promise<User | null> {
   await initializeDatabase();
   await db.table('users').update(userId, { ...data, updatedAt: new Date() });
   return db.table<User>('users').get(userId) || null;
+}
+
+export async function getUserById(userId: string): Promise<User | null> {
+  await initializeDatabase();
+  return db.table<User>('users').get(userId) || null;
+}
+
+export async function createUser(userData: { username: string; password: string; name?: string; role?: UserRole }): Promise<{ success: boolean; user?: User; message: string }> {
+  await initializeDatabase();
+  
+  const existing = await getUserByUsername(userData.username);
+  if (existing) {
+    return { success: false, message: 'اسم المستخدم موجود بالفعل' };
+  }
+  
+  const now = new Date();
+  const newUser: User = {
+    id: 'user_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    username: userData.username,
+    password: hashPassword(userData.password),
+    name: userData.name || userData.username,
+    role: userData.role || 'user',
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  await db.table('users').add(newUser);
+  return { success: true, user: newUser, message: 'تم إنشاء المستخدم بنجاح' };
+}
+
+export async function deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+  await initializeDatabase();
+  const user = await db.table<User>('users').get(userId);
+  if (!user) return { success: false, message: 'المستخدم غير موجود' };
+  
+  if (user.role === 'admin') {
+    const allUsers = await db.table<User>('users').toArray();
+    const admins = allUsers.filter(u => u.role === 'admin');
+    if (admins.length <= 1) {
+      return { success: false, message: 'لا يمكن حذف آخر مدير في النظام' };
+    }
+  }
+  
+  await db.table('users').delete(userId);
+  return { success: true, message: 'تم حذف المستخدم بنجاح' };
 }
 
 // ============================================

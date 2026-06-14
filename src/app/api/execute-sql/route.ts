@@ -12,13 +12,21 @@ const PROJECT_REF = 'hdlpvtuplwthqcksaynt';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { sql, dbPassword } = body;
+    const { sql, dbPassword, userRole } = body;
 
     if (!sql || typeof sql !== 'string') {
       return NextResponse.json({
         success: false,
         error: 'لم يتم تقديم SQL للتنفيذ',
       }, { status: 400 });
+    }
+
+    // 🔒 Role-based access control — only admins can execute SQL
+    if (userRole !== 'admin') {
+      return NextResponse.json({
+        success: false,
+        error: 'غير مصرح — فقط المدير يمكنه تنفيذ عمليات قاعدة البيانات',
+      }, { status: 403 });
     }
 
     // If dbPassword is provided, use pg to execute SQL directly

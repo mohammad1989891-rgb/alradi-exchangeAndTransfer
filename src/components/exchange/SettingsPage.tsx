@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
+import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from 'next-themes';
 import { motion } from 'framer-motion';
 import {
@@ -31,6 +32,10 @@ import {
   RotateCcw,
   Clock,
   HardDrive,
+  Users,
+  UserPlus,
+  ShieldCheck,
+  ShieldAlert,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -63,7 +68,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb, createBackup, getBackups, restoreBackup, deleteBackup, checkBackupsTableExists, exportBackupAsJson } from '@/lib/supabaseDb';
+import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb, createBackup, getBackups, restoreBackup, deleteBackup, checkBackupsTableExists, exportBackupAsJson, createUser, deleteUser as deleteUserFromDb, getUserById } from '@/lib/supabaseDb';
 import { supabase } from '@/lib/supabase';
 import type { Currency as CurrencyType } from '@/types';
 import { StorageDashboard } from '@/components/exchange/StorageDashboard';
@@ -72,6 +77,7 @@ export function SettingsPage() {
   const { theme, setTheme } = useTheme();
   const { currencies, setCurrencies, vaults, accounts, transactions, debts } = useAppStore();
   const { refreshData: refreshLocalData, autoArchiveOldRecords } = useSupabaseData();
+  const { isAdmin, userId: currentAuthUserId, role: currentRole } = useAuth();
   const { toast } = useToast();
   
   const [expandedSection, setExpandedSection] = useState<string | null>('appearance');
@@ -124,6 +130,17 @@ export function SettingsPage() {
   const [isSettingUpBackups, setIsSettingUpBackups] = useState(false);
   const [backupSetupResult, setBackupSetupResult] = useState<{ success: boolean; message: string } | null>(null);
   const [showRestoreConfirm, setShowRestoreConfirm] = useState<string | null>(null);
+
+  // User Management (Admin only)
+  const [usersList, setUsersList] = useState<Array<{ id: string; username: string; name?: string; role: string; createdAt: Date }>>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+  const [newUserUsername, setNewUserUsername] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+  const [isCreatingUser, setIsCreatingUser] = useState(false);
+  const [showAddUserDialog, setShowAddUserDialog] = useState(false);
+  const [showDeleteUserDialog, setShowDeleteUserDialog] = useState<string | null>(null);
 
   // Load current username on mount
   useEffect(() => {
@@ -660,7 +677,7 @@ CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
             const response = await fetch('/api/execute-sql', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ sql, dbPassword }),
+              body: JSON.stringify({ sql, dbPassword, userRole: currentRole }),
             });
             const result = await response.json();
 
@@ -848,7 +865,7 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
           const response = await fetch('/api/execute-sql', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sql, dbPassword }),
+            body: JSON.stringify({ sql, dbPassword, userRole: currentRole }),
           });
           const result = await response.json();
 
@@ -899,6 +916,62 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
       case 'pre_archive': return { label: 'قبل الأرشفة', color: 'text-amber-600 dark:text-amber-400' };
       case 'auto': return { label: 'تلقائي', color: 'text-emerald-600 dark:text-emerald-400' };
       default: return { label: reason, color: 'text-muted-foreground' };
+    }
+  };
+
+  // ============================================
+  // User Management Handlers (Admin Only)
+  // ============================================
+  const loadUsers = async () => {
+    setIsLoadingUsers(true);
+    try {
+      const users = await getUsers();
+      setUsersList(users.map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role, createdAt: u.createdAt })));
+    } catch (error) {
+      console.error('Error loading users:', error);
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  const handleCreateUser = async () => {
+    if (!newUserUsername.trim() || !newUserPassword.trim()) {
+      toast({ title: 'خطأ', description: 'يرجى إدخال اسم المستخدم وكلمة المرور', variant: 'destructive' });
+      return;
+    }
+    setIsCreatingUser(true);
+    try {
+      const result = await createUser({ username: newUserUsername, password: newUserPassword, name: newUserName || undefined, role: newUserRole });
+      if (result.success) {
+        toast({ title: 'تم بنجاح', description: result.message });
+        setNewUserUsername('');
+        setNewUserPassword('');
+        setNewUserName('');
+        setNewUserRole('user');
+        setShowAddUserDialog(false);
+        await loadUsers();
+      } else {
+        toast({ title: 'خطأ', description: result.message, variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: 'خطأ', description: 'فشل إنشاء المستخدم', variant: 'destructive' });
+    } finally {
+      setIsCreatingUser(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      const result = await deleteUserFromDb(userId);
+      if (result.success) {
+        toast({ title: 'تم بنجاح', description: result.message });
+        setShowDeleteUserDialog(null);
+        await loadUsers();
+      } else {
+        toast({ title: 'خطأ', description: result.message, variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: 'خطأ', description: 'فشل حذف المستخدم', variant: 'destructive' });
     }
   };
 
@@ -1178,6 +1251,16 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
       icon: FileJson,
       content: (
         <div className="space-y-4">
+          {!isAdmin && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إدارة النسخ الاحتياطية.</p>
+              </div>
+            </div>
+          )}
+          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
           {/* Export Section */}
           <div className="p-4 rounded-xl bg-muted/50">
             <div className="flex items-center gap-3 mb-3">
@@ -1243,6 +1326,7 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
               مسح جميع البيانات
             </Button>
           </div>
+          </div>
         </div>
       ),
     },
@@ -1252,6 +1336,16 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
       icon: HardDrive,
       content: (
         <div className="space-y-4">
+          {!isAdmin && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إدارة النسخ المحفوظة.</p>
+              </div>
+            </div>
+          )}
+          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
           {/* Setup Backups Table */}
           {!backupsTableExists && (
             <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
@@ -1445,6 +1539,7 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
               )}
             </div>
           )}
+          </div>
         </div>
       ),
     },
@@ -1485,6 +1580,16 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
       icon: Archive,
       content: (
         <div className="space-y-4">
+          {!isAdmin && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إدارة الأرشفة.</p>
+              </div>
+            </div>
+          )}
+          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
           {/* Auto Archive */}
           <div className="p-4 rounded-xl bg-muted/50">
             <div className="flex items-center gap-3 mb-3">
@@ -1566,6 +1671,7 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
               </p>
             )}
           </div>
+          </div>
         </div>
       ),
     },
@@ -1575,6 +1681,123 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
       icon: Database,
       content: <StorageDashboard />,
     },
+    // User Management Section — Admin Only
+    ...(isAdmin ? [{
+      id: 'user-management' as const,
+      title: 'إدارة المستخدمين',
+      icon: Users,
+      content: (
+        <div className="space-y-4">
+          {/* Role Info */}
+          <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+            <div className="flex items-center gap-2 mb-2">
+              <ShieldCheck className="w-4 h-4 text-blue-500" />
+              <p className="text-xs font-medium text-blue-700 dark:text-blue-400">نظام الصلاحيات</p>
+            </div>
+            <div className="space-y-1 text-xs text-muted-foreground">
+              <p>• <strong>مدير (admin)</strong>: صلاحية كاملة تشمل النسخ الاحتياطي والأرشفة</p>
+              <p>• <strong>مستخدم (user)</strong>: صلاحية محدودة بدون وصول للنسخ الاحتياطي والأرشفة</p>
+            </div>
+          </div>
+
+          {/* Users List */}
+          <div className="p-4 rounded-xl bg-muted/50">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                  <Users className="w-5 h-5 text-emerald-500" />
+                </div>
+                <div>
+                  <p className="font-medium">المستخدمون</p>
+                  <p className="text-xs text-muted-foreground">{usersList.length} مستخدم</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={loadUsers}
+                  disabled={isLoadingUsers}
+                >
+                  {isLoadingUsers ? <Loader2 className="w-4 h-4 animate-spin" /> : 'تحديث'}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setShowAddUserDialog(true)}
+                  className="gap-1"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  إضافة
+                </Button>
+              </div>
+            </div>
+
+            {isLoadingUsers && usersList.length === 0 ? (
+              <div className="text-center py-4">
+                <Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" />
+                <p className="text-xs text-muted-foreground mt-2">جاري تحميل المستخدمين...</p>
+              </div>
+            ) : usersList.length === 0 ? (
+              <div className="text-center py-4">
+                <p className="text-sm text-muted-foreground">لا يوجد مستخدمون</p>
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {usersList.map(user => (
+                  <div
+                    key={user.id}
+                    className="p-3 rounded-xl bg-background border border-border/50 flex items-center justify-between"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        'w-8 h-8 rounded-lg flex items-center justify-center',
+                        user.role === 'admin' ? 'bg-amber-500/10' : 'bg-blue-500/10'
+                      )}>
+                        {user.role === 'admin' ? (
+                          <ShieldCheck className="w-4 h-4 text-amber-500" />
+                        ) : (
+                          <User className="w-4 h-4 text-blue-500" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-medium">{user.name || user.username}</p>
+                          <span className={cn(
+                            'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                            user.role === 'admin'
+                              ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400'
+                              : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                          )}>
+                            {user.role === 'admin' ? 'مدير' : 'مستخدم'}
+                          </span>
+                          {user.id === currentAuthUserId && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400">
+                              أنت
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">@{user.username}</p>
+                      </div>
+                    </div>
+                    {user.id !== currentAuthUserId && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-red-500 hover:text-red-600"
+                        onClick={() => setShowDeleteUserDialog(user.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    }] : []),
   ];
 
   return (
@@ -1610,6 +1833,10 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
                   // Load backups when backup-management section is expanded
                   if (newSection === 'backup-management') {
                     loadBackups();
+                  }
+                  // Load users when user-management section is expanded
+                  if (newSection === 'user-management') {
+                    loadUsers();
                   }
                 }}
                 className="w-full flex items-center justify-between p-4 hover:bg-muted/30 transition-colors"
@@ -1691,6 +1918,108 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
           <AlertDialogFooter>
             <AlertDialogCancel>إلغاء</AlertDialogCancel>
             <AlertDialogAction onClick={handleDeleteCurrency} className="bg-red-500 hover:bg-red-600">
+              حذف
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Add User Dialog (Admin Only) */}
+      <Dialog open={showAddUserDialog} onOpenChange={setShowAddUserDialog}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-primary" />
+              إضافة مستخدم جديد
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-4">
+            <div className="space-y-2">
+              <Label>اسم المستخدم *</Label>
+              <Input
+                placeholder="username"
+                value={newUserUsername}
+                onChange={(e) => setNewUserUsername(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>الاسم المعروض</Label>
+              <Input
+                placeholder="اسم المستخدم"
+                value={newUserName}
+                onChange={(e) => setNewUserName(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>كلمة المرور *</Label>
+              <Input
+                type="password"
+                placeholder="كلمة المرور"
+                value={newUserPassword}
+                onChange={(e) => setNewUserPassword(e.target.value)}
+                dir="ltr"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>الدور</Label>
+              <Select value={newUserRole} onValueChange={(v: 'admin' | 'user') => setNewUserRole(v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="user">
+                    <div className="flex items-center gap-2">
+                      <User className="w-4 h-4 text-blue-500" />
+                      <span>مستخدم</span>
+                      <span className="text-xs text-muted-foreground">— صلاحية محدودة</span>
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="admin">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-500" />
+                      <span>مدير</span>
+                      <span className="text-xs text-muted-foreground">— صلاحية كاملة</span>
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setShowAddUserDialog(false)} className="flex-1">
+                إلغاء
+              </Button>
+              <Button
+                onClick={handleCreateUser}
+                disabled={isCreatingUser || !newUserUsername.trim() || !newUserPassword.trim()}
+                className="flex-1"
+              >
+                {isCreatingUser ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+                إنشاء
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete User Confirmation (Admin Only) */}
+      <AlertDialog open={!!showDeleteUserDialog} onOpenChange={(open) => { if (!open) setShowDeleteUserDialog(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Trash2 className="w-5 h-5 text-red-500" />
+              حذف المستخدم
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              هل أنت متأكد من حذف هذا المستخدم؟ لن يتمكن من تسجيل الدخول بعد الحذف.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => showDeleteUserDialog && handleDeleteUser(showDeleteUserDialog)}
+              className="bg-red-500 hover:bg-red-600"
+            >
               حذف
             </AlertDialogAction>
           </AlertDialogFooter>

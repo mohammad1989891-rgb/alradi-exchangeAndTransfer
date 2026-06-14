@@ -1,0 +1,2002 @@
+     1→import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+     2→
+     3→// ============================================
+     4→// 🔸 Smart Retry System for Supabase Queries
+     5→// 🔸 Automatically retries on network/fetch errors
+     6→// 🔸 Skips retry on data/logic errors (validation, not found, etc.)
+     7→// 🔸 Exponential backoff: 500ms → 1000ms → 2000ms
+     8→// ============================================
+     9→
+    10→/**
+    11→ * Determines if an error is retryable (network/fetch related).
+    12→ * Data/logic errors like "not found", "permission denied", or validation
+    13→ * errors are NOT retryable — retrying won't fix them.
+    14→ */
+    15→function isRetryableError(error: unknown): boolean {
+    16→  if (!error) return false;
+    17→
+    18→  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+    19→
+    20→  // Network / fetch errors — retryable
+    21→  if (
+    22→    msg.includes('failed to fetch') ||
+    23→    msg.includes('networkerror') ||
+    24→    msg.includes('network request failed') ||
+    25→    msg.includes('net::err_') ||
+    26→    msg.includes('fetch error') ||
+    27→    msg.includes('timeout') ||
+    28→    msg.includes('aborted') ||
+    29→    msg.includes('connection') ||
+    30→    msg.includes('econnrefused') ||
+    31→    msg.includes('econnreset') ||
+    32→    msg.includes('socket hang up') ||
+    33→    msg.includes('load failed')
+    34→  ) {
+    35→    return true;
+    36→  }
+    37→
+    38→  // TypeError in fetch context — usually network-related
+    39→  if (error instanceof TypeError && (
+    40→    msg.includes('fetch') ||
+    41→    msg.includes('network') ||
+    42→    msg.includes('load') ||
+    43→    msg.includes('failed')
+    44→  )) {
+    45→    return true;
+    46→  }
+    47→
+    48→  // NOT retryable: table doesn't exist, RLS, validation, business logic
+    49→  if (
+    50→    msg.includes('could not find') ||
+    51→    msg.includes('does not exist') ||
+    52→    msg.includes('schema cache') ||
+    53→    msg.includes('relation') ||
+    54→    msg.includes('policy') ||
+    55→    msg.includes('permission') ||
+    56→    msg.includes('jwt') ||
+    57→    msg.includes('rls') ||
+    58→    msg.includes('violates') ||
+    59→    msg.includes('duplicate') ||
+    60→    msg.includes('unique') ||
+    61→    msg.includes('not null') ||
+    62→    msg.includes('foreign key') ||
+    63→    msg.includes('check constraint')
+    64→  ) {
+    65→    return false;
+    66→  }
+    67→
+    68→  // For Supabase PostgrestError — check code
+    69→  const anyErr = error as Record<string, unknown>;
+    70→  const code = String(anyErr?.code || '');
+    71→  // Network-related Supabase error codes
+    72→  if (code === '08' || code.startsWith('08')) return true; // Connection exception
+    73→  if (code === '57' || code.startsWith('57')) return true; // Operator intervention
+    74→
+    75→  // Default: retry unknown errors — they could be transient network issues
+    76→  // (Supabase PostgrestError objects are plain objects, not Error instances,
+    77→  // and may have empty messages like {}, so we retry them rather than crash)
+    78→  return true;
+    79→}
+    80→
+    81→/**
+    82→ * Execute an async function with automatic retry on network errors.
+    83→ * Uses exponential backoff: 500ms → 1000ms → 2000ms.
+    84→ * Only retries on network/fetch errors — data/logic errors fail immediately.
+    85→ *
+    86→ * @param fn - The async function to execute
+    87→ * @param retries - Maximum number of retries (default: 3)
+    88→ * @param delay - Initial delay in ms, doubles on each retry (default: 500)
+    89→ * @returns The result of fn(), or null if all retries failed
+    90→ */
+    91→export async function fetchWithRetry<T>(
+    92→  fn: () => Promise<T>,
+    93→  retries: number = 3,
+    94→  delay: number = 500,
+    95→): Promise<T | null> {
+    96→  try {
+    97→    return await fn();
+    98→  } catch (error) {
+    99→    // If the error is not retryable, log and return null instead of throwing
+   100→    // This prevents app crashes — callers use `return result || []` as fallback
+   101→    if (!isRetryableError(error)) {
+   102→      console.error('[Supabase] ❌ Non-retryable error (returning null):', error instanceof Error ? error.message : error);
+   103→      return null;
+   104→    }
+   105→
+   106→    if (retries <= 0) {
+   107→      console.error('[Supabase] ❌ All retries exhausted:', error instanceof Error ? error.message : error);
+   108→      return null;
+   109→    }
+   110→
+   111→    const attempt = 3 - retries + 1; // Human-readable attempt number
+   112→    console.warn(`[Supabase] ⚠️ Network error (attempt ${attempt}/3), retrying in ${delay}ms...`, error instanceof Error ? error.message : error);
+   113→
+   114→    await new Promise(res => setTimeout(res, delay));
+   115→
+   116→    return fetchWithRetry(fn, retries - 1, delay * 2);
+   117→  }
+   118→}
+   119→
+   120→// ============================================
+   121→// Types / Interfaces
+   122→// ============================================
+   123→
+   124→export interface Currency {
+   125→  id: string;
+   126→  code: string;
+   127→  name: string;
+   128→  symbol: string;
+   129→  isDefault: boolean;
+   130→  isActive: boolean;
+   131→  exchangeRate: number;
+   132→  conversionMethod?: 'MULTIPLY' | 'DIVIDE';
+   133→  createdAt: Date;
+   134→  updatedAt: Date;
+   135→}
+   136→
+   137→export interface Vault {
+   138→  id: string;
+   139→  currencyId: string;
+   140→  balance: number;
+   141→  openingBalance: number;
+   142→  openingBalanceDate: Date | null;
+   143→  createdAt: Date;
+   144→  updatedAt: Date;
+   145→  currency?: Currency;
+   146→  conversionFactorToMain?: number;
+   147→}
+   148→
+   149→export interface Account {
+   150→  id: string;
+   151→  name: string;
+   152→  type: 'PRIVATE' | 'PUBLIC';
+   153→  description?: string;
+   154→  isActive: boolean;
+   155→  createdAt: Date;
+   156→  updatedAt: Date;
+   157→}
+   158→
+   159→export interface Transaction {
+   160→  id: string;
+   161→  accountId: string;
+   162→  currencyId: string;
+   163→  baseCurrencyId?: string | null;
+   164→  type: 'INCOME' | 'EXPENSE';
+   165→  paymentType: 'CASH' | 'DEFERRED';
+   166→  amount: number;
+   167→  conversionFactor: number;
+   168→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+   169→  feesType: 'FIXED' | 'PERCENTAGE' | 'PER_THOUSAND';
+   170→  feesDirection: 'INCOME' | 'EXPENSE';
+   171→  feesAmount: number;
+   172→  finalBalance: number;
+   173→  description?: string | null;
+   174→  date: Date;
+   175→  isOverflowTransaction?: boolean;
+   176→  relatedPaymentId?: string | null;
+   177→  isComplete: boolean;
+   178→  isArchived?: boolean;
+   179→  createdAt: Date;
+   180→  updatedAt: Date;
+   181→  account?: Account;
+   182→  currency?: Currency;
+   183→  baseCurrency?: Currency | null;
+   184→}
+   185→
+   186→export interface Debt {
+   187→  id: string;
+   188→  accountId: string;
+   189→  currencyId: string;
+   190→  amount: number;
+   191→  conversionFactor: number;
+   192→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+   193→  finalBalance: number;
+   194→  description?: string | null;
+   195→  debtType: 'RECEIVABLE' | 'PAYABLE';
+   196→  debtMode: 'CASH' | 'DEFERRED';
+   197→  isPaid: boolean;
+   198→  isArchived?: boolean;
+   199→  paidAt?: Date | null;
+   200→  date: Date;
+   201→  createdAt: Date;
+   202→  updatedAt: Date;
+   203→  account?: Account;
+   204→  currency?: Currency;
+   205→}
+   206→
+   207→export interface DebtPayment {
+   208→  id: string;
+   209→  debtId: string;
+   210→  amount: number;
+   211→  currencyId: string;
+   212→  description?: string | null;
+   213→  date: Date;
+   214→  paymentMode?: 'CASH' | 'DEFERRED';
+   215→  paymentDirection?: 'RECEIVABLE' | 'PAYABLE';
+   216→  overflowTransactionId?: string | null;
+   217→  isArchived?: boolean;
+   218→  createdAt: Date;
+   219→  updatedAt: Date;
+   220→}
+   221→
+   222→export interface CurrencyExchange {
+   223→  id: string;
+   224→  outgoingCurrencyId: string;
+   225→  incomingCurrencyId: string;
+   226→  outgoingAmount: number;
+   227→  incomingAmount: number;
+   228→  outgoingRateAtTime: number;
+   229→  incomingRateAtTime: number;
+   230→  outgoingConversionMethod: 'MULTIPLY' | 'DIVIDE';
+   231→  incomingConversionMethod: 'MULTIPLY' | 'DIVIDE';
+   232→  outgoingUsd: number;
+   233→  incomingUsd: number;
+   234→  profit: number;
+   235→  description?: string | null;
+   236→  date: Date;
+   237→  createdAt: Date;
+   238→  updatedAt: Date;
+   239→  isDeleted?: boolean;
+   240→  isArchived?: boolean;
+   241→}
+   242→
+   243→export interface User {
+   244→  id: string;
+   245→  username: string;
+   246→  password: string;
+   247→  name?: string;
+   248→  createdAt: Date;
+   249→  updatedAt: Date;
+   250→}
+   251→
+   252→export interface Vehicle {
+   253→  id: string;
+   254→  name: string;
+   255→  plateNumber?: string;
+   256→  notes?: string;
+   257→  isActive: boolean;
+   258→  createdAt: Date;
+   259→  updatedAt: Date;
+   260→}
+   261→
+   262→export interface VehicleTransaction {
+   263→  id: string;
+   264→  vehicleId: string;
+   265→  date: Date;
+   266→  amount: number;
+   267→  partner: 'first' | 'second';
+   268→  paymentType: 'cash' | 'deferred';
+   269→  description: string;
+   270→  createdAt: Date;
+   271→  updatedAt: Date;
+   272→}
+   273→
+   274→export interface SharedTransaction {
+   275→  id: string;
+   276→  date: Date;
+   277→  amount: number;
+   278→  partner: 'first' | 'second';
+   279→  paymentType: 'cash' | 'deferred';
+   280→  description: string;
+   281→  createdAt: Date;
+   282→  updatedAt: Date;
+   283→}
+   284→
+   285→export interface VehiclesSettings {
+   286→  id: string;
+   287→  firstPartnerName: string;
+   288→  secondPartnerName: string;
+   289→  updatedAt: Date;
+   290→}
+   291→
+   292→export interface CurrencyDebtSummary {
+   293→  currencyId: string;
+   294→  receivable: number;
+   295→  payable: number;
+   296→  receivablePaid: number;
+   297→  payablePaid: number;
+   298→  receivableRemaining: number;
+   299→  payableRemaining: number;
+   300→  netBalance: number;  // positive = لنا, negative = علينا
+   301→}
+   302→
+   303→export interface AccountDebtSummary {
+   304→  accountId: string;
+   305→  account: Account | undefined;
+   306→  totalReceivable: number;
+   307→  totalPayable: number;
+   308→  totalReceivablePaid: number;
+   309→  totalPayablePaid: number;
+   310→  totalReceivableRemaining: number;
+   311→  totalPayableRemaining: number;
+   312→  finalBalance: number;
+   313→  debts: Debt[];
+   314→  payments: DebtPayment[];
+   315→  currencyBreakdown: CurrencyDebtSummary[];
+   316→}
+   317→
+   318→export type Exchange = CurrencyExchange;
+   319→
+   320→export interface ExportData {
+   321→  version: string;
+   322→  exportedAt: string;
+   323→  currencies: Currency[];
+   324→  vaults: Vault[];
+   325→  accounts: Account[];
+   326→  transactions: Transaction[];
+   327→  debts: Debt[];
+   328→  debtPayments: DebtPayment[];
+   329→  currencyExchanges: CurrencyExchange[];
+   330→}
+   331→
+   332→// ============================================
+   333→// Helper: camelCase ↔ snake_case conversion
+   334→// ============================================
+   335→
+   336→function toCamelCaseKey(key: string): string {
+   337→  return key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
+   338→}
+   339→
+   340→function toSnakeCaseKey(key: string): string {
+   341→  return key.replace(/[A-Z]/g, letter => `_${letter.toLowerCase()}`);
+   342→}
+   343→
+   344→function toCamelCase<T extends Record<string, unknown>>(obj: Record<string, unknown>): T {
+   345→  const result: Record<string, unknown> = {};
+   346→  for (const [key, value] of Object.entries(obj)) {
+   347→    result[toCamelCaseKey(key)] = value;
+   348→  }
+   349→  return result as T;
+   350→}
+   351→
+   352→function toSnakeCase<T extends Record<string, unknown>>(obj: Record<string, unknown>): T {
+   353→  const result: Record<string, unknown> = {};
+   354→  for (const [key, value] of Object.entries(obj)) {
+   355→    if (value !== undefined) {
+   356→      result[toSnakeCaseKey(key)] = value;
+   357→    }
+   358→  }
+   359→  return result as T;
+   360→}
+   361→
+   362→// ============================================
+   363→// Helper: Date conversion
+   364→// ============================================
+   365→
+   366→function isoToDate(value: string | null | undefined): Date | null | undefined {
+   367→  if (value === null) return null;
+   368→  if (value === undefined) return undefined;
+   369→  return new Date(value);
+   370→}
+   371→
+   372→function dateToIso(value: Date | string | null | undefined): string | null | undefined {
+   373→  if (value === null) return null;
+   374→  if (value === undefined) return undefined;
+   375→  if (value instanceof Date) return value.toISOString();
+   376→  return new Date(value).toISOString();
+   377→}
+   378→
+   379→// Convert snake_case DB row to camelCase with Date objects
+   380→function rowToCurrency(row: Record<string, unknown>): Currency {
+   381→  const obj = toCamelCase<Currency>(row);
+   382→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   383→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   384→  return obj;
+   385→}
+   386→
+   387→function rowToVault(row: Record<string, unknown>): Vault {
+   388→  const obj = toCamelCase<Vault>(row);
+   389→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   390→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   391→  if (obj.openingBalanceDate) {
+   392→    obj.openingBalanceDate = new Date(obj.openingBalanceDate as unknown as string);
+   393→  }
+   394→  return obj;
+   395→}
+   396→
+   397→function rowToAccount(row: Record<string, unknown>): Account {
+   398→  const obj = toCamelCase<Account>(row);
+   399→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   400→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   401→  return obj;
+   402→}
+   403→
+   404→function rowToTransaction(row: Record<string, unknown>): Transaction {
+   405→  const obj = toCamelCase<Transaction>(row);
+   406→  obj.date = new Date(obj.date as unknown as string);
+   407→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   408→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   409→  return obj;
+   410→}
+   411→
+   412→function rowToDebt(row: Record<string, unknown>): Debt {
+   413→  const obj = toCamelCase<Debt>(row);
+   414→  obj.date = new Date(obj.date as unknown as string);
+   415→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   416→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   417→  if (obj.paidAt) obj.paidAt = new Date(obj.paidAt as unknown as string);
+   418→  return obj;
+   419→}
+   420→
+   421→function rowToDebtPayment(row: Record<string, unknown>): DebtPayment {
+   422→  const obj = toCamelCase<DebtPayment>(row);
+   423→  obj.date = new Date(obj.date as unknown as string);
+   424→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   425→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   426→  return obj;
+   427→}
+   428→
+   429→function rowToCurrencyExchange(row: Record<string, unknown>): CurrencyExchange {
+   430→  const obj = toCamelCase<CurrencyExchange>(row);
+   431→  obj.date = new Date(obj.date as unknown as string);
+   432→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   433→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   434→  return obj;
+   435→}
+   436→
+   437→function rowToUser(row: Record<string, unknown>): User {
+   438→  const obj = toCamelCase<User>(row);
+   439→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   440→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   441→  return obj;
+   442→}
+   443→
+   444→function rowToVehicle(row: Record<string, unknown>): Vehicle {
+   445→  const obj = toCamelCase<Vehicle>(row);
+   446→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   447→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   448→  return obj;
+   449→}
+   450→
+   451→function rowToVehicleTransaction(row: Record<string, unknown>): VehicleTransaction {
+   452→  const obj = toCamelCase<VehicleTransaction>(row);
+   453→  obj.date = new Date(obj.date as unknown as string);
+   454→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   455→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   456→  return obj;
+   457→}
+   458→
+   459→function rowToSharedTransaction(row: Record<string, unknown>): SharedTransaction {
+   460→  const obj = toCamelCase<SharedTransaction>(row);
+   461→  obj.date = new Date(obj.date as unknown as string);
+   462→  obj.createdAt = new Date(obj.createdAt as unknown as string);
+   463→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   464→  return obj;
+   465→}
+   466→
+   467→function rowToVehiclesSettings(row: Record<string, unknown>): VehiclesSettings {
+   468→  const obj = toCamelCase<VehiclesSettings>(row);
+   469→  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+   470→  return obj;
+   471→}
+   472→
+   473→// Convert camelCase object to snake_case DB row with ISO dates
+   474→function currencyToRow(currency: Partial<Currency>): Record<string, unknown> {
+   475→  const row = toSnakeCase<Record<string, unknown>>(currency as Record<string, unknown>);
+   476→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   477→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   478→  return row;
+   479→}
+   480→
+   481→function vaultToRow(vault: Partial<Vault>): Record<string, unknown> {
+   482→  const row = toSnakeCase<Record<string, unknown>>(vault as Record<string, unknown>);
+   483→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   484→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   485→  if (row.opening_balance_date) row.opening_balance_date = dateToIso(row.opening_balance_date as Date);
+   486→  return row;
+   487→}
+   488→
+   489→function accountToRow(account: Partial<Account>): Record<string, unknown> {
+   490→  const row = toSnakeCase<Record<string, unknown>>(account as Record<string, unknown>);
+   491→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   492→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   493→  return row;
+   494→}
+   495→
+   496→function transactionToRow(transaction: Partial<Transaction>): Record<string, unknown> {
+   497→  const row = toSnakeCase<Record<string, unknown>>(transaction as Record<string, unknown>);
+   498→  if (row.date) row.date = dateToIso(row.date as Date);
+   499→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   500→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   501→  return row;
+   502→}
+   503→
+   504→function debtToRow(debt: Partial<Debt>): Record<string, unknown> {
+   505→  const row = toSnakeCase<Record<string, unknown>>(debt as Record<string, unknown>);
+   506→  if (row.date) row.date = dateToIso(row.date as Date);
+   507→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   508→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   509→  if (row.paid_at) row.paid_at = dateToIso(row.paid_at as Date);
+   510→  return row;
+   511→}
+   512→
+   513→function debtPaymentToRow(payment: Partial<DebtPayment>): Record<string, unknown> {
+   514→  const row = toSnakeCase<Record<string, unknown>>(payment as Record<string, unknown>);
+   515→  if (row.date) row.date = dateToIso(row.date as Date);
+   516→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   517→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   518→  return row;
+   519→}
+   520→
+   521→function currencyExchangeToRow(exchange: Partial<CurrencyExchange>): Record<string, unknown> {
+   522→  const row = toSnakeCase<Record<string, unknown>>(exchange as Record<string, unknown>);
+   523→  if (row.date) row.date = dateToIso(row.date as Date);
+   524→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   525→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   526→  return row;
+   527→}
+   528→
+   529→function userToRow(user: Partial<User>): Record<string, unknown> {
+   530→  const row = toSnakeCase<Record<string, unknown>>(user as Record<string, unknown>);
+   531→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   532→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   533→  return row;
+   534→}
+   535→
+   536→function vehicleToRow(vehicle: Partial<Vehicle>): Record<string, unknown> {
+   537→  const row = toSnakeCase<Record<string, unknown>>(vehicle as Record<string, unknown>);
+   538→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   539→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   540→  return row;
+   541→}
+   542→
+   543→function vehicleTransactionToRow(vt: Partial<VehicleTransaction>): Record<string, unknown> {
+   544→  const row = toSnakeCase<Record<string, unknown>>(vt as Record<string, unknown>);
+   545→  if (row.date) row.date = dateToIso(row.date as Date);
+   546→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   547→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   548→  return row;
+   549→}
+   550→
+   551→function sharedTransactionToRow(st: Partial<SharedTransaction>): Record<string, unknown> {
+   552→  const row = toSnakeCase<Record<string, unknown>>(st as Record<string, unknown>);
+   553→  if (row.date) row.date = dateToIso(row.date as Date);
+   554→  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+   555→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   556→  return row;
+   557→}
+   558→
+   559→function vehiclesSettingsToRow(settings: Partial<VehiclesSettings>): Record<string, unknown> {
+   560→  const row = toSnakeCase<Record<string, unknown>>(settings as Record<string, unknown>);
+   561→  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+   562→  return row;
+   563→}
+   564→
+   565→// ============================================
+   566→// Helper: clean undefined fields for Supabase
+   567→// ============================================
+   568→
+   569→function removeUndefined(obj: Record<string, unknown>): Record<string, unknown> {
+   570→  const result: Record<string, unknown> = {};
+   571→  for (const [key, value] of Object.entries(obj)) {
+   572→    if (value !== undefined) {
+   573→      result[key] = value;
+   574→    }
+   575→  }
+   576→  return result;
+   577→}
+   578→
+   579→// ============================================
+   580→// ID Generation
+   581→// ============================================
+   582→
+   583→function generateId(): string {
+   584→  return 'sb_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+   585→}
+   586→
+   587→// ============================================
+   588→// calculateFinalBalance - COPIED VERBATIM
+   589→// ============================================
+   590→
+   591→function calculateFinalBalance(
+   592→  amount: number,
+   593→  conversionFactor: number,
+   594→  conversionMethod: string,
+   595→  feesType: string,
+   596→  feesAmount: number,
+   597→  feesDirection: string,
+   598→  transactionType: 'INCOME' | 'EXPENSE' = 'INCOME'
+   599→): number {
+   600→  if (!conversionFactor || conversionFactor === 0) {
+   601→    return 0;
+   602→  }
+   603→  
+   604→  let finalBalance = amount;
+   605→  
+   606→  if (conversionMethod === 'MULTIPLY') {
+   607→    finalBalance = amount * conversionFactor;
+   608→  } else {
+   609→    finalBalance = amount / conversionFactor;
+   610→  }
+   611→  
+   612→  let feesValue = 0;
+   613→  if (feesAmount && feesAmount > 0) {
+   614→    switch (feesType) {
+   615→      case 'FIXED':
+   616→        feesValue = feesAmount;
+   617→        break;
+   618→      case 'PERCENTAGE':
+   619→        feesValue = (finalBalance * feesAmount) / 100;
+   620→        break;
+   621→      case 'PER_THOUSAND':
+   622→        feesValue = (finalBalance * feesAmount) / 1000;
+   623→        break;
+   624→    }
+   625→    
+   626→    const sameDirection = transactionType === feesDirection;
+   627→    
+   628→    if (sameDirection) {
+   629→      finalBalance = finalBalance + feesValue;
+   630→    } else {
+   631→      finalBalance = finalBalance - feesValue;
+   632→    }
+   633→  }
+   634→  
+   635→  return finalBalance;
+   636→}
+   637→
+   638→// ============================================
+   639→// Default Currencies
+   640→// ============================================
+   641→
+   642→const defaultCurrencies: Omit<Currency, 'createdAt' | 'updatedAt'>[] = [
+   643→  { id: 'cur_usd', code: 'USD', name: 'دولار أمريكي', symbol: '$', isDefault: true, isActive: true, exchangeRate: 1, conversionMethod: 'MULTIPLY' },
+   644→  { id: 'cur_eur', code: 'EUR', name: 'يورو', symbol: '€', isDefault: false, isActive: false, exchangeRate: 1.08, conversionMethod: 'MULTIPLY' },
+   645→  { id: 'cur_gbp', code: 'GBP', name: 'جنيه إسترليني', symbol: '£', isDefault: false, isActive: false, exchangeRate: 1.27, conversionMethod: 'MULTIPLY' },
+   646→  { id: 'cur_sar', code: 'SAR', name: 'ريال سعودي', symbol: 'ر.س', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
+   647→  { id: 'cur_aed', code: 'AED', name: 'درهم إماراتي', symbol: 'د.إ', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
+   648→  { id: 'cur_kwd', code: 'KWD', name: 'دينار كويتي', symbol: 'د.ك', isDefault: false, isActive: false, exchangeRate: 3.26, conversionMethod: 'MULTIPLY' },
+   649→  { id: 'cur_bhd', code: 'BHD', name: 'دينار بحريني', symbol: 'د.ب', isDefault: false, isActive: false, exchangeRate: 2.65, conversionMethod: 'MULTIPLY' },
+   650→  { id: 'cur_qar', code: 'QAR', name: 'ريال قطري', symbol: 'ر.ق', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
+   651→  { id: 'cur_omr', code: 'OMR', name: 'ريال عماني', symbol: 'ر.ع', isDefault: false, isActive: false, exchangeRate: 2.60, conversionMethod: 'MULTIPLY' },
+   652→  { id: 'cur_syp', code: 'SYP', name: 'ليرة سورية', symbol: 'ل.س', isDefault: false, isActive: false, exchangeRate: 0.00004, conversionMethod: 'MULTIPLY' },
+   653→  { id: 'cur_lbp', code: 'LBP', name: 'ليرة لبنانية', symbol: 'ل.ل', isDefault: false, isActive: false, exchangeRate: 0.000011, conversionMethod: 'DIVIDE' },
+   654→  { id: 'cur_jod', code: 'JOD', name: 'دينار أردني', symbol: 'د.أ', isDefault: false, isActive: false, exchangeRate: 1.41, conversionMethod: 'MULTIPLY' },
+   655→  { id: 'cur_iqd', code: 'IQD', name: 'دينار عراقي', symbol: 'د.ع', isDefault: false, isActive: false, exchangeRate: 0.00076, conversionMethod: 'DIVIDE' },
+   656→  { id: 'cur_try', code: 'TRY', name: 'ليرة تركية', symbol: '₺', isDefault: false, isActive: false, exchangeRate: 0.031, conversionMethod: 'DIVIDE' },
+   657→  { id: 'cur_egp', code: 'EGP', name: 'جنيه مصري', symbol: 'ج.م', isDefault: false, isActive: false, exchangeRate: 0.020, conversionMethod: 'DIVIDE' },
+   658→  { id: 'cur_tnd', code: 'TND', name: 'دينار تونسي', symbol: 'د.ت', isDefault: false, isActive: false, exchangeRate: 0.32, conversionMethod: 'MULTIPLY' },
+   659→  { id: 'cur_dzd', code: 'DZD', name: 'دينار جزائري', symbol: 'د.ج', isDefault: false, isActive: false, exchangeRate: 0.0075, conversionMethod: 'DIVIDE' },
+   660→  { id: 'cur_mad', code: 'MAD', name: 'درهم مغربي', symbol: 'د.م', isDefault: false, isActive: false, exchangeRate: 0.10, conversionMethod: 'DIVIDE' },
+   661→  { id: 'cur_inr', code: 'INR', name: 'روبية هندية', symbol: '₹', isDefault: false, isActive: false, exchangeRate: 0.012, conversionMethod: 'DIVIDE' },
+   662→  { id: 'cur_aud', code: 'AUD', name: 'دولار أسترالي', symbol: 'A$', isDefault: false, isActive: false, exchangeRate: 0.65, conversionMethod: 'MULTIPLY' },
+   663→  { id: 'cur_cad', code: 'CAD', name: 'دولار كندي', symbol: 'C$', isDefault: false, isActive: false, exchangeRate: 0.73, conversionMethod: 'MULTIPLY' },
+   664→  { id: 'cur_chf', code: 'CHF', name: 'فرنك سويسري', symbol: 'Fr', isDefault: false, isActive: false, exchangeRate: 1.12, conversionMethod: 'MULTIPLY' },
+   665→  { id: 'cur_cny', code: 'CNY', name: 'يوان صيني', symbol: '¥', isDefault: false, isActive: false, exchangeRate: 0.14, conversionMethod: 'DIVIDE' },
+   666→  { id: 'cur_jpy', code: 'JPY', name: 'ين ياباني', symbol: '¥', isDefault: false, isActive: false, exchangeRate: 0.0067, conversionMethod: 'DIVIDE' },
+   667→];
+   668→
+   669→// ============================================
+   670→// Database Initialization
+   671→// ============================================
+   672→
+   673→let isDbInitialized = false;
+   674→
+   675→// Module-level flag: set to false when Supabase tables don't exist
+   676→export let tablesExist = true;
+   677→
+   678→// Error type for missing tables — used by callers to distinguish from other errors
+   679→export const TABLES_MISSING_ERROR = 'TABLES_MISSING';
+   680→
+   681→/**
+   682→ * Check whether Supabase tables exist by trying a simple SELECT
+   683→ * 🔸 Also checks if Supabase client is configured (isSupabaseConfigured)
+   684→ * 🔸 Distinguishes between "tables missing" vs "network/RLS error"
+   685→ * 🔸 Logs detailed info for debugging on different devices
+   686→ */
+   687→export async function checkTablesExist(): Promise<boolean> {
+   688→  // First check if Supabase is even configured
+   689→  if (!isSupabaseConfigured) {
+   690→    console.error('[Supabase] ❌ Client not configured — missing env vars');
+   691→    console.error('[Supabase] 💡 Check: NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY must be set');
+   692→    console.error('[Supabase] 💡 On Vercel: add in Settings → Environment Variables');
+   693→    tablesExist = false;
+   694→    return false;
+   695→  }
+   696→
+   697→  try {
+   698→    console.log('[Supabase] 🔍 Checking if tables exist...');
+   699→    const result = await fetchWithRetry(async () => {
+   700→      const { data, error, status } = await supabase.from('currencies').select('id').limit(1);
+   701→      if (error) throw error;
+   702→      return { data, status };
+   703→    });
+   704→
+   705→    if (result === null) {
+   706→      // All retries failed — likely network issue, assume tables exist and retry later
+   707→      console.warn('[Supabase] ⚠️ checkTablesExist: network error after retries, assuming tables exist');
+   708→      tablesExist = true;
+   709→      return true;
+   710→    }
+   711→
+   712→    // Success — tables exist
+   713→    console.log('[Supabase] ✅ Tables exist, currencies count:', result.data?.length ?? 0);
+   714→    tablesExist = true;
+   715→    return true;
+   716→  } catch (err) {
+   717→    // fetchWithRetry re-throws non-retryable errors (e.g., table doesn't exist, RLS)
+   718→    const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+   719→    
+   720→    // Table doesn't exist
+   721→    if (
+   722→      msg.includes('could not find') ||
+   723→      msg.includes('does not exist') ||
+   724→      msg.includes('schema cache') ||
+   725→      msg.includes('relation')
+   726→    ) {
+   727→      console.error('[Supabase] 💡 Tables do NOT exist. Run the migration SQL in Supabase SQL Editor.');
+   728→      tablesExist = false;
+   729→      return false;
+   730→    }
+   731→
+   732→    // RLS or auth errors — tables exist but access denied
+   733→    if (msg.includes('policy') || msg.includes('permission') || msg.includes('jwt') || msg.includes('rls') || msg.includes('new row violates')) {
+   734→      console.error('[Supabase] ⚠️ Tables EXIST but RLS blocks access — FIX: Run fix-rls.sql in Supabase SQL Editor');
+   735→      tablesExist = true;
+   736→      return true;
+   737→    }
+   738→
+   739→    // Other errors — don't block the app
+   740→    console.error('[Supabase] ❌ checkTablesExist exception:', err);
+   741→    tablesExist = true;
+   742→    return true;
+   743→  }
+   744→}
+   745→
+   746→/**
+   747→ * إعادة تعيين حالة التهيئة
+   748→ * تُستخدم بعد إعداد قاعدة البيانات للسماح بإعادة التهيئة
+   749→ */
+   750→export function resetInitializationState(): void {
+   751→  isDbInitialized = false;
+   752→  tablesExist = true;
+   753→}
+   754→
+   755→export async function initializeDatabase(): Promise<void> {
+   756→  if (isDbInitialized) return;
+   757→
+   758→  console.log('[Supabase] 🔄 initializeDatabase() called...');
+   759→
+   760→  // First check if tables exist
+   761→  const exist = await checkTablesExist();
+   762→  if (!exist) {
+   763→    // Don't throw — just set the flag and return silently
+   764→    // This allows the app to continue with empty data and show the setup screen
+   765→    console.warn('[Supabase] ⚠️ Tables do not exist. App will run with empty data.');
+   766→    isDbInitialized = true; // Mark as initialized so getters don't keep re-checking
+   767→    return;
+   768→  }
+   769→  
+   770→  const { data: currencies, error } = await supabase.from('currencies').select('id');
+   771→  if (error) {
+   772→    // Check if the error is because tables don't exist
+   773→    const msg = error.message || '';
+   774→    console.error('[Supabase] ❌ Error fetching currencies during init:', { message: msg, code: error.code, hint: error.hint });
+   775→    if (msg.includes('could not find') || msg.includes('does not exist') || msg.includes('schema cache') || msg.includes('relation')) {
+   776→      tablesExist = false;
+   777→      // Don't throw — return silently so the app can show setup screen
+   778→      console.warn('[Supabase] ⚠️ Tables do not exist (detected during init). App will run with empty data.');
+   779→      isDbInitialized = true; // Mark as initialized so getters don't keep re-checking
+   780→      return;
+   781→    }
+   782→    // RLS error - log but don't crash
+   783→    if (msg.includes('policy') || msg.includes('permission') || msg.includes('violates row-level')) {
+   784→      console.error('[Supabase] ❌ RLS is blocking access! Run fix-rls.sql in Supabase SQL Editor to fix this.');
+   785→      isDbInitialized = true;
+   786→      return;
+   787→    }
+   788→    throw new Error(error.message);
+   789→  }
+   790→  
+   791→  const count = currencies?.length || 0;
+   792→  const hasUsd = currencies?.some(c => c.id === 'cur_usd');
+   793→  
+   794→  if (count === 0 || !hasUsd) {
+   795→    const now = new Date();
+   796→    
+   797→    // Delete old currencies
+   798→    await supabase.from('currencies').delete().neq('id', '__never_match__');
+   799→    
+   800→    // Insert default currencies
+   801→    const currencyRows = defaultCurrencies.map(c => 
+   802→      currencyToRow({ ...c, createdAt: now, updatedAt: now })
+   803→    );
+   804→    const { error: insertError } = await supabase.from('currencies').insert(currencyRows);
+   805→    if (insertError) throw new Error(insertError.message);
+   806→    
+   807→    // Check USD vault
+   808→    const { data: usdVaults } = await supabase.from('vaults').select('id').eq('currency_id', 'cur_usd');
+   809→    if (!usdVaults || usdVaults.length === 0) {
+   810→      const vaultRow = vaultToRow({
+   811→        id: 'vault_cur_usd',
+   812→        currencyId: 'cur_usd',
+   813→        balance: 0,
+   814→        openingBalance: 0,
+   815→        createdAt: now,
+   816→        updatedAt: now,
+   817→      });
+   818→      await supabase.from('vaults').insert([vaultRow]);
+   819→    }
+   820→    
+   821→    // Check default account
+   822→    const { data: accounts } = await supabase.from('accounts').select('id');
+   823→    if (!accounts || accounts.length === 0) {
+   824→      const accountRow = accountToRow({
+   825→        id: 'acc_sample',
+   826→        name: 'حساب رئيسي',
+   827→        type: 'PRIVATE',
+   828→        description: 'الحساب الافتراضي',
+   829→        isActive: true,
+   830→        createdAt: now,
+   831→        updatedAt: now,
+   832→      });
+   833→      await supabase.from('accounts').insert([accountRow]);
+   834→    }
+   835→  }
+   836→  
+   837→  // SYP migration fix
+   838→  try {
+   839→    const { data: sypCurrency } = await supabase.from('currencies').select('*').eq('id', 'cur_syp').single();
+   840→    if (sypCurrency) {
+   841→      const syp = rowToCurrency(sypCurrency);
+   842→      if (syp.conversionMethod === 'DIVIDE' && syp.exchangeRate < 1) {
+   843→        await supabase.from('currencies').update({
+   844→          conversion_method: 'MULTIPLY',
+   845→          updated_at: new Date().toISOString(),
+   846→        }).eq('id', 'cur_syp');
+   847→      }
+   848→    }
+   849→  } catch (e) {
+   850→    console.warn('SYP migration fix skipped:', e);
+   851→  }
+   852→  
+   853→  isDbInitialized = true;
+   854→}
+   855→
+   856→// ============================================
+   857→// Reset Currencies to Default
+   858→// ============================================
+   859→
+   860→export async function resetCurrenciesToDefault(): Promise<{ success: boolean; message: string }> {
+   861→  try {
+   862→    const now = new Date();
+   863→    
+   864→    // Delete all existing currencies
+   865→    await supabase.from('currencies').delete().neq('id', '__never_match__');
+   866→    
+   867→    // Re-insert default currencies
+   868→    const currencyRows = defaultCurrencies.map(c =>
+   869→      currencyToRow({ ...c, createdAt: now, updatedAt: now })
+   870→    );
+   871→    const { error } = await supabase.from('currencies').insert(currencyRows);
+   872→    if (error) throw new Error(error.message);
+   873→    
+   874→    // Ensure USD vault exists
+   875→    const { data: usdVaults } = await supabase.from('vaults').select('id').eq('currency_id', 'cur_usd');
+   876→    if (!usdVaults || usdVaults.length === 0) {
+   877→      const vaultRow = vaultToRow({
+   878→        id: 'vault_cur_usd',
+   879→        currencyId: 'cur_usd',
+   880→        balance: 0,
+   881→        openingBalance: 0,
+   882→        createdAt: now,
+   883→        updatedAt: now,
+   884→      });
+   885→      await supabase.from('vaults').insert([vaultRow]);
+   886→    }
+   887→    
+   888→    return { success: true, message: 'تم إعادة العملات الافتراضية بنجاح' };
+   889→  } catch (error) {
+   890→    console.error('Error resetting currencies:', error);
+   891→    return { success: false, message: 'حدث خطأ أثناء إعادة التعيين' };
+   892→  }
+   893→}
+   894→
+   895→// ============================================
+   896→// Currency Functions
+   897→// ============================================
+   898→
+   899→export async function getAllAvailableCurrencies(): Promise<Currency[]> {
+   900→  await initializeDatabase();
+   901→  if (!tablesExist) return [];
+   902→  const result = await fetchWithRetry(async () => {
+   903→    const { data, error } = await supabase.from('currencies').select('*');
+   904→    if (error) throw error;
+   905→    return data;
+   906→  });
+   907→  if (result === null) {
+   908→    console.error('[Supabase] ❌ getAllAvailableCurrencies: failed after retries, returning []');
+   909→    return [];
+   910→  }
+   911→  console.log('[Supabase] 📊 Currencies loaded:', result?.length ?? 0);
+   912→  return (result || []).map(rowToCurrency);
+   913→}
+   914→
+   915→export async function getActiveCurrencies(): Promise<Currency[]> {
+   916→  await initializeDatabase();
+   917→  if (!tablesExist) return [];
+   918→  const result = await fetchWithRetry(async () => {
+   919→    const { data, error } = await supabase.from('currencies').select('*');
+   920→    if (error) throw error;
+   921→    return data;
+   922→  });
+   923→  if (result === null) {
+   924→    console.error('[Supabase] ❌ getActiveCurrencies: failed after retries, returning []');
+   925→    return [];
+   926→  }
+   927→  const active = (result || []).map(rowToCurrency).filter(c => c.isActive);
+   928→  console.log('[Supabase] 📊 Active currencies:', active.length);
+   929→  return active;
+   930→}
+   931→
+   932→export async function activateCurrency(currencyId: string, exchangeRate?: number): Promise<Currency> {
+   933→  await initializeDatabase();
+   934→  
+   935→  const { data: currencyRow, error: fetchError } = await supabase.from('currencies').select('*').eq('id', currencyId).single();
+   936→  if (fetchError || !currencyRow) throw new Error('العملة غير موجودة');
+   937→  
+   938→  const currency = rowToCurrency(currencyRow);
+   939→  const now = new Date();
+   940→  const rate = exchangeRate ?? currency.exchangeRate ?? 1;
+   941→  
+   942→  const { error: updateError } = await supabase.from('currencies').update({
+   943→    is_active: true,
+   944→    exchange_rate: rate,
+   945→    updated_at: now.toISOString(),
+   946→  }).eq('id', currencyId);
+   947→  if (updateError) throw new Error(updateError.message);
+   948→  
+   949→  // Check if vault exists
+   950→  const { data: existingVaults } = await supabase.from('vaults').select('id').eq('currency_id', currencyId);
+   951→  if (!existingVaults || existingVaults.length === 0) {
+   952→    const vaultRow = vaultToRow({
+   953→      id: 'vault_' + currencyId,
+   954→      currencyId,
+   955→      balance: 0,
+   956→      openingBalance: 0,
+   957→      createdAt: now,
+   958→      updatedAt: now,
+   959→    });
+   960→    await supabase.from('vaults').insert([vaultRow]);
+   961→  }
+   962→  
+   963→  const { data: updatedRow, error: refetchError } = await supabase.from('currencies').select('*').eq('id', currencyId).single();
+   964→  if (refetchError) throw new Error(refetchError.message);
+   965→  return rowToCurrency(updatedRow);
+   966→}
+   967→
+   968→export async function deactivateCurrency(currencyId: string): Promise<void> {
+   969→  await initializeDatabase();
+   970→  
+   971→  const { data: currencyRow } = await supabase.from('currencies').select('*').eq('id', currencyId).single();
+   972→  if (currencyRow) {
+   973→    const currency = rowToCurrency(currencyRow);
+   974→    if (currency.isDefault) throw new Error('لا يمكن إلغاء تفعيل العملة الافتراضية');
+   975→  }
+   976→  
+   977→  const { error } = await supabase.from('currencies').update({
+   978→    is_active: false,
+   979→    updated_at: new Date().toISOString(),
+   980→  }).eq('id', currencyId);
+   981→  if (error) throw new Error(error.message);
+   982→}
+   983→
+   984→export async function updateCurrencyExchangeRate(currencyId: string, rate: number): Promise<Currency> {
+   985→  await initializeDatabase();
+   986→  const { error } = await supabase.from('currencies').update({
+   987→    exchange_rate: rate,
+   988→    updated_at: new Date().toISOString(),
+   989→  }).eq('id', currencyId);
+   990→  if (error) throw new Error(error.message);
+   991→  
+   992→  const { data, error: refetchError } = await supabase.from('currencies').select('*').eq('id', currencyId).single();
+   993→  if (refetchError) throw new Error(refetchError.message);
+   994→  return rowToCurrency(data);
+   995→}
+   996→
+   997→export async function updateCurrencyConversionMethod(currencyId: string, method: 'MULTIPLY' | 'DIVIDE'): Promise<Currency> {
+   998→  await initializeDatabase();
+   999→  const { error } = await supabase.from('currencies').update({
+  1000→    conversion_method: method,
+  1001→    updated_at: new Date().toISOString(),
+  1002→  }).eq('id', currencyId);
+  1003→  if (error) throw new Error(error.message);
+  1004→  
+  1005→  const { data, error: refetchError } = await supabase.from('currencies').select('*').eq('id', currencyId).single();
+  1006→  if (refetchError) throw new Error(refetchError.message);
+  1007→  return rowToCurrency(data);
+  1008→}
+  1009→
+  1010→export async function addCustomCurrency(data: { code: string; name: string; symbol: string; exchangeRate?: number; conversionMethod?: 'MULTIPLY' | 'DIVIDE' }): Promise<Currency> {
+  1011→  await initializeDatabase();
+  1012→  
+  1013→  // Check for existing currency with same code
+  1014→  const { data: existing } = await supabase.from('currencies').select('id').eq('code', data.code.toUpperCase());
+  1015→  if (existing && existing.length > 0) {
+  1016→    throw new Error('العملة موجودة بالفعل');
+  1017→  }
+  1018→  
+  1019→  const now = new Date();
+  1020→  const id = 'cur_custom_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
+  1021→  
+  1022→  const currency: Currency = {
+  1023→    id,
+  1024→    code: data.code.toUpperCase(),
+  1025→    name: data.name,
+  1026→    symbol: data.symbol,
+  1027→    isDefault: false,
+  1028→    isActive: true,
+  1029→    exchangeRate: data.exchangeRate || 1,
+  1030→    conversionMethod: data.conversionMethod || 'MULTIPLY',
+  1031→    createdAt: now,
+  1032→    updatedAt: now,
+  1033→  };
+  1034→  
+  1035→  const { error } = await supabase.from('currencies').insert([currencyToRow(currency)]);
+  1036→  if (error) throw new Error(error.message);
+  1037→  
+  1038→  // Create vault for new currency
+  1039→  const { data: existingVaults } = await supabase.from('vaults').select('id').eq('currency_id', id);
+  1040→  if (!existingVaults || existingVaults.length === 0) {
+  1041→    const vaultRow = vaultToRow({
+  1042→      id: 'vault_' + id,
+  1043→      currencyId: id,
+  1044→      balance: 0,
+  1045→      openingBalance: 0,
+  1046→      createdAt: now,
+  1047→      updatedAt: now,
+  1048→    });
+  1049→    await supabase.from('vaults').insert([vaultRow]);
+  1050→  }
+  1051→  
+  1052→  return currency;
+  1053→}
+  1054→
+  1055→export async function deleteCurrencyFromDb(currencyId: string): Promise<void> {
+  1056→  await initializeDatabase();
+  1057→  
+  1058→  const { data: currencyRow } = await supabase.from('currencies').select('*').eq('id', currencyId).single();
+  1059→  if (!currencyRow) throw new Error('العملة غير موجودة');
+  1060→  
+  1061→  const currency = rowToCurrency(currencyRow);
+  1062→  if (currency.isDefault) throw new Error('لا يمكن حذف العملة الافتراضية');
+  1063→  
+  1064→  // Check for related transactions
+  1065→  const { count: txCount } = await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('currency_id', currencyId);
+  1066→  const { count: debtCount } = await supabase.from('debts').select('id', { count: 'exact', head: true }).eq('currency_id', currencyId);
+  1067→  
+  1068→  // Check for related exchanges (non-deleted)
+  1069→  const { data: exchangeData } = await supabase.from('currency_exchanges').select('id, outgoing_currency_id, incoming_currency_id, is_deleted')
+  1070→    .or(`outgoing_currency_id.eq.${currencyId},incoming_currency_id.eq.${currencyId}`);
+  1071→  const relatedExchanges = (exchangeData || []).filter(e => !e.is_deleted);
+  1072→  
+  1073→  if ((txCount || 0) > 0 || (debtCount || 0) > 0 || relatedExchanges.length > 0) {
+  1074→    throw new Error('لا يمكن حذف عملة مرتبطة بحركات أو ديون أو عمليات صرف');
+  1075→  }
+  1076→  
+  1077→  // Delete associated vault
+  1078→  const { data: vaultRows } = await supabase.from('vaults').select('id').eq('currency_id', currencyId);
+  1079→  if (vaultRows && vaultRows.length > 0) {
+  1080→    for (const v of vaultRows) {
+  1081→      await supabase.from('vaults').delete().eq('id', v.id);
+  1082→    }
+  1083→  }
+  1084→  
+  1085→  // Delete currency
+  1086→  const { error } = await supabase.from('currencies').delete().eq('id', currencyId);
+  1087→  if (error) throw new Error(error.message);
+  1088→}
+  1089→
+  1090→// ============================================
+  1091→// Vault Functions
+  1092→// ============================================
+  1093→
+  1094→export async function getVaults(): Promise<Vault[]> {
+  1095→  await initializeDatabase();
+  1096→  if (!tablesExist) return [];
+  1097→  const result = await fetchWithRetry(async () => {
+  1098→    const { data, error } = await supabase.from('vaults').select('*');
+  1099→    if (error) throw error;
+  1100→    return data;
+  1101→  });
+  1102→  if (result === null) {
+  1103→    console.error('[Supabase] ❌ getVaults: failed after retries, returning []');
+  1104→    return [];
+  1105→  }
+  1106→  console.log('[Supabase] 📊 Vaults loaded:', result?.length ?? 0);
+  1107→  return (result || []).map(rowToVault);
+  1108→}
+  1109→
+  1110→/**
+  1111→ * Recalculate vault balance from opening_balance + all vault-affecting operations after opening_balance_date
+  1112→ * Formula: balance = opening_balance + sum(post-date operations)
+  1113→ *
+  1114→ * Operations that affect vault:
+  1115→ * 1. TRANSACTIONS: Complete, cash, not archived
+  1116→ * 2. DEBTS: Cash mode debts
+  1117→ * 3. DEBT PAYMENTS: Cash mode payments
+  1118→ * 4. CURRENCY EXCHANGES: Not deleted
+  1119→ */
+  1120→export async function recalculateVaultBalance(currencyId: string): Promise<Vault | null> {
+  1121→  await initializeDatabase();
+  1122→
+  1123→  // Get the vault
+  1124→  const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', currencyId);
+  1125→  if (!vaultRows || vaultRows.length === 0) return null;
+  1126→  const vault = rowToVault(vaultRows[0]);
+  1127→
+  1128→  const openingBalance = vault.openingBalance || 0;
+  1129→  const openingDate = vault.openingBalanceDate;
+  1130→
+  1131→  let delta = 0;
+  1132→
+  1133→  // Build date filter - only operations AFTER opening_balance_date
+  1134→  const dateFilter = openingDate ? openingDate.toISOString() : null;
+  1135→
+  1136→  // 1. TRANSACTIONS: Complete, cash (overflow transactions use currencyId directly)
+  1137→  let transactionQuery = supabase.from('transactions').select('*')
+  1138→    .eq('is_complete', true)
+  1139→    .eq('payment_type', 'CASH');
+  1140→
+  1141→  if (dateFilter) {
+  1142→    transactionQuery = transactionQuery.gt('date', dateFilter);
+  1143→  }
+  1144→
+  1145→  const { data: transactions } = await transactionQuery;
+  1146→  if (transactions) {
+  1147→    for (const tx of transactions) {
+  1148→      const txObj = rowToTransaction(tx);
+  1149→      // Determine which vault this transaction affects
+  1150→      const vaultCurrencyId = txObj.isOverflowTransaction ? txObj.currencyId : (txObj.baseCurrencyId || txObj.currencyId);
+  1151→
+  1152→      if (vaultCurrencyId === currencyId) {
+  1153→        // INCOME: vault decreases (money goes out)
+  1154→        // EXPENSE: vault increases (money comes in)
+  1155→        if (txObj.type === 'INCOME') {
+  1156→          delta -= txObj.amount;
+  1157→        } else {
+  1158→          delta += txObj.amount;
+  1159→        }
+  1160→      }
+  1161→    }
+  1162→  }
+  1163→
+  1164→  // 2. DEBTS: Cash mode debts affect vault
+  1165→  let debtQuery = supabase.from('debts').select('*')
+  1166→    .eq('debt_mode', 'CASH');
+  1167→
+  1168→  if (dateFilter) {
+  1169→    debtQuery = debtQuery.gt('date', dateFilter);
+  1170→  }
+  1171→
+  1172→  const { data: debts } = await debtQuery;
+  1173→  if (debts) {
+  1174→    for (const d of debts) {
+  1175→      const debtObj = rowToDebt(d);
+  1176→      if (debtObj.currencyId === currencyId) {
+  1177→        // PAYABLE (علينا): vault increases (we receive money)
+  1178→        // RECEIVABLE (لنا): vault decreases (we give money out)
+  1179→        if (debtObj.debtType === 'PAYABLE') {
+  1180→          delta += debtObj.amount;
+  1181→        } else {
+  1182→          delta -= debtObj.amount;
+  1183→        }
+  1184→      }
+  1185→    }
+  1186→  }
+  1187→
+  1188→  // 3. DEBT PAYMENTS: Cash mode
+  1189→  let paymentQuery = supabase.from('debt_payments').select('*')
+  1190→    .eq('payment_mode', 'CASH');
+  1191→
+  1192→  if (dateFilter) {
+  1193→    paymentQuery = paymentQuery.gt('date', dateFilter);
+  1194→  }
+  1195→
+  1196→  const { data: payments } = await paymentQuery;
+  1197→  if (payments) {
+  1198→    for (const p of payments) {
+  1199→      const paymentObj = rowToDebtPayment(p);
+  1200→      if (paymentObj.currencyId === currencyId) {
+  1201→        // Debt payment direction logic:
+  1202→        // RECEIVABLE (لنا): vault decreases (money goes out to pay toward our receivable)
+  1203→        // PAYABLE (علينا): vault increases (money comes in to pay toward our payable)
+  1204→        const direction = paymentObj.paymentDirection || 'RECEIVABLE';
+  1205→        if (direction === 'PAYABLE') {
+  1206→          delta += paymentObj.amount;
+  1207→        } else {
+  1208→          delta -= paymentObj.amount;
+  1209→        }
+  1210→      }
+  1211→    }
+  1212→  }
+  1213→
+  1214→  // 4. CURRENCY EXCHANGES: Not deleted
+  1215→  let exchangeQuery = supabase.from('currency_exchanges').select('*')
+  1216→    .eq('is_deleted', false);
+  1217→
+  1218→  if (dateFilter) {
+  1219→    exchangeQuery = exchangeQuery.gt('date', dateFilter);
+  1220→  }
+  1221→
+  1222→  const { data: exchanges } = await exchangeQuery;
+  1223→  if (exchanges) {
+  1224→    for (const ex of exchanges) {
+  1225→      const exchangeObj = rowToCurrencyExchange(ex);
+  1226→      // Outgoing: vault decreases
+  1227→      if (exchangeObj.outgoingCurrencyId === currencyId) {
+  1228→        delta -= exchangeObj.outgoingAmount;
+  1229→      }
+  1230→      // Incoming: vault increases
+  1231→      if (exchangeObj.incomingCurrencyId === currencyId) {
+  1232→        delta += exchangeObj.incomingAmount;
+  1233→      }
+  1234→    }
+  1235→  }
+  1236→
+  1237→  // Compute new balance
+  1238→  const newBalance = openingBalance + delta;
+  1239→
+  1240→  // Update vault
+  1241→  const { error } = await supabase.from('vaults').update({
+  1242→    balance: newBalance,
+  1243→    updated_at: new Date().toISOString(),
+  1244→  }).eq('id', vault.id);
+  1245→
+  1246→  if (error) throw new Error(error.message);
+  1247→
+  1248→  const { data: updatedRow } = await supabase.from('vaults').select('*').eq('id', vault.id).single();
+  1249→  return updatedRow ? rowToVault(updatedRow) : null;
+  1250→}
+  1251→
+  1252→export async function updateVaultBalance(_currencyId: string, _balanceDelta: number): Promise<Vault | null> {
+  1253→  // Deprecated: Balance is now computed from opening_balance + post-date operations
+  1254→  // Just recalculate
+  1255→  return await recalculateVaultBalance(_currencyId);
+  1256→}
+  1257→
+  1258→export async function updateVaultOpeningBalance(
+  1259→  currencyId: string,
+  1260→  openingBalance: number,
+  1261→  openingBalanceDate?: Date | null
+  1262→): Promise<Vault | null> {
+  1263→  await initializeDatabase();
+  1264→
+  1265→  const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', currencyId);
+  1266→  if (vaultRows && vaultRows.length > 0) {
+  1267→    const vault = rowToVault(vaultRows[0]);
+  1268→
+  1269→    const updateData: Record<string, unknown> = {
+  1270→      opening_balance: openingBalance,
+  1271→      updated_at: new Date().toISOString(),
+  1272→    };
+  1273→
+  1274→    if (openingBalanceDate !== undefined) {
+  1275→      updateData.opening_balance_date = openingBalanceDate ? openingBalanceDate.toISOString() : null;
+  1276→    }
+  1277→
+  1278→    const { error } = await supabase.from('vaults').update(updateData).eq('id', vault.id);
+  1279→    if (error) throw new Error(error.message);
+  1280→
+  1281→    // Recalculate balance using the new opening balance + post-date operations
+  1282→    return await recalculateVaultBalance(currencyId);
+  1283→  }
+  1284→  return null;
+  1285→}
+  1286→
+  1287→export async function getTotalBalanceInUSD(): Promise<number> {
+  1288→  await initializeDatabase();
+  1289→  if (!tablesExist) return 0;
+  1290→  const allVaults = await getVaults();
+  1291→  const allCurrencies = await getAllAvailableCurrencies();
+  1292→  
+  1293→  let total = 0;
+  1294→  for (const vault of allVaults) {
+  1295→    const currency = allCurrencies.find(c => c.id === vault.currencyId);
+  1296→    if (currency && currency.isActive) {
+  1297→      if (currency.conversionMethod === 'DIVIDE') {
+  1298→        total += vault.balance / currency.exchangeRate;
+  1299→      } else {
+  1300→        total += vault.balance * currency.exchangeRate;
+  1301→      }
+  1302→    }
+  1303→  }
+  1304→  return total;
+  1305→}
+  1306→
+  1307→// ============================================
+  1308→// Account Functions
+  1309→// ============================================
+  1310→
+  1311→export async function getAccounts(): Promise<Account[]> {
+  1312→  await initializeDatabase();
+  1313→  if (!tablesExist) return [];
+  1314→  const result = await fetchWithRetry(async () => {
+  1315→    const { data, error } = await supabase.from('accounts').select('*');
+  1316→    if (error) throw error;
+  1317→    return data;
+  1318→  });
+  1319→  if (result === null) {
+  1320→    console.error('[Supabase] ❌ getAccounts: failed after retries, returning []');
+  1321→    return [];
+  1322→  }
+  1323→  const active = (result || []).map(rowToAccount).filter(a => a.isActive);
+  1324→  console.log('[Supabase] 📊 Active accounts loaded:', active.length);
+  1325→  return active;
+  1326→}
+  1327→
+  1328→export async function addAccount(data: Partial<Account>): Promise<Account> {
+  1329→  await initializeDatabase();
+  1330→  const now = new Date();
+  1331→  const account: Account = {
+  1332→    id: generateId(),
+  1333→    name: data.name || '',
+  1334→    type: data.type || 'PRIVATE',
+  1335→    description: data.description,
+  1336→    isActive: true,
+  1337→    createdAt: now,
+  1338→    updatedAt: now,
+  1339→  };
+  1340→  const { error } = await supabase.from('accounts').insert([accountToRow(account)]);
+  1341→  if (error) throw new Error(error.message);
+  1342→  return account;
+  1343→}
+  1344→
+  1345→export async function updateAccount(id: string, data: Partial<Account>): Promise<Account> {
+  1346→  await initializeDatabase();
+  1347→  const updateFields: Record<string, unknown> = { ...data, updatedAt: new Date() };
+  1348→  const { error } = await supabase.from('accounts').update(accountToRow(updateFields as Partial<Account>)).eq('id', id);
+  1349→  if (error) throw new Error(error.message);
+  1350→  
+  1351→  const { data: updatedRow, error: refetchError } = await supabase.from('accounts').select('*').eq('id', id).single();
+  1352→  if (refetchError) throw new Error(refetchError.message);
+  1353→  return rowToAccount(updatedRow);
+  1354→}
+  1355→
+  1356→export async function deleteAccount(id: string): Promise<void> {
+  1357→  await initializeDatabase();
+  1358→  const { error } = await supabase.from('accounts').update({
+  1359→    is_active: false,
+  1360→    updated_at: new Date().toISOString(),
+  1361→  }).eq('id', id);
+  1362→  if (error) throw new Error(error.message);
+  1363→}
+  1364→
+  1365→// ============================================
+  1366→// Transaction Functions
+  1367→// ============================================
+  1368→
+  1369→export async function getTransactions(options?: { includeArchived?: boolean }): Promise<Transaction[]> {
+  1370→  await initializeDatabase();
+  1371→  if (!tablesExist) return [];
+  1372→  const includeArchived = options?.includeArchived ?? false;
+  1373→  const result = await fetchWithRetry(async () => {
+  1374→    let query = supabase.from('transactions').select('*').order('date', { ascending: false });
+  1375→    if (!includeArchived) {
+  1376→      query = query.eq('is_archived', false);
+  1377→    }
+  1378→    const { data, error } = await query;
+  1379→    if (error) throw error;
+  1380→    return data;
+  1381→  });
+  1382→  if (result === null) {
+  1383→    console.error('[Supabase] ❌ getTransactions: failed after retries, returning []');
+  1384→    return [];
+  1385→  }
+  1386→  console.log('[Supabase] 📊 Transactions loaded:', result?.length ?? 0, includeArchived ? '(incl. archived)' : '(active only)');
+  1387→  return (result || []).map(rowToTransaction);
+  1388→}
+  1389→
+  1390→export async function addTransaction(data: {
+  1391→  accountId: string;
+  1392→  currencyId: string;
+  1393→  baseCurrencyId?: string | null;
+  1394→  type: 'INCOME' | 'EXPENSE';
+  1395→  paymentType: 'CASH' | 'DEFERRED';
+  1396→  amount: number;
+  1397→  conversionFactor: number;
+  1398→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+  1399→  feesType: 'FIXED' | 'PERCENTAGE' | 'PER_THOUSAND';
+  1400→  feesDirection: 'INCOME' | 'EXPENSE';
+  1401→  feesAmount: number;
+  1402→  description?: string;
+  1403→  date: string;
+  1404→  isOverflowTransaction?: boolean;
+  1405→  relatedPaymentId?: string | null;
+  1406→  isComplete?: boolean;
+  1407→  finalBalance?: number;  // 🔸 تجاوز الرصيد النهائي المحسوب
+  1408→}): Promise<Transaction> {
+  1409→  await initializeDatabase();
+  1410→  const now = new Date();
+  1411→  
+  1412→  const effectiveFactor = data.conversionFactor ?? 1;
+  1413→  // 🔸 إذا تم تمرير finalBalance يدويًا، نستخدمه مباشرة (للحركات غير المكتملة)
+  1414→  const calculatedFinal = calculateFinalBalance(
+  1415→    data.amount || 0,
+  1416→    effectiveFactor,
+  1417→    data.conversionMethod || 'MULTIPLY',
+  1418→    data.feesType || 'FIXED',
+  1419→    data.feesAmount || 0,
+  1420→    data.feesDirection || 'INCOME',
+  1421→    data.type
+  1422→  );
+  1423→  const finalBalance = data.finalBalance !== undefined ? data.finalBalance : calculatedFinal;
+  1424→  
+  1425→  // 🔸 Check Box هو المصدر الوحيد لحالة الاكتمال
+  1426→  const isComplete = data.isComplete !== undefined ? data.isComplete : true;
+  1427→  
+  1428→  // Check balance for complete cash income transactions
+  1429→  if (isComplete && data.paymentType === 'CASH' && data.type === 'INCOME') {
+  1430→    const vaultCurrencyId = data.baseCurrencyId || data.currencyId;
+  1431→    const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', vaultCurrencyId);
+  1432→    if (vaultRows && vaultRows.length > 0) {
+  1433→      const vault = rowToVault(vaultRows[0]);
+  1434→      if (vault.balance - data.amount < 0) {
+  1435→        const { data: currencyRow } = await supabase.from('currencies').select('*').eq('id', vaultCurrencyId).single();
+  1436→        const currency = currencyRow ? rowToCurrency(currencyRow) : null;
+  1437→        throw new Error(`الرصيد غير كافٍ في صندوق ${currency?.name || ''}`);
+  1438→      }
+  1439→    }
+  1440→  }
+  1441→  
+  1442→  const transaction: Transaction = {
+  1443→    id: generateId(),
+  1444→    accountId: data.accountId,
+  1445→    currencyId: data.currencyId,
+  1446→    baseCurrencyId: data.baseCurrencyId || null,
+  1447→    type: data.type,
+  1448→    paymentType: data.paymentType,
+  1449→    amount: data.amount,
+  1450→    conversionFactor: effectiveFactor,
+  1451→    conversionMethod: data.conversionMethod || 'MULTIPLY',
+  1452→    feesType: data.feesType || 'FIXED',
+  1453→    feesDirection: data.feesDirection || 'INCOME',
+  1454→    feesAmount: data.feesAmount || 0,
+  1455→    finalBalance,
+  1456→    description: data.description,
+  1457→    date: new Date(data.date),
+  1458→    isOverflowTransaction: data.isOverflowTransaction || false,
+  1459→    relatedPaymentId: data.relatedPaymentId || null,
+  1460→    isComplete,
+  1461→    createdAt: now,
+  1462→    updatedAt: now,
+  1463→  };
+  1464→  
+  1465→  const { error } = await supabase.from('transactions').insert([transactionToRow(transaction)]);
+  1466→  if (error) throw new Error(error.message);
+  1467→  
+  1468→  // Recalculate vault balance for complete cash transactions
+  1469→  if (isComplete && data.paymentType === 'CASH') {
+  1470→    const vaultCurrencyId = data.isOverflowTransaction ? data.currencyId : (data.baseCurrencyId || data.currencyId);
+  1471→    await recalculateVaultBalance(vaultCurrencyId);
+  1472→  }
+  1473→  
+  1474→  return transaction;
+  1475→}
+  1476→
+  1477→export async function updateTransaction(id: string, data: Partial<Transaction>): Promise<Transaction> {
+  1478→  await initializeDatabase();
+  1479→  
+  1480→  const { data: oldRow, error: fetchError } = await supabase.from('transactions').select('*').eq('id', id).single();
+  1481→  if (fetchError || !oldRow) throw new Error('الحركة غير موجودة');
+  1482→  
+  1483→  const old = rowToTransaction(oldRow);
+  1484→  const now = new Date();
+  1485→  const oldIsComplete = old.isComplete !== undefined ? old.isComplete : true;
+  1486→  
+  1487→  const effectiveAmount = data.amount ?? old.amount;
+  1488→  const effectiveConversionFactor = data.conversionFactor ?? old.conversionFactor;
+  1489→  const effectiveConversionMethod = data.conversionMethod ?? old.conversionMethod;
+  1490→  const effectiveFeesType = data.feesType ?? old.feesType;
+  1491→  const effectiveFeesAmount = data.feesAmount ?? old.feesAmount;
+  1492→  const effectiveFeesDirection = data.feesDirection ?? old.feesDirection;
+  1493→  const effectiveType = data.type ?? old.type;
+  1494→  const effectivePaymentType = data.paymentType ?? old.paymentType;
+  1495→  
+  1496→  // 🔸 إذا تم تمرير finalBalance يدويًا، نستخدمه مباشرة (للحركات غير المكتملة)
+  1497→  const calculatedFinal = calculateFinalBalance(
+  1498→    effectiveAmount,
+  1499→    effectiveConversionFactor,
+  1500→    effectiveConversionMethod,
+  1501→    effectiveFeesType,
+  1502→    effectiveFeesAmount,
+  1503→    effectiveFeesDirection,
+  1504→    effectiveType
+  1505→  );
+  1506→  const finalBalance = data.finalBalance !== undefined ? data.finalBalance : calculatedFinal;
+  1507→  
+  1508→  // 🔸 Check Box هو المصدر الوحيد لحالة الاكتمال
+  1509→  const newIsComplete = data.isComplete !== undefined ? data.isComplete : true;
+  1510→  
+  1511→  // Clean data - remove undefined fields
+  1512→  const cleanData: Record<string, unknown> = {};
+  1513→  for (const [key, value] of Object.entries(data)) {
+  1514→    if (value !== undefined) {
+  1515→      cleanData[key] = value;
+  1516→    }
+  1517→  }
+  1518→  
+  1519→  const updateObj: Record<string, unknown> = {
+  1520→    ...cleanData,
+  1521→    finalBalance,
+  1522→    isComplete: newIsComplete,
+  1523→    date: data.date ? new Date(data.date) : old.date,
+  1524→    updatedAt: now,
+  1525→  };
+  1526→  
+  1527→  const { error: updateError } = await supabase.from('transactions').update(
+  1528→    transactionToRow(updateObj as Partial<Transaction>)
+  1529→  ).eq('id', id);
+  1530→  if (updateError) throw new Error(updateError.message);
+  1531→
+  1532→  // Recalculate vault balance for affected currencies
+  1533→  const affectedCurrencyIds = new Set<string>();
+  1534→  if (oldIsComplete && old.paymentType === 'CASH') {
+  1535→    const oldVaultCurrencyId = old.isOverflowTransaction ? old.currencyId : (old.baseCurrencyId || old.currencyId);
+  1536→    affectedCurrencyIds.add(oldVaultCurrencyId);
+  1537→  }
+  1538→  if (newIsComplete && effectivePaymentType === 'CASH') {
+  1539→    const newVaultCurrencyId = (data.isOverflowTransaction ? data.currencyId : (data.baseCurrencyId ?? data.currencyId)) ?? (old.isOverflowTransaction ? old.currencyId : (old.baseCurrencyId || old.currencyId));
+  1540→    affectedCurrencyIds.add(newVaultCurrencyId);
+  1541→  }
+  1542→  for (const cid of affectedCurrencyIds) {
+  1543→    await recalculateVaultBalance(cid);
+  1544→  }
+  1545→  
+  1546→  const { data: updatedRow, error: refetchError } = await supabase.from('transactions').select('*').eq('id', id).single();
+  1547→  if (refetchError) throw new Error(refetchError.message);
+  1548→  return rowToTransaction(updatedRow);
+  1549→}
+  1550→
+  1551→export async function deleteTransaction(id: string): Promise<void> {
+  1552→  await initializeDatabase();
+  1553→  
+  1554→  const { data: txRow, error: fetchError } = await supabase.from('transactions').select('*').eq('id', id).single();
+  1555→  if (fetchError || !txRow) throw new Error('الحركة غير موجودة');
+  1556→  
+  1557→  const transaction = rowToTransaction(txRow);
+  1558→  
+  1559→  // Determine vault currency ID for recalculation
+  1560→  const vaultCurrencyId = transaction.isOverflowTransaction
+  1561→    ? transaction.currencyId
+  1562→    : (transaction.baseCurrencyId || transaction.currencyId);
+  1563→  
+  1564→  // If overflow transaction linked to a payment, remove the reference
+  1565→  if (transaction.isOverflowTransaction && transaction.relatedPaymentId) {
+  1566→    const { data: paymentRow } = await supabase.from('debt_payments').select('*').eq('id', transaction.relatedPaymentId).single();
+  1567→    if (paymentRow) {
+  1568→      const payment = rowToDebtPayment(paymentRow);
+  1569→      if (payment.overflowTransactionId === id) {
+  1570→        await supabase.from('debt_payments').update({
+  1571→          overflow_transaction_id: null,
+  1572→          updated_at: new Date().toISOString(),
+  1573→        }).eq('id', payment.id);
+  1574→      }
+  1575→    }
+  1576→  }
+  1577→  
+  1578→  const { error } = await supabase.from('transactions').delete().eq('id', id);
+  1579→  if (error) throw new Error(error.message);
+  1580→  
+  1581→  // Recalculate vault balance after deletion
+  1582→  if ((transaction.isComplete !== false) && transaction.paymentType === 'CASH') {
+  1583→    await recalculateVaultBalance(vaultCurrencyId);
+  1584→  }
+  1585→}
+  1586→
+  1587→// ============================================
+  1588→// Debt Functions
+  1589→// ============================================
+  1590→
+  1591→export async function getDebts(options?: { includeArchived?: boolean }): Promise<Debt[]> {
+  1592→  await initializeDatabase();
+  1593→  if (!tablesExist) return [];
+  1594→  const includeArchived = options?.includeArchived ?? false;
+  1595→  const result = await fetchWithRetry(async () => {
+  1596→    let query = supabase.from('debts').select('*').order('date', { ascending: false });
+  1597→    if (!includeArchived) {
+  1598→      query = query.eq('is_archived', false);
+  1599→    }
+  1600→    const { data, error } = await query;
+  1601→    if (error) throw error;
+  1602→    return data;
+  1603→  });
+  1604→  if (result === null) {
+  1605→    console.error('[Supabase] ❌ getDebts: failed after retries, returning []');
+  1606→    return [];
+  1607→  }
+  1608→  return (result || []).map(rowToDebt);
+  1609→}
+  1610→
+  1611→export async function addDebt(data: {
+  1612→  accountId: string;
+  1613→  currencyId: string;
+  1614→  amount: number;
+  1615→  conversionFactor: number;
+  1616→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+  1617→  description?: string;
+  1618→  date: string;
+  1619→  debtType?: 'RECEIVABLE' | 'PAYABLE';
+  1620→  debtMode?: 'CASH' | 'DEFERRED';
+  1621→}): Promise<Debt> {
+  1622→  await initializeDatabase();
+  1623→  const now = new Date();
+  1624→  const finalBalance = data.conversionMethod === 'MULTIPLY'
+  1625→    ? data.amount * (data.conversionFactor || 1)
+  1626→    : data.amount / (data.conversionFactor || 1);
+  1627→  
+  1628→  const debtMode = data.debtMode || 'DEFERRED';
+  1629→  const debtType = data.debtType || 'RECEIVABLE';
+  1630→  
+  1631→  const debt: Debt = {
+  1632→    id: generateId(),
+  1633→    accountId: data.accountId,
+  1634→    currencyId: data.currencyId,
+  1635→    amount: data.amount,
+  1636→    conversionFactor: data.conversionFactor || 1,
+  1637→    conversionMethod: data.conversionMethod,
+  1638→    finalBalance,
+  1639→    description: data.description,
+  1640→    debtType: debtType,
+  1641→    debtMode: debtMode,
+  1642→    isPaid: false,
+  1643→    date: new Date(data.date),
+  1644→    createdAt: now,
+  1645→    updatedAt: now,
+  1646→  };
+  1647→  
+  1648→  const { error } = await supabase.from('debts').insert([debtToRow(debt)]);
+  1649→  if (error) throw new Error(error.message);
+  1650→  
+  1651→  // Recalculate vault balance for CASH debts
+  1652→  if (debtMode === 'CASH') {
+  1653→    await recalculateVaultBalance(data.currencyId);
+  1654→  }
+  1655→  
+  1656→  return debt;
+  1657→}
+  1658→
+  1659→export async function updateDebt(id: string, data: Partial<Debt>): Promise<Debt> {
+  1660→  await initializeDatabase();
+  1661→  const updateFields: Record<string, unknown> = { ...data, updatedAt: new Date() };
+  1662→  const { error } = await supabase.from('debts').update(debtToRow(updateFields as Partial<Debt>)).eq('id', id);
+  1663→  if (error) throw new Error(error.message);
+  1664→  
+  1665→  const { data: updatedRow, error: refetchError } = await supabase.from('debts').select('*').eq('id', id).single();
+  1666→  if (refetchError) throw new Error(refetchError.message);
+  1667→  return rowToDebt(updatedRow);
+  1668→}
+  1669→
+  1670→// ============================================
+  1671→// 🔹 تعديل الدين مع عكس الحركة على الصندوق
+  1672→// 🔸 الخطوة 1: عكس تأثير الحركة القديمة على الصندوق
+  1673→// 🔸 الخطوة 2: تحديث سجل الدين
+  1674→// 🔸 الخطوة 3: تطبيق تأثير الحركة الجديدة على الصندوق
+  1675→// 🔸 منطق الصناديق:
+  1676→//   - لنا + كاش → خصم من الصندوق (نخرج مبلغ للطرف الآخر)
+  1677→//   - لنا + آجل → لا تأثير
+  1678→//   - علينا + كاش → إضافة للصندوق (نستلم مبلغ من الطرف الآخر)
+  1679→//   - علينا + آجل → لا تأثير
+  1680→// ============================================
+  1681→export async function editDebtWithVaultReversal(id: string, newData: {
+  1682→  accountId?: string;
+  1683→  currencyId?: string;
+  1684→  amount?: number;
+  1685→  conversionFactor?: number;
+  1686→  conversionMethod?: 'MULTIPLY' | 'DIVIDE';
+  1687→  description?: string | null;
+  1688→  date?: string;
+  1689→  debtType?: 'RECEIVABLE' | 'PAYABLE';
+  1690→  debtMode?: 'CASH' | 'DEFERRED';
+  1691→}): Promise<Debt> {
+  1692→  await initializeDatabase();
+  1693→  const now = new Date();
+  1694→
+  1695→  // 🔸 الخطوة 1: جلب الدين القديم وعكس تأثيره على الصندوق
+  1696→  const { data: oldDebtRow } = await supabase.from('debts').select('*').eq('id', id).single();
+  1697→  if (!oldDebtRow) throw new Error('الدين غير موجود');
+  1698→  const oldDebt = rowToDebt(oldDebtRow);
+  1699→
+  1700→  const oldCurrencyId = oldDebt.currencyId;
+  1701→
+  1702→  // عكس تأثير الدين القديم على الصندوق - NO LONGER needed, recalculateVaultBalance handles it
+  1703→
+  1704→  // 🔸 الخطوة 2: حساب finalBalance الجديد
+  1705→  const newAmount = newData.amount ?? oldDebt.amount;
+  1706→  const newConversionFactor = newData.conversionFactor ?? oldDebt.conversionFactor;
+  1707→  const newConversionMethod = newData.conversionMethod ?? oldDebt.conversionMethod;
+  1708→  const newCurrencyId = newData.currencyId ?? oldDebt.currencyId;
+  1709→  const newDebtType = newData.debtType ?? oldDebt.debtType;
+  1710→  const newDebtMode = newData.debtMode ?? oldDebt.debtMode;
+  1711→
+  1712→  let newFinalBalance = newAmount;
+  1713→  if (newConversionMethod === 'MULTIPLY') {
+  1714→    newFinalBalance = newAmount * newConversionFactor;
+  1715→  } else {
+  1716→    newFinalBalance = newAmount / newConversionFactor;
+  1717→  }
+  1718→
+  1719→  // 🔸 الخطوة 2.5: تحديث سجل الدين
+  1720→  const updatedFields: Record<string, unknown> = {
+  1721→    accountId: newData.accountId ?? oldDebt.accountId,
+  1722→    currencyId: newCurrencyId,
+  1723→    amount: newAmount,
+  1724→    conversionFactor: newConversionFactor,
+  1725→    conversionMethod: newConversionMethod,
+  1726→    finalBalance: newFinalBalance,
+  1727→    description: newData.description !== undefined ? newData.description : oldDebt.description,
+  1728→    debtType: newDebtType,
+  1729→    debtMode: newDebtMode,
+  1730→    date: newData.date ? new Date(newData.date).toISOString() : oldDebt.date,
+  1731→    updatedAt: now,
+  1732→  };
+  1733→
+  1734→  const { error: updateError } = await supabase.from('debts').update(
+  1735→    debtToRow(updatedFields as Partial<Debt>)
+  1736→  ).eq('id', id);
+  1737→  if (updateError) throw new Error(updateError.message);
+  1738→
+  1739→  // Recalculate vault balances for old and new currencies (if changed)
+  1740→  const affectedCurrencyIds = new Set<string>();
+  1741→  affectedCurrencyIds.add(oldCurrencyId);
+  1742→  if (newCurrencyId !== oldCurrencyId) {
+  1743→    affectedCurrencyIds.add(newCurrencyId);
+  1744→  }
+  1745→  if (oldDebt.debtMode === 'CASH' || newDebtMode === 'CASH') {
+  1746→    for (const cid of affectedCurrencyIds) {
+  1747→      await recalculateVaultBalance(cid);
+  1748→    }
+  1749→  }
+  1750→
+  1751→  // 🔸 إعادة حساب حالة isPaid للدين
+  1752→  const { data: allPaymentRows } = await supabase.from('debt_payments').select('*').eq('debt_id', id);
+  1753→  const allPayments = (allPaymentRows || []).map(rowToDebtPayment);
+  1754→  const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+  1755→
+  1756→  if (totalPaid >= newFinalBalance && !oldDebt.isPaid) {
+  1757→    await supabase.from('debts').update({
+  1758→      is_paid: true,
+  1759→      paid_at: now.toISOString(),
+  1760→      updated_at: now.toISOString(),
+  1761→    }).eq('id', id);
+  1762→  } else if (totalPaid < newFinalBalance && oldDebt.isPaid) {
+  1763→    await supabase.from('debts').update({
+  1764→      is_paid: false,
+  1765→      paid_at: null,
+  1766→      updated_at: now.toISOString(),
+  1767→    }).eq('id', id);
+  1768→  }
+  1769→
+  1770→  // 🔸 إرجاع الدين المحدّث
+  1771→  const { data: updatedRow, error: refetchError } = await supabase.from('debts').select('*').eq('id', id).single();
+  1772→  if (refetchError) throw new Error(refetchError.message);
+  1773→  return rowToDebt(updatedRow);
+  1774→}
+  1775→
+  1776→// ============================================
+  1777→// 🔹 تعديل دفعة السداد مع عكس الحركة على الصندوق
+  1778→// 🔸 الخطوة 1: عكس تأثير الدفعة القديمة على الصندوق
+  1779→// 🔸 الخطوة 2: تحديث سجل الدفعة
+  1780→// 🔸 الخطوة 3: تطبيق تأثير الدفعة الجديدة على الصندوق
+  1781→// 🔸 منطق الصناديق:
+  1782→//   - لنا + كاش → خصم من الصندوق (نخرج مبلغ للطرف الآخر)
+  1783→//   - لنا + آجل → لا تأثير
+  1784→//   - علينا + كاش → إضافة للصندوق (نستلم مبلغ من الطرف الآخر)
+  1785→//   - علينا + آجل → لا تأثير
+  1786→// ============================================
+  1787→export async function editDebtPaymentWithVaultReversal(id: string, newData: {
+  1788→  amount?: number;
+  1789→  currencyId?: string;
+  1790→  description?: string | null;
+  1791→  date?: string;
+  1792→  paymentMode?: 'CASH' | 'DEFERRED';
+  1793→  paymentDirection?: 'RECEIVABLE' | 'PAYABLE';
+  1794→}): Promise<DebtPayment> {
+  1795→  await initializeDatabase();
+  1796→  const now = new Date();
+  1797→
+  1798→  // 🔸 الخطوة 1: جلب الدفعة القديمة وعكس تأثيرها على الصندوق
+  1799→  const { data: oldPaymentRow } = await supabase.from('debt_payments').select('*').eq('id', id).single();
+  1800→  if (!oldPaymentRow) throw new Error('الدفعة غير موجودة');
+  1801→  const oldPayment = rowToDebtPayment(oldPaymentRow);
+  1802→
+  1803→  // جلب الدين المرتبط
+  1804→  const { data: debtRow } = await supabase.from('debts').select('*').eq('id', oldPayment.debtId).single();
+  1805→  const debt = debtRow ? rowToDebt(debtRow) : null;
+  1806→
+  1807→  const oldPaymentMode = oldPayment.paymentMode || 'CASH';
+  1808→  const oldPaymentDirection = oldPayment.paymentDirection || debt?.debtType || 'RECEIVABLE';
+  1809→  const oldCurrencyId = oldPayment.currencyId;
+  1810→
+  1811→  // عكس تأثير الدفعة القديمة على الصندوق - NO LONGER needed, recalculateVaultBalance handles it
+  1812→
+  1813→  // 🔸 الخطوة 2: تحديث سجل الدفعة
+  1814→  const newAmount = newData.amount ?? oldPayment.amount;
+  1815→  const newCurrencyId = newData.currencyId ?? oldPayment.currencyId;
+  1816→  const newPaymentMode = newData.paymentMode ?? oldPaymentMode;
+  1817→  const newPaymentDirection = newData.paymentDirection ?? oldPaymentDirection;
+  1818→
+  1819→  const updatedFields: Record<string, unknown> = {
+  1820→    amount: newAmount,
+  1821→    currencyId: newCurrencyId,
+  1822→    description: newData.description !== undefined ? newData.description : oldPayment.description,
+  1823→    date: newData.date ? new Date(newData.date).toISOString() : oldPayment.date,
+  1824→    paymentMode: newPaymentMode,
+  1825→    paymentDirection: newPaymentDirection,
+  1826→    updatedAt: now,
+  1827→  };
+  1828→
+  1829→  const { error: updateError } = await supabase.from('debt_payments').update(
+  1830→    debtPaymentToRow(updatedFields as Partial<DebtPayment>)
+  1831→  ).eq('id', id);
+  1832→  if (updateError) throw new Error(updateError.message);
+  1833→
+  1834→  // Recalculate vault balances for old and new currencies (if changed)
+  1835→  const affectedCurrencyIds = new Set<string>();
+  1836→  affectedCurrencyIds.add(oldCurrencyId);
+  1837→  if (newCurrencyId !== oldCurrencyId) {
+  1838→    affectedCurrencyIds.add(newCurrencyId);
+  1839→  }
+  1840→  if (oldPaymentMode === 'CASH' || newPaymentMode === 'CASH') {
+  1841→    for (const cid of affectedCurrencyIds) {
+  1842→      await recalculateVaultBalance(cid);
+  1843→    }
+  1844→  }
+  1845→
+  1846→  // 🔸 إعادة حساب حالة isPaid للدين
+  1847→  if (debt) {
+  1848→    const { data: allPaymentRows } = await supabase.from('debt_payments').select('*').eq('debt_id', oldPayment.debtId);
+  1849→    const allPayments = (allPaymentRows || []).map(rowToDebtPayment);
+  1850→    const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+  1851→
+  1852→    if (totalPaid >= debt.finalBalance && !debt.isPaid) {
+  1853→      await supabase.from('debts').update({
+  1854→        is_paid: true,
+  1855→        paid_at: now.toISOString(),
+  1856→        updated_at: now.toISOString(),
+  1857→      }).eq('id', oldPayment.debtId);
+  1858→    } else if (totalPaid < debt.finalBalance && debt.isPaid) {
+  1859→      await supabase.from('debts').update({
+  1860→        is_paid: false,
+  1861→        paid_at: null,
+  1862→        updated_at: now.toISOString(),
+  1863→      }).eq('id', oldPayment.debtId);
+  1864→    }
+  1865→  }
+  1866→
+  1867→  // 🔸 إرجاع الدفعة المحدّثة
+  1868→  const { data: updatedRow, error: refetchError } = await supabase.from('debt_payments').select('*').eq('id', id).single();
+  1869→  if (refetchError) throw new Error(refetchError.message);
+  1870→  return rowToDebtPayment(updatedRow);
+  1871→}
+  1872→
+  1873→export async function deleteDebt(id: string): Promise<void> {
+  1874→  await initializeDatabase();
+  1875→  
+  1876→  const { data: debtRow } = await supabase.from('debts').select('*').eq('id', id).single();
+  1877→  if (!debtRow) throw new Error('الدين غير موجود');
+  1878→  
+  1879→  const debt = rowToDebt(debtRow);
+  1880→  
+  1881→  // Collect affected currency IDs for recalculation
+  1882→  const affectedCurrencyIds = new Set<string>();
+  1883→  
+  1884→  // Reverse vault effect for CASH debts
+  1885→  if (debt.debtMode === 'CASH') {
+  1886→    affectedCurrencyIds.add(debt.currencyId);
+  1887→  }
+  1888→  
+  1889→  // Process related payments
+  1890→  const { data: paymentRows } = await supabase.from('debt_payments').select('*').eq('debt_id', id);
+  1891→  const payments = (paymentRows || []).map(rowToDebtPayment);
+  1892→  
+  1893→  for (const payment of payments) {
+  1894→    const paymentMode = payment.paymentMode || 'CASH';
+  1895→    
+  1896→    if (paymentMode === 'CASH') {
+  1897→      affectedCurrencyIds.add(payment.currencyId);
+  1898→    }
+  1899→    
+  1900→    // Handle overflow transaction linked to payment
+  1901→    if (payment.overflowTransactionId) {
+  1902→      const { data: overflowRow } = await supabase.from('transactions').select('*').eq('id', payment.overflowTransactionId).single();
+  1903→      
+  1904→      if (overflowRow) {
+  1905→        const overflowTransaction = rowToTransaction(overflowRow);
+  1906→        if (overflowTransaction.paymentType === 'CASH') {
+  1907→          affectedCurrencyIds.add(overflowTransaction.currencyId);
+  1908→        }
+  1909→        await supabase.from('transactions').delete().eq('id', payment.overflowTransactionId);
+  1910→      }
+  1911→    }
+  1912→    
+  1913→    // Delete payment
+  1914→    await supabase.from('debt_payments').delete().eq('id', payment.id);
+  1915→  }
+  1916→  
+  1917→  // Delete debt
+  1918→  const { error } = await supabase.from('debts').delete().eq('id', id);
+  1919→  if (error) throw new Error(error.message);
+  1920→  
+  1921→  // Recalculate vault balances for all affected currencies
+  1922→  for (const cid of affectedCurrencyIds) {
+  1923→    await recalculateVaultBalance(cid);
+  1924→  }
+  1925→}
+  1926→
+  1927→// ============================================
+  1928→// Debt Payment Functions
+  1929→// ============================================
+  1930→
+  1931→export async function getDebtPayments(debtId?: string, options?: { includeArchived?: boolean }): Promise<DebtPayment[]> {
+  1932→  await initializeDatabase();
+  1933→  if (!tablesExist) return [];
+  1934→  const includeArchived = options?.includeArchived ?? false;
+  1935→  if (debtId) {
+  1936→    const result = await fetchWithRetry(async () => {
+  1937→      let query = supabase.from('debt_payments').select('*').eq('debt_id', debtId);
+  1938→      if (!includeArchived) {
+  1939→        query = query.eq('is_archived', false);
+  1940→      }
+  1941→      const { data, error } = await query;
+  1942→      if (error) throw error;
+  1943→      return data;
+  1944→    });
+  1945→    if (result === null) {
+  1946→      console.error('[Supabase] ❌ getDebtPayments: failed after retries, returning []');
+  1947→      return [];
+  1948→    }
+  1949→    return (result || []).map(rowToDebtPayment);
+  1950→  }
+  1951→  const result = await fetchWithRetry(async () => {
+  1952→    let query = supabase.from('debt_payments').select('*').order('date', { ascending: false });
+  1953→    if (!includeArchived) {
+  1954→      query = query.eq('is_archived', false);
+  1955→    }
+  1956→    const { data, error } = await query;
+  1957→    if (error) throw error;
+  1958→    return data;
+  1959→  });
+  1960→  if (result === null) {
+  1961→    console.error('[Supabase] ❌ getDebtPayments: failed after retries, returning []');
+  1962→    return [];
+  1963→  }
+  1964→  return (result || []).map(rowToDebtPayment);
+  1965→}
+  1966→
+  1967→export async function updateDebtPayment(id: string, data: Partial<DebtPayment>): Promise<DebtPayment> {
+  1968→  await initializeDatabase();
+  1969→  const updateFields: Record<string, unknown> = { ...data, updatedAt: new Date() };
+  1970→  const { error } = await supabase.from('debt_payments').update(debtPaymentToRow(updateFields as Partial<DebtPayment>)).eq('id', id);
+  1971→  if (error) throw new Error(error.message);
+  1972→  
+  1973→  const { data: updatedRow, error: refetchError } = await supabase.from('debt_payments').select('*').eq('id', id).single();
+  1974→  if (refetchError) throw new Error(refetchError.message);
+  1975→  return rowToDebtPayment(updatedRow);
+  1976→}
+  1977→
+  1978→export async function addDebtPayment(data: {
+  1979→  debtId: string;
+  1980→  amount: number;
+  1981→  currencyId: string;
+  1982→  description?: string;
+  1983→  date: string;
+  1984→  paymentMode?: 'CASH' | 'DEFERRED';
+  1985→  direction?: 'RECEIVABLE' | 'PAYABLE';
+  1986→  currentBalance?: number;
+  1987→}): Promise<DebtPayment> {
+  1988→  await initializeDatabase();
+  1989→  const now = new Date();
+  1990→  
+  1991→  const { data: debtRow } = await supabase.from('debts').select('*').eq('id', data.debtId).single();
+  1992→  if (!debtRow) throw new Error('الدين غير موجود');
+  1993→  const debt = rowToDebt(debtRow);
+  1994→  
+  1995→  const paymentMode = data.paymentMode || 'CASH';
+  1996→  
+  1997→  let paymentDirection: 'RECEIVABLE' | 'PAYABLE';
+  1998→  
+  1999→  if (data.currentBalance !== undefined) {
+  2000→    paymentDirection = data.currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
+
+[showing lines 1-2000 of 4140; use offset=2001 with limit to continue reading]

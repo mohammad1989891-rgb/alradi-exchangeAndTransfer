@@ -1,0 +1,1054 @@
+     1→'use client';
+     2→
+     3→import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+     4→import { supabase, isSupabaseConfigured } from '@/lib/supabase';
+     5→import {
+     6→  initializeDatabase,
+     7→  resetInitializationState,
+     8→  checkTablesExist,
+     9→  tablesExist as tablesExistFlag,
+    10→  TABLES_MISSING_ERROR,
+    11→  getAllAvailableCurrencies,
+    12→  getActiveCurrencies,
+    13→  getVaults,
+    14→  getAccounts,
+    15→  getTransactions,
+    16→  getDebts,
+    17→  getTotalBalanceInUSD,
+    18→  activateCurrency,
+    19→  deactivateCurrency,
+    20→  updateCurrencyExchangeRate,
+    21→  updateCurrencyConversionMethod,
+    22→  updateVaultOpeningBalance,
+    23→  recalculateVaultBalance as recalculateVaultBalanceFn,
+    24→  addAccount,
+    25→  updateAccount,
+    26→  deleteAccount,
+    27→  addTransaction,
+    28→  updateTransaction,
+    29→  deleteTransaction,
+    30→  addDebt,
+    31→  updateDebt,
+    32→  deleteDebt,
+    33→  editDebtWithVaultReversal,
+    34→  editDebtPaymentWithVaultReversal,
+    35→  getDebtPayments,
+    36→  addDebtPayment,
+    37→  deleteDebtPayment,
+    38→  getCurrencyExchanges,
+    39→  addCurrencyExchange,
+    40→  deleteCurrencyExchange,
+    41→  getExchangeStats,
+    42→} from '@/lib/supabaseDb';
+    43→import type { Currency, Vault, Account, Transaction, Debt, DebtPayment, CurrencyExchange } from '@/lib/supabaseDb';
+    44→import { calcDebtRemaining, calcTotalBalanceUSD, EMPTY_DEBT_REMAINING, CurrencyDebtBreakdown } from '@/lib/cachedCalculations';
+    45→
+    46→// Re-export for consumers
+    47→export type { CurrencyDebtBreakdown };
+    48→
+    49→// ============================================
+    50→// Retry Constants
+    51→// ============================================
+    52→const MAX_RETRIES = 3;
+    53→const RETRY_DELAY_MS = 1000;
+    54→const INIT_TIMEOUT_MS = 15000;
+    55→const FALLBACK_POLL_INTERVAL_MS = 10000; // 10s — fast enough for cross-device sync
+    56→const REFRESH_DEBOUNCE_MS = 300;
+    57→
+    58→// ============================================
+    59→// Debt Remaining Type (matches useLocalData exactly)
+    60→// ============================================
+    61→interface DebtRemaining {
+    62→  totalDebts: number;
+    63→  totalPaid: number;
+    64→  totalRemaining: number;
+    65→  unpaidDebtsCount: number;
+    66→  paidDebtsCount: number;
+    67→  totalReceivable: number;
+    68→  totalPayable: number;
+    69→  totalReceivablePaid: number;
+    70→  totalPayablePaid: number;
+    71→  totalReceivableRemaining: number;
+    72→  totalPayableRemaining: number;
+    73→  deferredReceivable: number;
+    74→  deferredPayable: number;
+    75→  deferredReceivablePaid: number;
+    76→  deferredPayablePaid: number;
+    77→  deferredReceivableRemaining: number;
+    78→  deferredPayableRemaining: number;
+    79→  cashReceivable: number;
+    80→  cashPayable: number;
+    81→  cashReceivablePaid: number;
+    82→  cashPayablePaid: number;
+    83→  cashReceivableRemaining: number;
+    84→  cashPayableRemaining: number;
+    85→  // 🔸 تقسيم حسب العملة
+    86→  currencyBreakdown: CurrencyDebtBreakdown[];
+    87→}
+    88→
+    89→// EMPTY_DEBT_REMAINING is imported from cachedCalculations.ts
+    90→
+    91→// ============================================
+    92→// Helper: Retry with exponential backoff
+    93→// ============================================
+    94→async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES, delay = RETRY_DELAY_MS): Promise<T> {
+    95→  for (let attempt = 1; attempt <= retries; attempt++) {
+    96→    try {
+    97→      return await fn();
+    98→    } catch (error) {
+    99→      if (attempt === retries) throw error;
+   100→      console.warn(`Attempt ${attempt}/${retries} failed, retrying after ${delay}ms...`, error);
+   101→      await new Promise(resolve => setTimeout(resolve, delay * attempt));
+   102→    }
+   103→  }
+   104→  throw new Error('All retry attempts failed');
+   105→}
+   106→
+   107→// ============================================
+   108→// Table names for Realtime subscriptions
+   109→// ============================================
+   110→const REALTIME_TABLES = [
+   111→  'currencies',
+   112→  'vaults',
+   113→  'accounts',
+   114→  'transactions',
+   115→  'debts',
+   116→  'debt_payments',
+   117→  'currency_exchanges',
+   118→] as const;
+   119→
+   120→// ============================================
+   121→// The Hook
+   122→// ============================================
+   123→export function useSupabaseData() {
+   124→  // ---- State ----
+   125→  const [currencies, setCurrencies] = useState<Currency[]>([]);
+   126→  const [allCurrencies, setAllCurrencies] = useState<Currency[]>([]);
+   127→  const [vaults, setVaults] = useState<Vault[]>([]);
+   128→  const [accounts, setAccounts] = useState<Account[]>([]);
+   129→  const [transactions, setTransactions] = useState<Transaction[]>([]);
+   130→  const [debts, setDebts] = useState<Debt[]>([]);
+   131→  const [debtPayments, setDebtPayments] = useState<DebtPayment[]>([]);
+   132→  const [currencyExchanges, setCurrencyExchanges] = useState<CurrencyExchange[]>([]);
+   133→  const [totalBalanceUSD, setTotalBalanceUSD] = useState(0);
+   134→  const [debtRemaining, setDebtRemaining] = useState<DebtRemaining>(EMPTY_DEBT_REMAINING as DebtRemaining);
+   135→  const [isLoading, setIsLoading] = useState(true);
+   136→  const [isInitialized, setIsInitialized] = useState(false);
+   137→  const [initError, setInitError] = useState<string | null>(null);
+   138→  const [tablesMissing, setTablesMissing] = useState(false);
+   139→  const [showArchived, setShowArchived] = useState(false);
+   140→
+   141→  // ---- Refs ----
+   142→  const isRefreshingRef = useRef(false);
+   143→  const lastRefreshTimeRef = useRef(0);
+   144→  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+   145→  const fallbackPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   146→  const realtimeConnectedRef = useRef(false);
+   147→  const mountedRef = useRef(true);
+   148→  const tablesExistRef = useRef(true); // Track whether Supabase tables exist
+   149→
+   150→  // ============================================
+   151→  // Refresh: load all data from Supabase
+   152→  // ============================================
+   153→  const refreshData = useCallback(async (skipEvent = false, forceRefresh = false) => {
+   154→    // If a refresh is in progress and this is not forced, skip
+   155→    if (isRefreshingRef.current && !forceRefresh) return;
+   156→
+   157→    // If a refresh is in progress and this is forced, wait for it to finish
+   158→    if (isRefreshingRef.current && forceRefresh) {
+   159→      for (let i = 0; i < 20; i++) {
+   160→        await new Promise(r => setTimeout(r, 100));
+   161→        if (!isRefreshingRef.current) break;
+   162→      }
+   163→      if (isRefreshingRef.current) return; // timeout, skip
+   164→    }
+   165→
+   166→    // Debounce: prevent rapid consecutive refreshes (unless forced)
+   167→    if (!forceRefresh) {
+   168→      const debounceNow = Date.now();
+   169→      if (debounceNow - lastRefreshTimeRef.current < REFRESH_DEBOUNCE_MS) return;
+   170→    }
+   171→
+   172→    isRefreshingRef.current = true;
+   173→    lastRefreshTimeRef.current = Date.now();
+   174→
+   175→    try {
+   176→      const [allCur, activeCur, vaultsData, accountsData, txData, debtData, debtPaymentsData, totalUSD, exchangeData] = await Promise.all([
+   177→        getAllAvailableCurrencies(),
+   178→        getActiveCurrencies(),
+   179→        getVaults(),
+   180→        getAccounts(),
+   181→        getTransactions({ includeArchived: false }), // Only load ACTIVE data — archive is lazy-loaded
+   182→        getDebts({ includeArchived: false }), // Only load ACTIVE data
+   183→        getDebtPayments(undefined, { includeArchived: false }), // Only load ACTIVE data
+   184→        getTotalBalanceInUSD(),
+   185→        getCurrencyExchanges({ includeArchived: false }), // Only load ACTIVE data
+   186→      ]);
+   187→
+   188→      if (!mountedRef.current) return;
+   189→
+   190→      setAllCurrencies(allCur);
+   191→      setCurrencies(activeCur);
+   192→      setVaults(vaultsData);
+   193→      setAccounts(accountsData);
+   194→      setTransactions(txData);
+   195→      setDebts(debtData);
+   196→      setDebtPayments(debtPaymentsData);
+   197→      setTotalBalanceUSD(totalUSD);
+   198→      // debtRemaining is now computed client-side via useMemo (computedDebtRemaining)
+   199→      setCurrencyExchanges(exchangeData);
+   200→      setInitError(null);
+   201→
+   202→      // Dispatch event for other components (same as useLocalData)
+   203→      if (!skipEvent) {
+   204→        window.dispatchEvent(new CustomEvent('local-data-refreshed'));
+   205→      }
+   206→    } catch (error) {
+   207→      console.error('Error loading data from Supabase:', error);
+   208→      setInitError('حدث خطأ في تحميل البيانات');
+   209→    } finally {
+   210→      isRefreshingRef.current = false;
+   211→    }
+   212→  }, []);
+   213→
+   214→  // ============================================
+   215→  // Targeted refresh: refresh only specific tables
+   216→  // ============================================
+   217→  const refreshCurrencies = useCallback(async () => {
+   218→    try {
+   219→      const [allCur, activeCur] = await Promise.all([
+   220→        getAllAvailableCurrencies(),
+   221→        getActiveCurrencies(),
+   222→      ]);
+   223→      if (!mountedRef.current) return;
+   224→      setAllCurrencies(allCur);
+   225→      setCurrencies(activeCur);
+   226→    } catch (error) {
+   227→      console.error('Error refreshing currencies:', error);
+   228→    }
+   229→  }, []);
+   230→
+   231→  const refreshVaults = useCallback(async () => {
+   232→    try {
+   233→      const vaultsData = await getVaults();
+   234→      if (!mountedRef.current) return;
+   235→      setVaults(vaultsData);
+   236→    } catch (error) {
+   237→      console.error('Error refreshing vaults:', error);
+   238→    }
+   239→  }, []);
+   240→
+   241→  const refreshAccounts = useCallback(async () => {
+   242→    try {
+   243→      const accountsData = await getAccounts();
+   244→      if (!mountedRef.current) return;
+   245→      setAccounts(accountsData);
+   246→    } catch (error) {
+   247→      console.error('Error refreshing accounts:', error);
+   248→    }
+   249→  }, []);
+   250→
+   251→  const refreshTransactions = useCallback(async () => {
+   252→    try {
+   253→      const txData = await getTransactions({ includeArchived: false });
+   254→      if (!mountedRef.current) return;
+   255→      setTransactions(txData);
+   256→    } catch (error) {
+   257→      console.error('Error refreshing transactions:', error);
+   258→    }
+   259→  }, []);
+   260→
+   261→  const refreshDebts = useCallback(async () => {
+   262→    try {
+   263→      const [debtData, debtPaymentsData] = await Promise.all([
+   264→        getDebts({ includeArchived: false }),
+   265→        getDebtPayments(undefined, { includeArchived: false }),
+   266→      ]);
+   267→      if (!mountedRef.current) return;
+   268→      setDebts(debtData);
+   269→      setDebtPayments(debtPaymentsData);
+   270→      // debtRemaining is now computed client-side via useMemo
+   271→    } catch (error) {
+   272→      console.error('Error refreshing debts:', error);
+   273→    }
+   274→  }, []);
+   275→
+   276→  const refreshDebtPayments = useCallback(async () => {
+   277→    try {
+   278→      const debtPaymentsData = await getDebtPayments(undefined, { includeArchived: false });
+   279→      if (!mountedRef.current) return;
+   280→      setDebtPayments(debtPaymentsData);
+   281→      // debtRemaining is now computed client-side via useMemo
+   282→    } catch (error) {
+   283→      console.error('Error refreshing debt payments:', error);
+   284→    }
+   285→  }, []);
+   286→
+   287→  const refreshCurrencyExchanges = useCallback(async () => {
+   288→    try {
+   289→      const exchangeData = await getCurrencyExchanges({ includeArchived: false });
+   290→      if (!mountedRef.current) return;
+   291→      setCurrencyExchanges(exchangeData);
+   292→    } catch (error) {
+   293→      console.error('Error refreshing currency exchanges:', error);
+   294→    }
+   295→  }, []);
+   296→
+   297→  // ============================================
+   298→  // Debounced targeted refresh
+   299→  // Used by Realtime subscriptions to prevent rapid consecutive refreshes
+   300→  // ============================================
+   301→  const debouncedRefreshMap = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+   302→
+   303→  const debouncedRefresh = useCallback((table: string, refreshFn: () => Promise<void>) => {
+   304→    const existing = debouncedRefreshMap.current.get(table);
+   305→    if (existing) clearTimeout(existing);
+   306→
+   307→    const timer = setTimeout(() => {
+   308→      debouncedRefreshMap.current.delete(table);
+   309→      refreshFn();
+   310→    }, REFRESH_DEBOUNCE_MS);
+   311→
+   312→    debouncedRefreshMap.current.set(table, timer);
+   313→  }, []);
+   314→
+   315→  // ============================================
+   316→  // Refs for Realtime callback functions
+   317→  // Using refs so the Realtime effect only runs ONCE and always
+   318→  // calls the latest callback versions without re-subscribing
+   319→  // ============================================
+   320→  const refreshCurrenciesRef = useRef(refreshCurrencies);
+   321→  const refreshVaultsRef = useRef(refreshVaults);
+   322→  const refreshAccountsRef = useRef(refreshAccounts);
+   323→  const refreshTransactionsRef = useRef(refreshTransactions);
+   324→  const refreshDebtsRef = useRef(refreshDebts);
+   325→  const refreshDebtPaymentsRef = useRef(refreshDebtPayments);
+   326→  const refreshCurrencyExchangesRef = useRef(refreshCurrencyExchanges);
+   327→  const debouncedRefreshRef = useRef(debouncedRefresh);
+   328→  const refreshDataRef = useRef(refreshData);
+   329→
+   330→  // Keep refs up-to-date on every render
+   331→  refreshCurrenciesRef.current = refreshCurrencies;
+   332→  refreshVaultsRef.current = refreshVaults;
+   333→  refreshAccountsRef.current = refreshAccounts;
+   334→  refreshTransactionsRef.current = refreshTransactions;
+   335→  refreshDebtsRef.current = refreshDebts;
+   336→  refreshDebtPaymentsRef.current = refreshDebtPayments;
+   337→  refreshCurrencyExchangesRef.current = refreshCurrencyExchanges;
+   338→  debouncedRefreshRef.current = debouncedRefresh;
+   339→  refreshDataRef.current = refreshData;
+   340→
+   341→  // ============================================
+   342→  // Realtime Subscriptions
+   343→  // 🔸 Effect runs ONCE on mount (empty dependency array)
+   344→  // 🔸 Uses refs to call latest callback versions
+   345→  // 🔸 Uses unique channel name to prevent "already subscribed" conflicts
+   346→  // 🔸 Skips subscription if Supabase tables don't exist
+   347→  // ============================================
+   348→  useEffect(() => {
+   349→    mountedRef.current = true;
+   350→
+   351→    // Async setup: check tables exist before subscribing
+   352→    const setupRealtime = async () => {
+   353→      // Check if tables exist before attempting Realtime subscription
+   354→      const exist = await checkTablesExist();
+   355→      tablesExistRef.current = exist;
+   356→
+   357→      if (!exist) {
+   358→        console.warn('Supabase Realtime: tables do not exist, skipping subscription');
+   359→        return;
+   360→      }
+   361→
+   362→      // Use a unique channel name to prevent conflicts with stale channels
+   363→      // from React StrictMode double-mounting or hot reloads
+   364→      const channelId = `schema-db-changes-${Date.now()}`;
+   365→
+   366→      const channel = supabase
+   367→        .channel(channelId)
+   368→        .on('postgres_changes', { event: '*', schema: 'public', table: 'currencies' }, () => {
+   369→          debouncedRefreshRef.current('currencies', () => refreshCurrenciesRef.current());
+   370→        })
+   371→        .on('postgres_changes', { event: '*', schema: 'public', table: 'vaults' }, () => {
+   372→          // Vaults depend on currencies for total balance calculation
+   373→          debouncedRefreshRef.current('vaults', async () => {
+   374→            await refreshVaultsRef.current();
+   375→            // Also refresh total balance since it depends on vaults
+   376→            try {
+   377→              const totalUSD = await getTotalBalanceInUSD();
+   378→              if (mountedRef.current) setTotalBalanceUSD(totalUSD);
+   379→            } catch (e) {
+   380→              console.error('Error refreshing total balance:', e);
+   381→            }
+   382→          });
+   383→        })
+   384→        .on('postgres_changes', { event: '*', schema: 'public', table: 'accounts' }, () => {
+   385→          debouncedRefreshRef.current('accounts', () => refreshAccountsRef.current());
+   386→        })
+   387→        .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+   388→          debouncedRefreshRef.current('transactions', () => refreshTransactionsRef.current());
+   389→        })
+   390→        .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+   391→          debouncedRefreshRef.current('debts', () => refreshDebtsRef.current());
+   392→        })
+   393→        .on('postgres_changes', { event: '*', schema: 'public', table: 'debt_payments' }, () => {
+   394→          debouncedRefreshRef.current('debt_payments', () => refreshDebtPaymentsRef.current());
+   395→        })
+   396→        .on('postgres_changes', { event: '*', schema: 'public', table: 'currency_exchanges' }, () => {
+   397→          debouncedRefreshRef.current('currency_exchanges', () => refreshCurrencyExchangesRef.current());
+   398→        })
+   399→        .subscribe((status) => {
+   400→          if (status === 'SUBSCRIBED') {
+   401→            realtimeConnectedRef.current = true;
+   402→            console.log('Supabase Realtime: ✅ subscribed successfully');
+   403→            // Keep periodic polling even with Realtime — ensures cross-device sync reliability
+   404→            // (Realtime only works while tab is open; polling catches up after tab reactivation)
+   405→            if (!fallbackPollRef.current) {
+   406→              fallbackPollRef.current = setInterval(() => {
+   407→                refreshDataRef.current(true);
+   408→              }, FALLBACK_POLL_INTERVAL_MS);
+   409→            }
+   410→          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+   411→            realtimeConnectedRef.current = false;
+   412→            console.warn('Supabase Realtime: ❌ subscription error, using polling only');
+   413→            // Start fallback polling if not already running
+   414→            if (!fallbackPollRef.current) {
+   415→              fallbackPollRef.current = setInterval(() => {
+   416→                refreshDataRef.current(true);
+   417→              }, FALLBACK_POLL_INTERVAL_MS);
+   418→            }
+   419→          }
+   420→        });
+   421→
+   422→      channelRef.current = channel;
+   423→
+   424→      // 🔸 ALWAYS start periodic polling for reliable cross-device sync
+   425→      // Even when Realtime works, polling ensures data consistency
+   426→      if (!fallbackPollRef.current) {
+   427→        fallbackPollRef.current = setInterval(() => {
+   428→          refreshDataRef.current(true);
+   429→        }, FALLBACK_POLL_INTERVAL_MS);
+   430→      }
+   431→    };
+   432→
+   433→    setupRealtime();
+   434→
+   435→    return () => {
+   436→      mountedRef.current = false;
+   437→      // Clean up debounced timers
+   438→      debouncedRefreshMap.current.forEach(timer => clearTimeout(timer));
+   439→      debouncedRefreshMap.current.clear();
+   440→      // Unsubscribe first, then remove channel
+   441→      if (channelRef.current) {
+   442→        channelRef.current.unsubscribe();
+   443→        supabase.removeChannel(channelRef.current);
+   444→        channelRef.current = null;
+   445→      }
+   446→      // Clean up fallback polling
+   447→      if (fallbackPollRef.current) {
+   448→        clearInterval(fallbackPollRef.current);
+   449→        fallbackPollRef.current = null;
+   450→      }
+   451→    };
+   452→  }, []); // Intentionally empty — uses refs for callbacks
+   453→
+   454→  // ============================================
+   455→  // Initialization with retry + timeout
+   456→  // 🔸 Checks if Supabase is configured first
+   457→  // 🔸 More resilient error handling for cross-device support
+   458→  // ============================================
+   459→  useEffect(() => {
+   460→    let cancelled = false;
+   461→    let timeoutId: ReturnType<typeof setTimeout>;
+   462→
+   463→    const init = async () => {
+   464→      try {
+   465→        setIsLoading(true);
+   466→        setInitError(null);
+   467→
+   468→        // 🔸 First: Check if Supabase client is configured
+   469→        if (!isSupabaseConfigured) {
+   470→          console.error('[Supabase] ❌ Client not configured — env vars missing');
+   471→          setTablesMissing(true);
+   472→          setInitError('لم يتم تكوين Supabase. تأكد من إضافة متغيرات البيئة NEXT_PUBLIC_SUPABASE_URL و NEXT_PUBLIC_SUPABASE_ANON_KEY');
+   473→          setIsInitialized(true);
+   474→          setIsLoading(false);
+   475→          return;
+   476→        }
+   477→
+   478→        console.log('[Supabase] 🔄 Initializing database...');
+   479→
+   480→        await withRetry(async () => {
+   481→          if (cancelled) return;
+   482→          await initializeDatabase();
+   483→        });
+   484→
+   485→        if (cancelled) return;
+   486→
+   487→        // After initializeDatabase(), check if tables are missing
+   488→        const tablesDoExist = await checkTablesExist();
+   489→        tablesExistRef.current = tablesDoExist;
+   490→
+   491→        if (!tablesDoExist) {
+   492→          console.warn('[Supabase] ⚠️ Tables missing — showing setup screen');
+   493→          setTablesMissing(true);
+   494→          setInitError('لم يتم العثور على جداول قاعدة البيانات. يرجى إعداد قاعدة البيانات أولاً.');
+   495→          setIsInitialized(true);
+   496→          setIsLoading(false);
+   497→          return;
+   498→        }
+   499→
+   500→        console.log('[Supabase] ✅ Tables exist, loading data...');
+   501→        setTablesMissing(false);
+   502→        await refreshData(true); // skipEvent=true to prevent event during init
+   503→
+   504→        if (!cancelled) {
+   505→          setIsInitialized(true);
+   506→          console.log('[Supabase] ✅ Initialization complete!');
+   507→        }
+   508→      } catch (error) {
+   509→        console.error('[Supabase] ❌ Initialization failed:', error);
+   510→        if (!cancelled) {
+   511→          setInitError('فشل في تهيئة قاعدة البيانات. يرجى إعادة تحميل الصفحة.');
+   512→          setIsInitialized(true); // Allow entry to prevent white screen
+   513→        }
+   514→      } finally {
+   515→        if (!cancelled) {
+   516→          setIsLoading(false);
+   517→        }
+   518→      }
+   519→    };
+   520→
+   521→    // Timeout: prevent infinite waiting
+   522→    timeoutId = setTimeout(() => {
+   523→      if (!cancelled && !isInitialized) {
+   524→        console.warn('[Supabase] ⏱️ Initialization timeout');
+   525→        setIsInitialized(true);
+   526→        setIsLoading(false);
+   527→        setInitError('استغرقت التهيئة وقتًا طويلاً. قد لا تكون جميع البيانات محملة.');
+   528→      }
+   529→    }, INIT_TIMEOUT_MS);
+   530→
+   531→    init();
+   532→
+   533→    return () => {
+   534→      cancelled = true;
+   535→      clearTimeout(timeoutId);
+   536→    };
+   537→  }, [refreshData]);
+   538→
+   539→  // ============================================
+   540→  // Listen for data refresh events (from other components)
+   541→  // ============================================
+   542→  useEffect(() => {
+   543→    let cancelled = false;
+   544→
+   545→    const handleDataRefresh = async () => {
+   546→      if (cancelled || isRefreshingRef.current) return;
+   547→      await refreshData(true);
+   548→    };
+   549→
+   550→    window.addEventListener('local-data-refreshed', handleDataRefresh);
+   551→    window.addEventListener('app-data-refreshed', handleDataRefresh);
+   552→
+   553→    return () => {
+   554→      cancelled = true;
+   555→      window.removeEventListener('local-data-refreshed', handleDataRefresh);
+   556→      window.removeEventListener('app-data-refreshed', handleDataRefresh);
+   557→    };
+   558→  }, [refreshData]);
+   559→
+   560→  // ============================================
+   561→  // Network restore: reload data when connection is back
+   562→  // ============================================
+   563→  useEffect(() => {
+   564→    let cancelled = false;
+   565→
+   566→    const handleNetworkRestored = async () => {
+   567→      if (cancelled) return;
+   568→      console.log('Network restored - reloading data from Supabase');
+   569→      await new Promise(resolve => setTimeout(resolve, 500));
+   570→      try {
+   571→        await refreshData(true);
+   572→      } catch (error) {
+   573→        console.error('Error refreshing data after network restore:', error);
+   574→      }
+   575→    };
+   576→
+   577→    window.addEventListener('app-network-restored', handleNetworkRestored);
+   578→    window.addEventListener('online', handleNetworkRestored);
+   579→
+   580→    return () => {
+   581→      cancelled = true;
+   582→      window.removeEventListener('app-network-restored', handleNetworkRestored);
+   583→      window.removeEventListener('online', handleNetworkRestored);
+   584→    };
+   585→  }, [refreshData]);
+   586→
+   587→  // ============================================
+   588→  // 🔸 Visibility change: reload data when user switches back to tab
+   589→  // 🔸 Critical for cross-device sync — data may have changed while tab was hidden
+   590→  // ============================================
+   591→  useEffect(() => {
+   592→    let cancelled = false;
+   593→
+   594→    const handleVisibilityChange = async () => {
+   595→      if (cancelled) return;
+   596→      if (document.visibilityState === 'visible') {
+   597→        console.log('[Supabase] 🔸 Tab became visible — refreshing data for cross-device sync');
+   598→        try {
+   599→          await refreshData(true, true); // forceRefresh to ensure latest data
+   600→        } catch (error) {
+   601→          console.error('Error refreshing data on visibility change:', error);
+   602→        }
+   603→      }
+   604→    };
+   605→
+   606→    document.addEventListener('visibilitychange', handleVisibilityChange);
+   607→
+   608→    return () => {
+   609→      cancelled = true;
+   610→      document.removeEventListener('visibilitychange', handleVisibilityChange);
+   611→    };
+   612→  }, [refreshData]);
+   613→
+   614→  // ============================================
+   615→  // Calculate total balance dynamically from vaults + currencies
+   616→  // Uses cached calculation for performance
+   617→  // ============================================
+   618→  const actualTotalBalance = useMemo(() => {
+   619→    return calcTotalBalanceUSD(vaults, currencies);
+   620→  }, [vaults, currencies]);
+   621→
+   622→  // ============================================
+   623→  // Calculate debt remaining client-side using useMemo
+   624→  // Avoids an extra Supabase query — uses data already loaded
+   625→  // Includes BOTH active and archived data for accurate calculations
+   626→  // ============================================
+   627→  const computedDebtRemaining = useMemo(() => {
+   628→    return calcDebtRemaining(debts, debtPayments);
+   629→  }, [debts, debtPayments]);
+   630→
+   631→  // ============================================
+   632→  // Display-filtered data
+   633→  // Since we now only load active data by default,
+   634→  // display data = loaded data (no archive filtering needed)
+   635→  // ============================================
+   636→  const displayTransactions = useMemo(() => {
+   637→    return transactions;
+   638→  }, [transactions]);
+   639→
+   640→  const displayDebts = useMemo(() => {
+   641→    return debts;
+   642→  }, [debts]);
+   643→
+   644→  const displayDebtPayments = useMemo(() => {
+   645→    return debtPayments;
+   646→  }, [debtPayments]);
+   647→
+   648→  const displayCurrencyExchanges = useMemo(() => {
+   649→    return currencyExchanges;
+   650→  }, [currencyExchanges]);
+   651→
+   652→  // ============================================
+   653→  // Manual retry function
+   654→  // ============================================
+   655→  const retryInit = useCallback(async () => {
+   656→    setIsLoading(true);
+   657→    setInitError(null);
+   658→    resetInitializationState(); // Allow re-initialization after setup
+   659→    try {
+   660→      await initializeDatabase();
+   661→
+   662→      // Check if tables now exist (after setup)
+   663→      const tablesDoExist = await checkTablesExist();
+   664→      tablesExistRef.current = tablesDoExist;
+   665→
+   666→      if (!tablesDoExist) {
+   667→        // Still no tables — keep showing setup screen
+   668→        setTablesMissing(true);
+   669→        setInitError('لم يتم العثور على جداول قاعدة البيانات. يرجى إعداد قاعدة البيانات أولاً.');
+   670→        setIsInitialized(true);
+   671→        setIsLoading(false);
+   672→        return;
+   673→      }
+   674→
+   675→      // Tables exist now! Clear the missing flag and reload data
+   676→      setTablesMissing(false);
+   677→      await refreshData(true);
+   678→      setIsInitialized(true);
+   679→
+   680→      // Set up Realtime subscription if we don't have one yet
+   681→      if (!channelRef.current) {
+   682→        const channelId = `schema-db-changes-${Date.now()}`;
+   683→        const channel = supabase
+   684→          .channel(channelId)
+   685→          .on('postgres_changes', { event: '*', schema: 'public', table: 'currencies' }, () => {
+   686→            debouncedRefreshRef.current('currencies', () => refreshCurrenciesRef.current());
+   687→          })
+   688→          .on('postgres_changes', { event: '*', schema: 'public', table: 'vaults' }, () => {
+   689→            debouncedRefreshRef.current('vaults', async () => {
+   690→              await refreshVaultsRef.current();
+   691→              try {
+   692→                const totalUSD = await getTotalBalanceInUSD();
+   693→                if (mountedRef.current) setTotalBalanceUSD(totalUSD);
+   694→              } catch (e) {
+   695→                console.error('Error refreshing total balance:', e);
+   696→              }
+   697→            });
+   698→          })
+   699→          .on('postgres_changes', { event: '*', schema: 'public', table: 'accounts' }, () => {
+   700→            debouncedRefreshRef.current('accounts', () => refreshAccountsRef.current());
+   701→          })
+   702→          .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions' }, () => {
+   703→            debouncedRefreshRef.current('transactions', () => refreshTransactionsRef.current());
+   704→          })
+   705→          .on('postgres_changes', { event: '*', schema: 'public', table: 'debts' }, () => {
+   706→            debouncedRefreshRef.current('debts', () => refreshDebtsRef.current());
+   707→          })
+   708→          .on('postgres_changes', { event: '*', schema: 'public', table: 'debt_payments' }, () => {
+   709→            debouncedRefreshRef.current('debt_payments', () => refreshDebtPaymentsRef.current());
+   710→          })
+   711→          .on('postgres_changes', { event: '*', schema: 'public', table: 'currency_exchanges' }, () => {
+   712→            debouncedRefreshRef.current('currency_exchanges', () => refreshCurrencyExchangesRef.current());
+   713→          })
+   714→          .subscribe((status) => {
+   715→            if (status === 'SUBSCRIBED') {
+   716→              realtimeConnectedRef.current = true;
+   717→              console.log('Supabase Realtime: subscribed after retry');
+   718→            }
+   719→          });
+   720→        channelRef.current = channel;
+   721→      }
+   722→    } catch (error) {
+   723→      console.error('Retry init failed:', error);
+   724→      const msg = error instanceof Error ? error.message : 'فشلت إعادة المحاولة';
+   725→      setInitError(msg);
+   726→    } finally {
+   727→      setIsLoading(false);
+   728→    }
+   729→  }, [refreshData]);
+   730→
+   731→  // ============================================
+   732→  // Manual sync: force refresh from Supabase
+   733→  // 🔸 Used by the sync button in the header
+   734→  // ============================================
+   735→  const manualSync = useCallback(async () => {
+   736→    console.log('[Supabase] 🔄 Manual sync triggered');
+   737→    resetInitializationState();
+   738→    await refreshData(false, true); // forceRefresh=true
+   739→  }, [refreshData]);
+   740→
+   741→  // ============================================
+   742→  // Return: EXACT same interface as useLocalData
+   743→  // ============================================
+   744→  return {
+   745→    // Data
+   746→    currencies,
+   747→    allCurrencies,
+   748→    vaults,
+   749→    accounts,
+   750→    transactions,
+   751→    debts,
+   752→    debtPayments,
+   753→    currencyExchanges,
+   754→    totalBalanceUSD: actualTotalBalance,
+   755→    debtRemaining: computedDebtRemaining,
+   756→    isLoading,
+   757→    isInitialized,
+   758→    initError,
+   759→    tablesMissing,
+   760→    realtimeConnected: realtimeConnectedRef.current,
+   761→
+   762→    // Display data (filtered by archive status)
+   763→    displayTransactions,
+   764→    displayDebts,
+   765→    displayDebtPayments,
+   766→    displayCurrencyExchanges,
+   767→
+   768→    // Archive controls
+   769→    showArchived,
+   770→    setShowArchived,
+   771→
+   772→    // Actions
+   773→    refreshData,
+   774→    retryInit,
+   775→    manualSync,
+   776→    setCurrencies,
+   777→    setVaults,
+   778→    setAccounts,
+   779→    setTransactions,
+   780→    setDebts,
+   781→    setDebtPayments,
+   782→    setCurrencyExchanges,
+   783→
+   784→    // Currency actions
+   785→    activateCurrency: async (currencyId: string, exchangeRate?: number): Promise<Currency> => {
+   786→      try {
+   787→        const result = await activateCurrency(currencyId, exchangeRate);
+   788→        // Realtime will auto-refresh, but also refresh as fallback
+   789→        await refreshData();
+   790→        return result;
+   791→      } catch (error) {
+   792→        console.error('Error activating currency:', error);
+   793→        throw error;
+   794→      }
+   795→    },
+   796→    deactivateCurrency: async (currencyId: string): Promise<void> => {
+   797→      try {
+   798→        await deactivateCurrency(currencyId);
+   799→        await refreshData();
+   800→      } catch (error) {
+   801→        console.error('Error deactivating currency:', error);
+   802→        throw error;
+   803→      }
+   804→    },
+   805→    updateCurrencyExchangeRate: async (currencyId: string, rate: number): Promise<Currency> => {
+   806→      try {
+   807→        const result = await updateCurrencyExchangeRate(currencyId, rate);
+   808→        await refreshData();
+   809→        return result;
+   810→      } catch (error) {
+   811→        console.error('Error updating exchange rate:', error);
+   812→        throw error;
+   813→      }
+   814→    },
+   815→    updateCurrencyConversionMethod: async (currencyId: string, method: 'MULTIPLY' | 'DIVIDE'): Promise<Currency> => {
+   816→      try {
+   817→        const result = await updateCurrencyConversionMethod(currencyId, method);
+   818→        await refreshData();
+   819→        return result;
+   820→      } catch (error) {
+   821→        console.error('Error updating conversion method:', error);
+   822→        throw error;
+   823→      }
+   824→    },
+   825→
+   826→    // Vault actions
+   827→    updateVaultOpeningBalance: async (currencyId: string, balance: number, date?: Date | null): Promise<Vault | null> => {
+   828→      try {
+   829→        const result = await updateVaultOpeningBalance(currencyId, balance, date);
+   830→        await refreshData();
+   831→        return result;
+   832→      } catch (error) {
+   833→        console.error('Error updating vault balance:', error);
+   834→        throw error;
+   835→      }
+   836→    },
+   837→    recalculateVaultBalance: async (currencyId: string): Promise<Vault | null> => {
+   838→      try {
+   839→        const result = await recalculateVaultBalanceFn(currencyId);
+   840→        await refreshData();
+   841→        return result;
+   842→      } catch (error) {
+   843→        console.error('Error recalculating vault balance:', error);
+   844→        throw error;
+   845→      }
+   846→    },
+   847→
+   848→    // Account actions
+   849→    addAccount: async (data: Partial<Account>): Promise<Account> => {
+   850→      try {
+   851→        const result = await addAccount(data);
+   852→        await refreshData();
+   853→        return result;
+   854→      } catch (error) {
+   855→        console.error('Error adding account:', error);
+   856→        throw error;
+   857→      }
+   858→    },
+   859→    updateAccount: async (id: string, data: Partial<Account>): Promise<Account> => {
+   860→      try {
+   861→        const result = await updateAccount(id, data);
+   862→        await refreshData();
+   863→        return result;
+   864→      } catch (error) {
+   865→        console.error('Error updating account:', error);
+   866→        throw error;
+   867→      }
+   868→    },
+   869→    deleteAccount: async (id: string): Promise<void> => {
+   870→      try {
+   871→        await deleteAccount(id);
+   872→        await refreshData();
+   873→      } catch (error) {
+   874→        console.error('Error deleting account:', error);
+   875→        throw error;
+   876→      }
+   877→    },
+   878→
+   879→    // Transaction actions
+   880→    addTransaction: async (data: Parameters<typeof addTransaction>[0]): Promise<{ success: boolean; data?: Transaction; error?: string }> => {
+   881→      try {
+   882→        const result = await addTransaction(data);
+   883→        await refreshData(false, true); // forceRefresh=true to ensure UI updates
+   884→        return { success: true, data: result };
+   885→      } catch (error) {
+   886→        return { success: false, error: error instanceof Error ? error.message : 'حدث خطأ' };
+   887→      }
+   888→    },
+   889→    updateTransaction: async (id: string, data: Partial<Transaction>): Promise<{ success: boolean; data?: Transaction; error?: string }> => {
+   890→      try {
+   891→        const result = await updateTransaction(id, data);
+   892→        await refreshData(false, true); // forceRefresh=true
+   893→        return { success: true, data: result };
+   894→      } catch (error) {
+   895→        return { success: false, error: error instanceof Error ? error.message : 'حدث خطأ' };
+   896→      }
+   897→    },
+   898→    deleteTransaction: async (id: string): Promise<{ success: boolean; error?: string }> => {
+   899→      try {
+   900→        await deleteTransaction(id);
+   901→        await refreshData(false, true); // forceRefresh=true
+   902→        return { success: true };
+   903→      } catch (error) {
+   904→        return { success: false, error: error instanceof Error ? error.message : 'حدث خطأ' };
+   905→      }
+   906→    },
+   907→
+   908→    // Debt actions
+   909→    addDebt: async (data: Parameters<typeof addDebt>[0]): Promise<Debt> => {
+   910→      try {
+   911→        const result = await addDebt(data);
+   912→        await refreshData();
+   913→        return result;
+   914→      } catch (error) {
+   915→        console.error('Error adding debt:', error);
+   916→        throw error;
+   917→      }
+   918→    },
+   919→    updateDebt: async (id: string, data: Partial<Debt>): Promise<Debt> => {
+   920→      try {
+   921→        const result = await updateDebt(id, data);
+   922→        await refreshData();
+   923→        return result;
+   924→      } catch (error) {
+   925→        console.error('Error updating debt:', error);
+   926→        throw error;
+   927→      }
+   928→    },
+   929→    deleteDebt: async (id: string): Promise<void> => {
+   930→      try {
+   931→        await deleteDebt(id);
+   932→        await refreshData();
+   933→      } catch (error) {
+   934→        console.error('Error deleting debt:', error);
+   935→        throw error;
+   936→      }
+   937→    },
+   938→    editDebtWithVaultReversal: async (id: string, data: Parameters<typeof editDebtWithVaultReversal>[1]): Promise<Debt> => {
+   939→      try {
+   940→        const result = await editDebtWithVaultReversal(id, data);
+   941→        await refreshData();
+   942→        return result;
+   943→      } catch (error) {
+   944→        console.error('Error editing debt with vault reversal:', error);
+   945→        throw error;
+   946→      }
+   947→    },
+   948→    editDebtPaymentWithVaultReversal: async (id: string, data: Parameters<typeof editDebtPaymentWithVaultReversal>[1]): Promise<DebtPayment> => {
+   949→      try {
+   950→        const result = await editDebtPaymentWithVaultReversal(id, data);
+   951→        await refreshData();
+   952→        return result;
+   953→      } catch (error) {
+   954→        console.error('Error editing debt payment with vault reversal:', error);
+   955→        throw error;
+   956→      }
+   957→    },
+   958→
+   959→    // Debt Payment actions
+   960→    addDebtPayment: async (data: Parameters<typeof addDebtPayment>[0]): Promise<DebtPayment> => {
+   961→      try {
+   962→        const result = await addDebtPayment(data);
+   963→        await refreshData();
+   964→        return result;
+   965→      } catch (error) {
+   966→        console.error('Error adding debt payment:', error);
+   967→        throw error;
+   968→      }
+   969→    },
+   970→    deleteDebtPayment: async (id: string): Promise<void> => {
+   971→      try {
+   972→        await deleteDebtPayment(id);
+   973→        await refreshData();
+   974→      } catch (error) {
+   975→        console.error('Error deleting debt payment:', error);
+   976→        throw error;
+   977→      }
+   978→    },
+   979→
+   980→    // Currency Exchange actions
+   981→    addCurrencyExchange: async (data: Parameters<typeof addCurrencyExchange>[0]): Promise<CurrencyExchange> => {
+   982→      try {
+   983→        const result = await addCurrencyExchange(data);
+   984→        await refreshData();
+   985→        return result;
+   986→      } catch (error) {
+   987→        console.error('Error adding exchange:', error);
+   988→        throw error;
+   989→      }
+   990→    },
+   991→    deleteCurrencyExchange: async (id: string): Promise<void> => {
+   992→      try {
+   993→        await deleteCurrencyExchange(id);
+   994→        await refreshData();
+   995→      } catch (error) {
+   996→        console.error('Error deleting exchange:', error);
+   997→        throw error;
+   998→      }
+   999→    },
+  1000→
+  1001→    // Archive actions
+  1002→    archiveRecords: async (table: 'transactions' | 'debts' | 'debt_payments' | 'currency_exchanges', ids: string[]) => {
+  1003→      const { archiveRecords } = await import('@/lib/supabaseDb');
+  1004→      await archiveRecords(table, ids);
+  1005→      await refreshData(false, true);
+  1006→    },
+  1007→    unarchiveRecords: async (table: 'transactions' | 'debts' | 'debt_payments' | 'currency_exchanges', ids: string[]) => {
+  1008→      const { unarchiveRecords } = await import('@/lib/supabaseDb');
+  1009→      await unarchiveRecords(table, ids);
+  1010→      await refreshData(false, true);
+  1011→    },
+  1012→    autoArchiveOldRecords: async (monthsThreshold: number = 6) => {
+  1013→      const { autoArchiveOldRecords } = await import('@/lib/supabaseDb');
+  1014→      const result = await autoArchiveOldRecords(monthsThreshold);
+  1015→      await refreshData(false, true);
+  1016→      return result;
+  1017→    },
+  1018→    getArchivedCounts: async () => {
+  1019→      const { getArchivedCounts } = await import('@/lib/supabaseDb');
+  1020→      return await getArchivedCounts();
+  1021→    },
+  1022→
+  1023→    // Backup actions
+  1024→    createBackup: async (reason: 'manual' | 'pre_delete' | 'pre_archive' | 'auto' = 'manual') => {
+  1025→      const { createBackup } = await import('@/lib/supabaseDb');
+  1026→      return await createBackup(reason);
+  1027→    },
+  1028→    getBackups: async () => {
+  1029→      const { getBackups } = await import('@/lib/supabaseDb');
+  1030→      return await getBackups();
+  1031→    },
+  1032→    restoreBackup: async (backupId: string) => {
+  1033→      const { restoreBackup } = await import('@/lib/supabaseDb');
+  1034→      const result = await restoreBackup(backupId);
+  1035→      if (result.success) {
+  1036→        await refreshData(false, true);
+  1037→      }
+  1038→      return result;
+  1039→    },
+  1040→    deleteBackup: async (backupId: string) => {
+  1041→      const { deleteBackup } = await import('@/lib/supabaseDb');
+  1042→      return await deleteBackup(backupId);
+  1043→    },
+  1044→    checkBackupsTableExists: async () => {
+  1045→      const { checkBackupsTableExists } = await import('@/lib/supabaseDb');
+  1046→      return await checkBackupsTableExists();
+  1047→    },
+  1048→    exportBackupAsJson: async (backupId: string) => {
+  1049→      const { exportBackupAsJson } = await import('@/lib/supabaseDb');
+  1050→      return await exportBackupAsJson(backupId);
+  1051→    },
+  1052→  };
+  1053→}
+  1054→

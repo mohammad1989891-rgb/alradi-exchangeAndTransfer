@@ -1,0 +1,765 @@
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[log] [Supabase] ✅ Client configured successfully
+[log] [Supabase] 🔗 URL: https://hdlpvtuplwthqcksaynt.supabase.co
+[log] [Supabase] 🔑 Anon Key: sb_publishable_zcZex...
+[log] [HMR] connected
+[log] SW registered: http://localhost:3000/
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔄 initializeDatabase() called...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] SW controller changed - page will reload
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [HMR] connected
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[log] [Supabase] ✅ Client configured successfully
+[log] [Supabase] 🔗 URL: https://hdlpvtuplwthqcksaynt.supabase.co
+[log] [Supabase] 🔑 Anon Key: sb_publishable_zcZex...
+[log] [HMR] connected
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔄 initializeDatabase() called...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] SW registered: http://localhost:3000/
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[log] [Supabase] ✅ Client configured successfully
+[log] [Supabase] 🔗 URL: https://hdlpvtuplwthqcksaynt.supabase.co
+[log] [Supabase] 🔑 Anon Key: sb_publishable_zcZex...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔄 initializeDatabase() called...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] SW registered: http://localhost:3000/
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[log] [Supabase] ✅ Client configured successfully
+[log] [Supabase] 🔗 URL: https://hdlpvtuplwthqcksaynt.supabase.co
+[log] [Supabase] 🔑 Anon Key: sb_publishable_zcZex...
+[log] SW registered: http://localhost:3000/
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔄 initializeDatabase() called...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] 📊 Active currencies: 2
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[log] [Supabase] ✅ Client configured successfully
+[log] [Supabase] 🔗 URL: https://hdlpvtuplwthqcksaynt.supabase.co
+[log] [Supabase] 🔑 Anon Key: sb_publishable_zcZex...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔄 initializeDatabase() called...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] SW registered: http://localhost:3000/
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[warning] [Supabase] ⏱️ Initialization timeout
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔄 Initializing database...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] 🔍 Checking if tables exist...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] Supabase Realtime: ✅ subscribed successfully
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] ✅ Tables exist, currencies count: 1
+[log] [Supabase] ✅ Tables exist, loading data...
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active accounts loaded: 2
+[log] [Supabase] 📊 Transactions loaded: 1 (active only)
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] ✅ Initialization complete!
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Vaults loaded: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Active currencies: 2
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24
+[log] [Supabase] 📊 Currencies loaded: 24

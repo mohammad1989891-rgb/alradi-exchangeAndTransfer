@@ -426,3 +426,30 @@ Stage Summary:
 - All 5 API routes now use `encodeURIComponent()` for password in connection strings
 - Special characters in passwords (@, :, #, !, etc.) are now handled correctly
 - Better error messages: "Invalid URL" mapped to Arabic friendly message
+---
+Task ID: RBAC-1
+Agent: Main Agent
+Task: Implement Role-Based Access Control (RBAC) system for Al-Radhi Exchange app
+
+Work Log:
+- Added `role` field (`'admin' | 'user'`) to User interface in supabaseDb.ts and localDb.ts
+- Updated `initializeDefaultUser()` to include `role: 'admin'` with fallback for missing column
+- Updated `rowToUser()` to default to 'admin' if role column doesn't exist
+- Added `getUserById()`, `createUser()`, `deleteUser()` functions to both db files
+- Created `useAuth` hook (`src/hooks/useAuth.ts`) for reading user role from localStorage
+- Updated `LoginPage.tsx` to pass username and role on login
+- Updated `page.tsx` to store `currentUserRole` in localStorage on login/logout
+- Added User Management section in SettingsPage (admin only) with add/delete users
+- Added role restriction overlay to Backup, Backup Management, and Archive sections
+- Non-admin users see red "صلاحية مطلوبة" banner with greyed-out disabled content
+- Added backend role check in `/api/execute-sql` route (rejects non-admin)
+- Updated fetch calls to pass `userRole` parameter to API
+- Fixed lint error in useAuth hook (avoided setState in useEffect)
+
+Stage Summary:
+- RBAC system fully implemented with admin/user roles
+- Admin: full access to all settings including Backup, Archive, User Management
+- User: restricted access (Backup & Archive sections disabled with warning)
+- User Management section completely hidden from non-admin users
+- Backend API routes protected with role check
+- Need to add `role` column to Supabase `users` table via SQL Editor

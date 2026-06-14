@@ -1,0 +1,2002 @@
+     1→import Dexie from 'dexie';
+     2→
+     3→// Types
+     4→export interface Currency {
+     5→  id: string;
+     6→  code: string;
+     7→  name: string;
+     8→  symbol: string;
+     9→  isDefault: boolean;
+    10→  isActive: boolean;
+    11→  exchangeRate: number;
+    12→  conversionMethod?: 'MULTIPLY' | 'DIVIDE';  // طريقة التحويل إلى الدولار
+    13→  createdAt: Date;
+    14→  updatedAt: Date;
+    15→}
+    16→
+    17→export interface Vault {
+    18→  id: string;
+    19→  currencyId: string;
+    20→  balance: number;
+    21→  openingBalance: number;
+    22→  createdAt: Date;
+    23→  updatedAt: Date;
+    24→  // خصائص إضافية للتوافق مع المكونات
+    25→  currency?: Currency;
+    26→  conversionFactorToMain?: number;
+    27→}
+    28→
+    29→export interface Account {
+    30→  id: string;
+    31→  name: string;
+    32→  type: 'PRIVATE' | 'PUBLIC';
+    33→  description?: string;
+    34→  isActive: boolean;
+    35→  createdAt: Date;
+    36→  updatedAt: Date;
+    37→}
+    38→
+    39→export interface Transaction {
+    40→  id: string;
+    41→  accountId: string;
+    42→  currencyId: string;
+    43→  baseCurrencyId?: string | null;
+    44→  type: 'INCOME' | 'EXPENSE';
+    45→  paymentType: 'CASH' | 'DEFERRED';
+    46→  amount: number;
+    47→  conversionFactor: number;
+    48→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+    49→  feesType: 'FIXED' | 'PERCENTAGE' | 'PER_THOUSAND';
+    50→  feesDirection: 'INCOME' | 'EXPENSE';
+    51→  feesAmount: number;
+    52→  finalBalance: number;
+    53→  description?: string | null;
+    54→  date: Date;
+    55→  // تمييز حركة الفائض الناتجة عن دفعات الديون
+    56→  isOverflowTransaction?: boolean;
+    57→  // ربط الحركة بالدفعة التي أنتجتها
+    58→  relatedPaymentId?: string | null;
+    59→  // حالة الاكتمال: true = مكتملة (تؤثر على الصندوق), false = غير مكتملة (لا تؤثر)
+    60→  isComplete: boolean;
+    61→  isArchived?: boolean;
+    62→  createdAt: Date;
+    63→  updatedAt: Date;
+    64→  // خصائص إضافية للتوافق مع المكونات
+    65→  account?: Account;
+    66→  currency?: Currency;
+    67→  baseCurrency?: Currency | null;
+    68→}
+    69→
+    70→export interface Debt {
+    71→  id: string;
+    72→  accountId: string;
+    73→  currencyId: string;
+    74→  amount: number;
+    75→  conversionFactor: number;
+    76→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+    77→  finalBalance: number;
+    78→  description?: string | null;
+    79→  debtType: 'RECEIVABLE' | 'PAYABLE';  // RECEIVABLE = لنا (مستحق لنا), PAYABLE = علينا (مستحق علينا)
+    80→  debtMode: 'CASH' | 'DEFERRED';       // CASH = نقدي (يؤثر على الصندوق), DEFERRED = آجل (لا يؤثر على الصندوق)
+    81→  isPaid: boolean;
+    82→  paidAt?: Date | null;
+    83→  isArchived?: boolean;
+    84→  date: Date;
+    85→  createdAt: Date;
+    86→  updatedAt: Date;
+    87→  // خصائص إضافية للتوافق مع المكونات
+    88→  account?: Account;
+    89→  currency?: Currency;
+    90→}
+    91→
+    92→export interface DebtPayment {
+    93→  id: string;
+    94→  debtId: string;
+    95→  amount: number;
+    96→  currencyId: string;  // عملة الدفعة
+    97→  description?: string | null;
+    98→  date: Date;
+    99→  // نوع الدفعة: كاش (تؤثر على الصندوق) أو آجل (لا تؤثر)
+   100→  paymentMode?: 'CASH' | 'DEFERRED';
+   101→  // اتجاه الدفعة: لنا (RECEIVABLE) أو علينا (PAYABLE)
+   102→  paymentDirection?: 'RECEIVABLE' | 'PAYABLE';
+   103→  // ربط الدفعة بحركة الفائض إن وجدت
+   104→  overflowTransactionId?: string | null;
+   105→  isArchived?: boolean;
+   106→  createdAt: Date;
+   107→  updatedAt: Date;
+   108→}
+   109→
+   110→// ============================================
+   111→// Currency Exchange Module
+   112→// ============================================
+   113→
+   114→/**
+   115→ * عملية تصريف عملات
+   116→ * 
+   117→ * جميع القيم المخزنة هي SNAPSHOT (لقطات) من وقت إنشاء العملية
+   118→ * ولا تتغير بعد الحفظ - هذا يضمن دقة البيانات التاريخية
+   119→ */
+   120→export interface CurrencyExchange {
+   121→  id: string;
+   122→  
+   123→  // العملات والمبالغ الأساسية
+   124→  outgoingCurrencyId: string;      // العملة المصدر (التي نخرجها)
+   125→  incomingCurrencyId: string;      // العملة الهدف (التي ندخلها)
+   126→  outgoingAmount: number;          // المبلغ الصادر
+   127→  incomingAmount: number;          // المبلغ الوارد
+   128→  
+   129→  // معاملات التحويل - SNAPSHOT (غير قابلة للتعديل)
+   130→  outgoingRateAtTime: number;      // سعر صرف العملة المصدر وقت العملية
+   131→  incomingRateAtTime: number;      // سعر صرف العملة الهدف وقت العملية
+   132→  outgoingConversionMethod: 'MULTIPLY' | 'DIVIDE';  // طريقة تحويل العملة المصدر
+   133→  incomingConversionMethod: 'MULTIPLY' | 'DIVIDE';  // طريقة تحويل العملة الهدف
+   134→  
+   135→  // القيم بالدولار - SNAPSHOT (محسوبة مرة واحدة عند الإنشاء)
+   136→  outgoingUsd: number;             // المبلغ الصادر بالدولار
+   137→  incomingUsd: number;             // المبلغ الوارد بالدولار
+   138→  
+   139→  // الربح/الخسارة - SNAPSHOT
+   140→  profit: number;                  // الربح = incomingUsd - outgoingUsd
+   141→  
+   142→  // معلومات إضافية
+   143→  description?: string | null;     // ملاحظات
+   144→  date: Date;                      // تاريخ العملية
+   145→  
+   146→  // Timestamps
+   147→  createdAt: Date;                 // تاريخ الإنشاء
+   148→  updatedAt: Date;                 // تاريخ آخر تحديث
+   149→  
+   150→  // علامة الحذف الناعم
+   151→  isDeleted?: boolean;             // للحذف الناعم بدلاً من الحذف الفعلي
+   152→  isArchived?: boolean;            // للأرشفة
+   153→}
+   154→
+   155→// Database setup
+   156→const db = new Dexie('ExchangeAppDB');
+   157→
+   158→// ============================================
+   159→// User Model - للمستخدمين وتسجيل الدخول
+   160→// ============================================
+   161→export interface User {
+   162→  id: string;
+   163→  username: string;
+   164→  password: string;  // سيتم تخزينها مشفرة
+   165→  name?: string;
+   166→  createdAt: Date;
+   167→  updatedAt: Date;
+   168→}
+   169→
+   170→// ============================================
+   171→// Vehicles Module - قسم المركبات
+   172→// ============================================
+   173→
+   174→export interface Vehicle {
+   175→  id: string;
+   176→  name: string;           // اسم المركبة
+   177→  plateNumber?: string;   // رقم اللوحة
+   178→  notes?: string;         // ملاحظات
+   179→  isActive: boolean;      // نشطة/غير نشطة
+   180→  createdAt: Date;
+   181→  updatedAt: Date;
+   182→}
+   183→
+   184→export interface VehicleTransaction {
+   185→  id: string;
+   186→  vehicleId: string;      // ربط بالمركبة
+   187→  date: Date;
+   188→  amount: number;         // المبلغ
+   189→  partner: 'first' | 'second';  // الشريك الأول أو الثاني
+   190→  paymentType: 'cash' | 'deferred';  // كاش أو آجل
+   191→  description: string;    // البيان
+   192→  createdAt: Date;
+   193→  updatedAt: Date;
+   194→}
+   195→
+   196→export interface SharedTransaction {
+   197→  id: string;
+   198→  date: Date;
+   199→  amount: number;
+   200→  partner: 'first' | 'second';
+   201→  paymentType: 'cash' | 'deferred';
+   202→  description: string;
+   203→  createdAt: Date;
+   204→  updatedAt: Date;
+   205→}
+   206→
+   207→export interface VehiclesSettings {
+   208→  id: string;
+   209→  firstPartnerName: string;   // اسم الشريك الأول
+   210→  secondPartnerName: string;  // اسم الشريك الثاني
+   211→  updatedAt: Date;
+   212→}
+   213→
+   214→db.version(4).stores({
+   215→  currencies: 'id, code, name, isDefault, isActive, exchangeRate',
+   216→  vaults: 'id, currencyId',
+   217→  accounts: 'id, name, type, isActive',
+   218→  transactions: 'id, accountId, currencyId, type, paymentType, date',
+   219→  debts: 'id, accountId, currencyId, isPaid, date',
+   220→  debtPayments: 'id, debtId, date',
+   221→  currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
+   222→  users: 'id, username',
+   223→  vehicles: 'id, name, plateNumber, isActive',
+   224→  vehicleTransactions: 'id, vehicleId, partner, paymentType, date',
+   225→  sharedTransactions: 'id, partner, paymentType, date',
+   226→  vehiclesSettings: 'id',
+   227→});
+   228→
+   229→// ============================================
+   230→// 🔹 ترقية إلى v5: إضافة حقل الحالة (status)
+   231→// جميع الحركات القديمة تعتبر مكتملة (COMPLETED)
+   232→// ============================================
+   233→db.version(5).stores({
+   234→  currencies: 'id, code, name, isDefault, isActive, exchangeRate',
+   235→  vaults: 'id, currencyId',
+   236→  accounts: 'id, name, type, isActive',
+   237→  transactions: 'id, accountId, currencyId, type, paymentType, status, date',
+   238→  debts: 'id, accountId, currencyId, isPaid, date',
+   239→  debtPayments: 'id, debtId, date',
+   240→  currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
+   241→  users: 'id, username',
+   242→  vehicles: 'id, name, plateNumber, isActive',
+   243→  vehicleTransactions: 'id, vehicleId, partner, paymentType, date',
+   244→  sharedTransactions: 'id, partner, paymentType, date',
+   245→  vehiclesSettings: 'id',
+   246→}).upgrade(tx => {
+   247→  return tx.table('transactions').toCollection().modify(transaction => {
+   248→    if (!transaction.status) {
+   249→      transaction.status = 'COMPLETED';
+   250→    }
+   251→  });
+   252→});
+   253→
+   254→// ============================================
+   255→// 🔹 ترقية إلى v6: استبدال status بـ isComplete
+   256→// status = 'COMPLETED' → isComplete = true
+   257→// status = 'PENDING' → isComplete = false
+   258→// ============================================
+   259→db.version(6).stores({
+   260→  currencies: 'id, code, name, isDefault, isActive, exchangeRate',
+   261→  vaults: 'id, currencyId',
+   262→  accounts: 'id, name, type, isActive',
+   263→  transactions: 'id, accountId, currencyId, type, paymentType, isComplete, date',
+   264→  debts: 'id, accountId, currencyId, isPaid, date',
+   265→  debtPayments: 'id, debtId, date',
+   266→  currencyExchanges: 'id, outgoingCurrencyId, incomingCurrencyId, date, profit, isDeleted',
+   267→  users: 'id, username',
+   268→  vehicles: 'id, name, plateNumber, isActive',
+   269→  vehicleTransactions: 'id, vehicleId, partner, paymentType, date',
+   270→  sharedTransactions: 'id, partner, paymentType, date',
+   271→  vehiclesSettings: 'id',
+   272→}).upgrade(tx => {
+   273→  return tx.table('transactions').toCollection().modify(transaction => {
+   274→    // تحويل status القديم إلى isComplete
+   275→    if (transaction.isComplete === undefined) {
+   276→      transaction.isComplete = transaction.status !== 'PENDING';
+   277→    }
+   278→    // حذف الحقل القديم
+   279→    delete transaction.status;
+   280→  });
+   281→});
+   282→
+   283→// Helper function
+   284→function generateId(): string {
+   285→  return 'local_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9);
+   286→}
+   287→
+   288→function calculateFinalBalance(
+   289→  amount: number,
+   290→  conversionFactor: number,
+   291→  conversionMethod: string,
+   292→  feesType: string,
+   293→  feesAmount: number,
+   294→  feesDirection: string,
+   295→  transactionType: 'INCOME' | 'EXPENSE' = 'INCOME'
+   296→): number {
+   297→  // 🔸 حماية: إذا كان معامل التحويل = 0، الرصيد النهائي = 0
+   298→  // (لتجنب القسمة على صفر في وضع DIVIDE)
+   299→  if (!conversionFactor || conversionFactor === 0) {
+   300→    return 0;
+   301→  }
+   302→  
+   303→  let finalBalance = amount;
+   304→  
+   305→  if (conversionMethod === 'MULTIPLY') {
+   306→    finalBalance = amount * conversionFactor;
+   307→  } else {
+   308→    finalBalance = amount / conversionFactor;
+   309→  }
+   310→  
+   311→  let feesValue = 0;
+   312→  if (feesAmount && feesAmount > 0) {
+   313→    switch (feesType) {
+   314→      case 'FIXED':
+   315→        feesValue = feesAmount;
+   316→        break;
+   317→      case 'PERCENTAGE':
+   318→        feesValue = (finalBalance * feesAmount) / 100;
+   319→        break;
+   320→      case 'PER_THOUSAND':
+   321→        feesValue = (finalBalance * feesAmount) / 1000;
+   322→        break;
+   323→    }
+   324→    
+   325→    // منطق الأجور:
+   326→    // إذا تطابق اتجاه الحركة مع اتجاه الأجور = زيادة في المبلغ النهائي
+   327→    // إذا اختلف اتجاه الحركة عن اتجاه الأجور = خصم من المبلغ النهائي
+   328→    const sameDirection = transactionType === feesDirection;
+   329→    
+   330→    if (sameDirection) {
+   331→      // نفس الاتجاه = زيادة
+   332→      finalBalance = finalBalance + feesValue;
+   333→    } else {
+   334→      // اتجاه مختلف = خصم
+   335→      finalBalance = finalBalance - feesValue;
+   336→    }
+   337→  }
+   338→  
+   339→  return finalBalance;
+   340→}
+   341→
+   342→// Default currencies
+   343→const defaultCurrencies: Omit<Currency, 'createdAt' | 'updatedAt'>[] = [
+   344→  { id: 'cur_usd', code: 'USD', name: 'دولار أمريكي', symbol: '$', isDefault: true, isActive: true, exchangeRate: 1, conversionMethod: 'MULTIPLY' },
+   345→  { id: 'cur_eur', code: 'EUR', name: 'يورو', symbol: '€', isDefault: false, isActive: false, exchangeRate: 1.08, conversionMethod: 'MULTIPLY' },
+   346→  { id: 'cur_gbp', code: 'GBP', name: 'جنيه إسترليني', symbol: '£', isDefault: false, isActive: false, exchangeRate: 1.27, conversionMethod: 'MULTIPLY' },
+   347→  { id: 'cur_sar', code: 'SAR', name: 'ريال سعودي', symbol: 'ر.س', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
+   348→  { id: 'cur_aed', code: 'AED', name: 'درهم إماراتي', symbol: 'د.إ', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
+   349→  { id: 'cur_kwd', code: 'KWD', name: 'دينار كويتي', symbol: 'د.ك', isDefault: false, isActive: false, exchangeRate: 3.26, conversionMethod: 'MULTIPLY' },
+   350→  { id: 'cur_bhd', code: 'BHD', name: 'دينار بحريني', symbol: 'د.ب', isDefault: false, isActive: false, exchangeRate: 2.65, conversionMethod: 'MULTIPLY' },
+   351→  { id: 'cur_qar', code: 'QAR', name: 'ريال قطري', symbol: 'ر.ق', isDefault: false, isActive: false, exchangeRate: 0.27, conversionMethod: 'DIVIDE' },
+   352→  { id: 'cur_omr', code: 'OMR', name: 'ريال عماني', symbol: 'ر.ع', isDefault: false, isActive: false, exchangeRate: 2.60, conversionMethod: 'MULTIPLY' },
+   353→  { id: 'cur_syp', code: 'SYP', name: 'ليرة سورية', symbol: 'ل.س', isDefault: false, isActive: false, exchangeRate: 0.00004, conversionMethod: 'MULTIPLY' },
+   354→  { id: 'cur_lbp', code: 'LBP', name: 'ليرة لبنانية', symbol: 'ل.ل', isDefault: false, isActive: false, exchangeRate: 0.000011, conversionMethod: 'DIVIDE' },
+   355→  { id: 'cur_jod', code: 'JOD', name: 'دينار أردني', symbol: 'د.أ', isDefault: false, isActive: false, exchangeRate: 1.41, conversionMethod: 'MULTIPLY' },
+   356→  { id: 'cur_iqd', code: 'IQD', name: 'دينار عراقي', symbol: 'د.ع', isDefault: false, isActive: false, exchangeRate: 0.00076, conversionMethod: 'DIVIDE' },
+   357→  { id: 'cur_try', code: 'TRY', name: 'ليرة تركية', symbol: '₺', isDefault: false, isActive: false, exchangeRate: 0.031, conversionMethod: 'DIVIDE' },
+   358→  { id: 'cur_egp', code: 'EGP', name: 'جنيه مصري', symbol: 'ج.م', isDefault: false, isActive: false, exchangeRate: 0.020, conversionMethod: 'DIVIDE' },
+   359→  { id: 'cur_tnd', code: 'TND', name: 'دينار تونسي', symbol: 'د.ت', isDefault: false, isActive: false, exchangeRate: 0.32, conversionMethod: 'MULTIPLY' },
+   360→  { id: 'cur_dzd', code: 'DZD', name: 'دينار جزائري', symbol: 'د.ج', isDefault: false, isActive: false, exchangeRate: 0.0075, conversionMethod: 'DIVIDE' },
+   361→  { id: 'cur_mad', code: 'MAD', name: 'درهم مغربي', symbol: 'د.م', isDefault: false, isActive: false, exchangeRate: 0.10, conversionMethod: 'DIVIDE' },
+   362→  { id: 'cur_inr', code: 'INR', name: 'روبية هندية', symbol: '₹', isDefault: false, isActive: false, exchangeRate: 0.012, conversionMethod: 'DIVIDE' },
+   363→  { id: 'cur_aud', code: 'AUD', name: 'دولار أسترالي', symbol: 'A$', isDefault: false, isActive: false, exchangeRate: 0.65, conversionMethod: 'MULTIPLY' },
+   364→  { id: 'cur_cad', code: 'CAD', name: 'دولار كندي', symbol: 'C$', isDefault: false, isActive: false, exchangeRate: 0.73, conversionMethod: 'MULTIPLY' },
+   365→  { id: 'cur_chf', code: 'CHF', name: 'فرنك سويسري', symbol: 'Fr', isDefault: false, isActive: false, exchangeRate: 1.12, conversionMethod: 'MULTIPLY' },
+   366→  { id: 'cur_cny', code: 'CNY', name: 'يوان صيني', symbol: '¥', isDefault: false, isActive: false, exchangeRate: 0.14, conversionMethod: 'DIVIDE' },
+   367→  { id: 'cur_jpy', code: 'JPY', name: 'ين ياباني', symbol: '¥', isDefault: false, isActive: false, exchangeRate: 0.0067, conversionMethod: 'DIVIDE' },
+   368→];
+   369→
+   370→// Initialize database
+   371→let isDbInitialized = false;
+   372→
+   373→export async function initializeDatabase(): Promise<void> {
+   374→  if (isDbInitialized) return;
+   375→  
+   376→  const count = await db.table('currencies').count();
+   377→  const usdCurrency = await db.table<Currency>('currencies').get('cur_usd');
+   378→  
+   379→  // إذا تم حذف العملات، أعد إضافتها
+   380→  if (count === 0 || !usdCurrency) {
+   381→    const now = new Date();
+   382→    
+   383→    // حذف أي بيانات قديمة
+   384→    await db.table('currencies').clear();
+   385→    
+   386→    // إضافة العملات الافتراضية
+   387→    await db.table('currencies').bulkAdd(
+   388→      defaultCurrencies.map(c => ({ ...c, createdAt: now, updatedAt: now }))
+   389→    );
+   390→    
+   391→    // التحقق من وجود صندوق الدولار
+   392→    const usdVault = await db.table<Vault>('vaults').where('currencyId').equals('cur_usd').first();
+   393→    if (!usdVault) {
+   394→      await db.table('vaults').add({
+   395→        id: 'vault_cur_usd',
+   396→        currencyId: 'cur_usd',
+   397→        balance: 0,
+   398→        openingBalance: 0,
+   399→        createdAt: now,
+   400→        updatedAt: now,
+   401→      });
+   402→    }
+   403→    
+   404→    // التحقق من وجود حساب افتراضي
+   405→    const accountsCount = await db.table('accounts').count();
+   406→    if (accountsCount === 0) {
+   407→      await db.table('accounts').add({
+   408→        id: 'acc_sample',
+   409→        name: 'حساب رئيسي',
+   410→        type: 'PRIVATE',
+   411→        description: 'الحساب الافتراضي',
+   412→        isActive: true,
+   413→        createdAt: now,
+   414→        updatedAt: now,
+   415→      });
+   416→    }
+   417→  }
+   418→  
+   419→  // ============================================
+   420→  // 🔹 إصلاح سير العملة السورية (SYP)
+   421→  // تصحيح conversionMethod من DIVIDE إلى MULTIPLY
+   422→  // لأن exchangeRate = 0.00004 يمثل "1 ليرة = 0.00004 دولار"
+   423→  // والعملية الصحيحة هي: amount × 0.00004 = usdValue (MULTIPLY)
+   424→  // وليس: amount ÷ 0.00004 = نتيجة خاطئة
+   425→  // ============================================
+   426→  try {
+   427→    const sypCurrency = await db.table<Currency>('currencies').get('cur_syp');
+   428→    if (sypCurrency && sypCurrency.conversionMethod === 'DIVIDE' && sypCurrency.exchangeRate < 1) {
+   429→      await db.table('currencies').update('cur_syp', { 
+   430→        conversionMethod: 'MULTIPLY',
+   431→        updatedAt: new Date()
+   432→      });
+   433→    }
+   434→  } catch (e) {
+   435→    // تجاهل الأخطاء في عملية الإصلاح
+   436→    console.warn('SYP migration fix skipped:', e);
+   437→  }
+   438→  
+   439→  isDbInitialized = true;
+   440→}
+   441→
+   442→/**
+   443→ * إعادة تعيين العملات الافتراضية
+   444→ * تستخدم عند حذف العملات عن طريق الخطأ
+   445→ */
+   446→export async function resetCurrenciesToDefault(): Promise<{ success: boolean; message: string }> {
+   447→  try {
+   448→    const now = new Date();
+   449→    
+   450→    // حذف جميع العملات الحالية
+   451→    await db.table('currencies').clear();
+   452→    
+   453→    // إعادة إضافة العملات الافتراضية
+   454→    await db.table('currencies').bulkAdd(
+   455→      defaultCurrencies.map(c => ({ ...c, createdAt: now, updatedAt: now }))
+   456→    );
+   457→    
+   458→    // التأكد من وجود صندوق الدولار
+   459→    const usdVault = await db.table<Vault>('vaults').where('currencyId').equals('cur_usd').first();
+   460→    if (!usdVault) {
+   461→      await db.table('vaults').add({
+   462→        id: 'vault_cur_usd',
+   463→        currencyId: 'cur_usd',
+   464→        balance: 0,
+   465→        openingBalance: 0,
+   466→        createdAt: now,
+   467→        updatedAt: now,
+   468→      });
+   469→    }
+   470→    
+   471→    return { success: true, message: 'تم إعادة العملات الافتراضية بنجاح' };
+   472→  } catch (error) {
+   473→    console.error('Error resetting currencies:', error);
+   474→    return { success: false, message: 'حدث خطأ أثناء إعادة التعيين' };
+   475→  }
+   476→}
+   477→
+   478→// Currency functions
+   479→export async function getAllAvailableCurrencies(): Promise<Currency[]> {
+   480→  await initializeDatabase();
+   481→  return db.table<Currency>('currencies').toArray();
+   482→}
+   483→
+   484→export async function getActiveCurrencies(): Promise<Currency[]> {
+   485→  await initializeDatabase();
+   486→  const all = await db.table<Currency>('currencies').toArray();
+   487→  return all.filter(c => c.isActive);
+   488→}
+   489→
+   490→export async function activateCurrency(currencyId: string, exchangeRate?: number): Promise<Currency> {
+   491→  await initializeDatabase();
+   492→  
+   493→  const currency = await db.table<Currency>('currencies').get(currencyId);
+   494→  if (!currency) throw new Error('العملة غير موجودة');
+   495→  
+   496→  const now = new Date();
+   497→  const rate = exchangeRate ?? currency.exchangeRate ?? 1;
+   498→  
+   499→  await db.table('currencies').update(currencyId, { isActive: true, exchangeRate: rate, updatedAt: now });
+   500→  
+   501→  const existingVault = await db.table<Vault>('vaults').where('currencyId').equals(currencyId).first();
+   502→  if (!existingVault) {
+   503→    await db.table('vaults').add({
+   504→      id: 'vault_' + currencyId,
+   505→      currencyId,
+   506→      balance: 0,
+   507→      openingBalance: 0,
+   508→      createdAt: now,
+   509→      updatedAt: now,
+   510→    });
+   511→  }
+   512→  
+   513→  return (await db.table<Currency>('currencies').get(currencyId))!;
+   514→}
+   515→
+   516→export async function deactivateCurrency(currencyId: string): Promise<void> {
+   517→  await initializeDatabase();
+   518→  
+   519→  const currency = await db.table<Currency>('currencies').get(currencyId);
+   520→  if (currency?.isDefault) throw new Error('لا يمكن إلغاء تفعيل العملة الافتراضية');
+   521→  
+   522→  await db.table('currencies').update(currencyId, { isActive: false, updatedAt: new Date() });
+   523→}
+   524→
+   525→export async function updateCurrencyExchangeRate(currencyId: string, rate: number): Promise<Currency> {
+   526→  await initializeDatabase();
+   527→  await db.table('currencies').update(currencyId, { exchangeRate: rate, updatedAt: new Date() });
+   528→  return (await db.table<Currency>('currencies').get(currencyId))!;
+   529→}
+   530→
+   531→// Update currency conversion method
+   532→export async function updateCurrencyConversionMethod(currencyId: string, method: 'MULTIPLY' | 'DIVIDE'): Promise<Currency> {
+   533→  await initializeDatabase();
+   534→  await db.table('currencies').update(currencyId, { conversionMethod: method, updatedAt: new Date() });
+   535→  return (await db.table<Currency>('currencies').get(currencyId))!;
+   536→}
+   537→
+   538→// ============================================
+   539→// 🔹 إضافة عملة مخصصة جديدة (بدون حاجة لـ API)
+   540→// 🔸 تعمل بالكامل بدون إنترنت
+   541→// ============================================
+   542→export async function addCustomCurrency(data: { code: string; name: string; symbol: string; exchangeRate?: number; conversionMethod?: 'MULTIPLY' | 'DIVIDE' }): Promise<Currency> {
+   543→  await initializeDatabase();
+   544→  
+   545→  // 🔸 التحقق من عدم وجود عملة بنفس الرمز
+   546→  const existing = await db.table<Currency>('currencies').where('code').equals(data.code.toUpperCase()).first();
+   547→  if (existing) {
+   548→    throw new Error('العملة موجودة بالفعل');
+   549→  }
+   550→  
+   551→  const now = new Date();
+   552→  const id = 'cur_custom_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
+   553→  
+   554→  const currency: Currency = {
+   555→    id,
+   556→    code: data.code.toUpperCase(),
+   557→    name: data.name,
+   558→    symbol: data.symbol,
+   559→    isDefault: false,
+   560→    isActive: true,
+   561→    exchangeRate: data.exchangeRate || 1,
+   562→    conversionMethod: data.conversionMethod || 'MULTIPLY',
+   563→    createdAt: now,
+   564→    updatedAt: now,
+   565→  };
+   566→  
+   567→  await db.table('currencies').add(currency);
+   568→  
+   569→  // 🔸 إنشاء صندوق للعملة الجديدة
+   570→  const existingVault = await db.table<Vault>('vaults').where('currencyId').equals(id).first();
+   571→  if (!existingVault) {
+   572→    await db.table('vaults').add({
+   573→      id: 'vault_' + id,
+   574→      currencyId: id,
+   575→      balance: 0,
+   576→      openingBalance: 0,
+   577→      createdAt: now,
+   578→      updatedAt: now,
+   579→    });
+   580→  }
+   581→  
+   582→  return currency;
+   583→}
+   584→
+   585→// ============================================
+   586→// 🔹 حذف عملة من قاعدة البيانات المحلية (بدون حاجة لـ API)
+   587→// 🔸 تعمل بالكامل بدون إنترنت
+   588→// ============================================
+   589→export async function deleteCurrencyFromDb(currencyId: string): Promise<void> {
+   590→  await initializeDatabase();
+   591→  
+   592→  const currency = await db.table<Currency>('currencies').get(currencyId);
+   593→  if (!currency) throw new Error('العملة غير موجودة');
+   594→  if (currency.isDefault) throw new Error('لا يمكن حذف العملة الافتراضية');
+   595→  
+   596→  // 🔸 التحقق من عدم وجود حركات مرتبطة بالعملة
+   597→  const relatedTransactions = await db.table('transactions').where('currencyId').equals(currencyId).count();
+   598→  const relatedDebts = await db.table('debts').where('currencyId').equals(currencyId).count();
+   599→  const relatedExchanges = await db.table('currencyExchanges')
+   600→    .filter(e => (e.outgoingCurrencyId === currencyId || e.incomingCurrencyId === currencyId) && !e.isDeleted)
+   601→    .count();
+   602→  
+   603→  if (relatedTransactions > 0 || relatedDebts > 0 || relatedExchanges > 0) {
+   604→    throw new Error('لا يمكن حذف عملة مرتبطة بحركات أو ديون أو عمليات صرف');
+   605→  }
+   606→  
+   607→  // 🔸 حذف الصندوق المرتبط
+   608→  const vault = await db.table<Vault>('vaults').where('currencyId').equals(currencyId).first();
+   609→  if (vault) {
+   610→    await db.table('vaults').delete(vault.id);
+   611→  }
+   612→  
+   613→  // 🔸 حذف العملة
+   614→  await db.table('currencies').delete(currencyId);
+   615→}
+   616→
+   617→// Vault functions
+   618→export async function getVaults(): Promise<Vault[]> {
+   619→  await initializeDatabase();
+   620→  return db.table<Vault>('vaults').toArray();
+   621→}
+   622→
+   623→// ============================================
+   624→// 🔹 دالة مساعدة لتحديث رصيد الصندوق مباشرة
+   625→// 🔸 تستخدم لقسم المركبات
+   626→// ============================================
+   627→export async function updateVaultBalance(currencyId: string, balanceDelta: number): Promise<Vault | null> {
+   628→  await initializeDatabase();
+   629→  
+   630→  const vault = await db.table<Vault>('vaults').where('currencyId').equals(currencyId).first();
+   631→  if (vault) {
+   632→    const newBalance = vault.balance + balanceDelta;
+   633→    await db.table('vaults').update(vault.id, { balance: newBalance, updatedAt: new Date() });
+   634→    return db.table<Vault>('vaults').get(vault.id) || null;
+   635→  }
+   636→  return null;
+   637→}
+   638→
+   639→export async function updateVaultOpeningBalance(currencyId: string, openingBalance: number): Promise<Vault | null> {
+   640→  await initializeDatabase();
+   641→  
+   642→  const vault = await db.table<Vault>('vaults').where('currencyId').equals(currencyId).first();
+   643→  if (vault) {
+   644→    const diff = openingBalance - (vault.openingBalance || 0);
+   645→    await db.table('vaults').update(vault.id, { openingBalance, balance: vault.balance + diff, updatedAt: new Date() });
+   646→    return db.table<Vault>('vaults').get(vault.id) || null;
+   647→  }
+   648→  return null;
+   649→}
+   650→
+   651→export async function getTotalBalanceInUSD(): Promise<number> {
+   652→  await initializeDatabase();
+   653→  const allVaults = await db.table<Vault>('vaults').toArray();
+   654→  const allCurrencies = await db.table<Currency>('currencies').toArray();
+   655→  
+   656→  let total = 0;
+   657→  for (const vault of allVaults) {
+   658→    const currency = allCurrencies.find(c => c.id === vault.currencyId);
+   659→    if (currency && currency.isActive) {
+   660→      // تطبيق طريقة التحويل المناسبة
+   661→      if (currency.conversionMethod === 'DIVIDE') {
+   662→        total += vault.balance / currency.exchangeRate;
+   663→      } else {
+   664→        total += vault.balance * currency.exchangeRate;
+   665→      }
+   666→    }
+   667→  }
+   668→  return total;
+   669→}
+   670→
+   671→// Account functions
+   672→export async function getAccounts(): Promise<Account[]> {
+   673→  await initializeDatabase();
+   674→  const all = await db.table<Account>('accounts').toArray();
+   675→  return all.filter(a => a.isActive);
+   676→}
+   677→
+   678→export async function addAccount(data: Partial<Account>): Promise<Account> {
+   679→  await initializeDatabase();
+   680→  const now = new Date();
+   681→  const account: Account = { id: generateId(), name: data.name || '', type: data.type || 'PRIVATE', description: data.description, isActive: true, createdAt: now, updatedAt: now };
+   682→  await db.table('accounts').add(account);
+   683→  return account;
+   684→}
+   685→
+   686→export async function updateAccount(id: string, data: Partial<Account>): Promise<Account> {
+   687→  await initializeDatabase();
+   688→  await db.table('accounts').update(id, { ...data, updatedAt: new Date() });
+   689→  return (await db.table<Account>('accounts').get(id))!;
+   690→}
+   691→
+   692→export async function deleteAccount(id: string): Promise<void> {
+   693→  await initializeDatabase();
+   694→  await db.table('accounts').update(id, { isActive: false, updatedAt: new Date() });
+   695→}
+   696→
+   697→// Transaction functions
+   698→export async function getTransactions(): Promise<Transaction[]> {
+   699→  await initializeDatabase();
+   700→  return db.table<Transaction>('transactions').orderBy('date').reverse().toArray();
+   701→}
+   702→
+   703→export async function addTransaction(data: {
+   704→  accountId: string;
+   705→  currencyId: string;
+   706→  baseCurrencyId?: string | null;
+   707→  type: 'INCOME' | 'EXPENSE';
+   708→  paymentType: 'CASH' | 'DEFERRED';
+   709→  amount: number;
+   710→  conversionFactor: number;
+   711→  conversionMethod: 'MULTIPLY' | 'DIVIDE';
+   712→  feesType: 'FIXED' | 'PERCENTAGE' | 'PER_THOUSAND';
+   713→  feesDirection: 'INCOME' | 'EXPENSE';
+   714→  feesAmount: number;
+   715→  description?: string;
+   716→  date: string;
+   717→  isOverflowTransaction?: boolean;
+   718→  relatedPaymentId?: string | null;
+   719→  isComplete?: boolean;
+   720→}): Promise<Transaction> {
+   721→  await initializeDatabase();
+   722→  const now = new Date();
+   723→  
+   724→  // 🔸 حساب الرصيد النهائي
+   725→  // ملاحظة: نستخدم ?? بدلاً من || لأن conversionFactor يمكن أن يكون 0 (قيمة صحيحة)
+   726→  const effectiveFactor = data.conversionFactor ?? 1;
+   727→  const finalBalance = calculateFinalBalance(
+   728→    data.amount || 0, 
+   729→    effectiveFactor, 
+   730→    data.conversionMethod || 'MULTIPLY', 
+   731→    data.feesType || 'FIXED', 
+   732→    data.feesAmount || 0, 
+   733→    data.feesDirection || 'INCOME',
+   734→    data.type
+   735→  );
+   736→  
+   737→  // 🔹 تحديد حالة الاكتمال تلقائيًا
+   738→  // الحركة غير مكتملة إذا: لا يوجد مبلغ أساسي، أو لا يوجد معامل تحويل، أو الرصيد النهائي = 0
+   739→  const isDataComplete = !!(effectiveFactor && effectiveFactor !== 0 
+   740→    && data.amount && data.amount !== 0
+   741→    && finalBalance && finalBalance !== 0);
+   742→  const isComplete = data.isComplete !== undefined ? data.isComplete : isDataComplete;
+   743→  
+   744→  // 🔸 التحقق من الرصيد فقط للحركات المكتملة
+   745→  if (isComplete && data.paymentType === 'CASH' && data.type === 'INCOME') {
+   746→    const vaultCurrencyId = data.baseCurrencyId || data.currencyId;
+   747→    const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
+   748→    if (vault && vault.balance - data.amount < 0) {
+   749→      const currency = await db.table<Currency>('currencies').get(vaultCurrencyId);
+   750→      throw new Error(`الرصيد غير كافٍ في صندوق ${currency?.name || ''}`);
+   751→    }
+   752→  }
+   753→  
+   754→  const transaction: Transaction = { 
+   755→    id: generateId(), 
+   756→    accountId: data.accountId, 
+   757→    currencyId: data.currencyId, 
+   758→    baseCurrencyId: data.baseCurrencyId || null, 
+   759→    type: data.type, 
+   760→    paymentType: data.paymentType, 
+   761→    amount: data.amount, 
+   762→    conversionFactor: effectiveFactor, 
+   763→    conversionMethod: data.conversionMethod || 'MULTIPLY', 
+   764→    feesType: data.feesType || 'FIXED', 
+   765→    feesDirection: data.feesDirection || 'INCOME', 
+   766→    feesAmount: data.feesAmount || 0, 
+   767→    finalBalance, 
+   768→    description: data.description, 
+   769→    date: new Date(data.date),
+   770→    isOverflowTransaction: data.isOverflowTransaction || false,
+   771→    relatedPaymentId: data.relatedPaymentId || null,
+   772→    isComplete,
+   773→    createdAt: now, 
+   774→    updatedAt: now 
+   775→  };
+   776→  
+   777→  await db.table('transactions').add(transaction);
+   778→  
+   779→  // 🔸 تحديث الصندوق فقط للحركات المكتملة والنقدية
+   780→  if (isComplete && data.paymentType === 'CASH') {
+   781→    const vaultCurrencyId = data.baseCurrencyId || data.currencyId;
+   782→    const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
+   783→    if (vault) {
+   784→      const newBalance = data.type === 'INCOME' ? vault.balance - data.amount : vault.balance + data.amount;
+   785→      await db.table('vaults').update(vault.id, { balance: newBalance, updatedAt: now });
+   786→    }
+   787→  }
+   788→  
+   789→  return transaction;
+   790→}
+   791→
+   792→export async function updateTransaction(id: string, data: Partial<Transaction>): Promise<Transaction> {
+   793→  await initializeDatabase();
+   794→  const old = await db.table<Transaction>('transactions').get(id);
+   795→  if (!old) throw new Error('الحركة غير موجودة');
+   796→  
+   797→  const now = new Date();
+   798→  const oldIsComplete = old.isComplete !== undefined ? old.isComplete : true; // التوافق مع البيانات القديمة
+   799→  
+   800→  // 🔸 استخدام القيم الجديدة إذا وُجدت، وإلا القيم القديمة
+   801→  // ملاحظة: نستخدم ?? بدلاً من || لأن القيمة 0 قيمة صحيحة يجب احترامها
+   802→  const effectiveAmount = data.amount ?? old.amount;
+   803→  const effectiveConversionFactor = data.conversionFactor ?? old.conversionFactor;
+   804→  const effectiveConversionMethod = data.conversionMethod ?? old.conversionMethod;
+   805→  const effectiveFeesType = data.feesType ?? old.feesType;
+   806→  const effectiveFeesAmount = data.feesAmount ?? old.feesAmount;
+   807→  const effectiveFeesDirection = data.feesDirection ?? old.feesDirection;
+   808→  const effectiveType = data.type ?? old.type;
+   809→  const effectivePaymentType = data.paymentType ?? old.paymentType;
+   810→  
+   811→  // 🔸 عكس التأثير على الصندوق فقط إذا كانت الحركة القديمة مكتملة ونقدية
+   812→  if (oldIsComplete && old.paymentType === 'CASH') {
+   813→    const oldVaultCurrencyId = old.baseCurrencyId || old.currencyId;
+   814→    const oldVault = await db.table<Vault>('vaults').where('currencyId').equals(oldVaultCurrencyId).first();
+   815→    if (oldVault) {
+   816→      const reversed = old.type === 'INCOME' ? oldVault.balance + old.amount : oldVault.balance - old.amount;
+   817→      await db.table('vaults').update(oldVault.id, { balance: reversed, updatedAt: now });
+   818→    }
+   819→  }
+   820→  
+   821→  const finalBalance = calculateFinalBalance(
+   822→    effectiveAmount,
+   823→    effectiveConversionFactor, 
+   824→    effectiveConversionMethod, 
+   825→    effectiveFeesType, 
+   826→    effectiveFeesAmount, 
+   827→    effectiveFeesDirection,
+   828→    effectiveType
+   829→  );
+   830→  
+   831→  // 🔸 تحديد حالة الاكتمال تلقائيًا:
+   832→  // إذا كانت جميع البيانات مكتملة (مبلغ > 0 + معامل تحويل > 0 + رصيد نهائي > 0) → مكتملة
+   833→  // إذا نقص أي حقل → غير مكتملة تلقائيًا
+   834→  const isDataComplete = effectiveAmount > 0 && effectiveConversionFactor > 0 && finalBalance > 0;
+   835→  const newIsComplete = data.isComplete !== undefined 
+   836→    ? (isDataComplete && data.isComplete)  // إذا مرر isComplete يدويًا، نحترمه فقط إذا البيانات مكتملة
+   837→    : isDataComplete;  // تلقائي حسب البيانات
+   838→  
+   839→  // 🔸 تنظيف البيانات - إزالة الحقول غير المعرفة (undefined)
+   840→  const cleanData: Record<string, unknown> = {};
+   841→  for (const [key, value] of Object.entries(data)) {
+   842→    if (value !== undefined) {
+   843→      cleanData[key] = value;
+   844→    }
+   845→  }
+   846→  
+   847→  await db.table('transactions').update(id, { ...cleanData, finalBalance, isComplete: newIsComplete, date: data.date ? new Date(data.date) : old.date, updatedAt: now });
+   848→  
+   849→  // 🔸 تطبيق التأثير على الصندوق فقط إذا كانت الحركة الجديدة مكتملة ونقدية
+   850→  if (newIsComplete && effectivePaymentType === 'CASH') {
+   851→    const vaultCurrencyId = (data.baseCurrencyId ?? data.currencyId) ?? (old.baseCurrencyId || old.currencyId);
+   852→    const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
+   853→    if (vault) {
+   854→      const newBalance = effectiveType === 'INCOME' ? vault.balance - effectiveAmount : vault.balance + effectiveAmount;
+   855→      await db.table('vaults').update(vault.id, { balance: newBalance, updatedAt: now });
+   856→    }
+   857→  }
+   858→  
+   859→  return (await db.table<Transaction>('transactions').get(id))!;
+   860→}
+   861→
+   862→export async function deleteTransaction(id: string): Promise<void> {
+   863→  await initializeDatabase();
+   864→  const transaction = await db.table<Transaction>('transactions').get(id);
+   865→  if (!transaction) throw new Error('الحركة غير موجودة');
+   866→  
+   867→  // ============================================
+   868→  // 🔹 عكس التأثير على الصندوق للحركات النقدية
+   869→  // 🔸 للحركات العادية: نستخدم baseCurrencyId || currencyId
+   870→  // 🔸 لحركات الفائض: نستخدم currencyId مباشرة
+   871→  // 🔸 INCOME (لنا) = كان خصم → نزيد
+   872→  // 🔸 EXPENSE (علينا) = كانت إضافة → نخصم
+   873→  // ============================================
+   874→  // 🔸 عكس التأثير على الصندوق فقط للحركات المكتملة والنقدية
+   875→  if ((transaction.isComplete !== false) && transaction.paymentType === 'CASH') {
+   876→    // تحديد عملة الصندوق
+   877→    // لحركات الفائض: نستخدم currencyId مباشرة لأن baseCurrencyId يكون null
+   878→    // للحركات العادية: نستخدم baseCurrencyId إذا وجد، وإلا currencyId
+   879→    const vaultCurrencyId = transaction.isOverflowTransaction 
+   880→      ? transaction.currencyId 
+   881→      : (transaction.baseCurrencyId || transaction.currencyId);
+   882→    
+   883→    const vault = await db.table<Vault>('vaults').where('currencyId').equals(vaultCurrencyId).first();
+   884→    
+   885→    if (vault) {
+   886→      let newBalance = vault.balance;
+   887→      
+   888→      // ============================================
+   889→      // 🔹 منطق عكس التأثير:
+   890→      // 🔸 INCOME (لنا): كان خصم من الصندوق → نزيده
+   891→      // 🔸 EXPENSE (علينا): كانت إضافة للصندوق → ننقصه
+   892→      // ============================================
+   893→      if (transaction.type === 'INCOME') {
+   894→        // INCOME = كان خصم من الصندوق → نزيده
+   895→        newBalance = vault.balance + transaction.amount;
+   896→      } else {
+   897→        // EXPENSE = كانت إضافة للصندوق → ننقصه
+   898→        newBalance = vault.balance - transaction.amount;
+   899→      }
+   900→      
+   901→      await db.table('vaults').update(vault.id, { balance: newBalance, updatedAt: new Date() });
+   902→    }
+   903→  }
+   904→  
+   905→  // ============================================
+   906→  // 🔹 إذا كانت حركة فائض مرتبطة بدفعة، نزيل المرجع من الدفعة
+   907→  // ============================================
+   908→  if (transaction.isOverflowTransaction && transaction.relatedPaymentId) {
+   909→    const payment = await db.table<DebtPayment>('debtPayments').get(transaction.relatedPaymentId);
+   910→    if (payment && payment.overflowTransactionId === id) {
+   911→      await db.table('debtPayments').update(payment.id, { 
+   912→        overflowTransactionId: null,
+   913→        updatedAt: new Date() 
+   914→      });
+   915→    }
+   916→  }
+   917→  
+   918→  await db.table('transactions').delete(id);
+   919→}
+   920→
+   921→// Debt functions
+   922→export async function getDebts(): Promise<Debt[]> {
+   923→  await initializeDatabase();
+   924→  return db.table<Debt>('debts').orderBy('date').reverse().toArray();
+   925→}
+   926→
+   927→export async function addDebt(data: { 
+   928→  accountId: string; 
+   929→  currencyId: string; 
+   930→  amount: number; 
+   931→  conversionFactor: number; 
+   932→  conversionMethod: 'MULTIPLY' | 'DIVIDE'; 
+   933→  description?: string; 
+   934→  date: string;
+   935→  debtType?: 'RECEIVABLE' | 'PAYABLE';  // نوع الدين: لنا أو علينا
+   936→  debtMode?: 'CASH' | 'DEFERRED';       // طريقة الدين: نقدي أو آجل
+   937→}): Promise<Debt> {
+   938→  await initializeDatabase();
+   939→  const now = new Date();
+   940→  const finalBalance = data.conversionMethod === 'MULTIPLY' 
+   941→    ? data.amount * (data.conversionFactor || 1) 
+   942→    : data.amount / (data.conversionFactor || 1);
+   943→  
+   944→  const debtMode = data.debtMode || 'DEFERRED';  // افتراضياً آجل (للتوافق مع البيانات القديمة)
+   945→  const debtType = data.debtType || 'RECEIVABLE';
+   946→  
+   947→  const debt: Debt = { 
+   948→    id: generateId(), 
+   949→    accountId: data.accountId, 
+   950→    currencyId: data.currencyId, 
+   951→    amount: data.amount, 
+   952→    conversionFactor: data.conversionFactor || 1, 
+   953→    conversionMethod: data.conversionMethod, 
+   954→    finalBalance, 
+   955→    description: data.description, 
+   956→    debtType: debtType,
+   957→    debtMode: debtMode,
+   958→    isPaid: false, 
+   959→    date: new Date(data.date), 
+   960→    createdAt: now, 
+   961→    updatedAt: now 
+   962→  };
+   963→  
+   964→  await db.table('debts').add(debt);
+   965→  
+   966→  // ============================================
+   967→  // منطق التأثير على الصندوق
+   968→  // ============================================
+   969→  // إذا كان الدين نقدي (CASH):
+   970→  // - علينا (PAYABLE): نستلم مبلغ => زيادة في الصندوق
+   971→  // - لنا (RECEIVABLE): نعطي مبلغ => خصم من الصندوق
+   972→  // إذا كان الدين آجل (DEFERRED): لا يؤثر على الصندوق
+   973→  
+   974→  if (debtMode === 'CASH') {
+   975→    const vault = await db.table<Vault>('vaults')
+   976→      .where('currencyId').equals(data.currencyId).first();
+   977→    
+   978→    if (vault) {
+   979→      let newBalance = vault.balance;
+   980→      
+   981→      if (debtType === 'PAYABLE') {
+   982→        // دين علينا نقدي: استلمنا مالاً => زيادة في الصندوق
+   983→        newBalance = vault.balance + data.amount;
+   984→      } else {
+   985→        // دين لنا نقدي: أعطينا مالاً => خصم من الصندوق
+   986→        newBalance = vault.balance - data.amount;
+   987→      }
+   988→      
+   989→      await db.table('vaults').update(vault.id, { 
+   990→        balance: newBalance, 
+   991→        updatedAt: now 
+   992→      });
+   993→    }
+   994→  }
+   995→  
+   996→  return debt;
+   997→}
+   998→
+   999→export async function updateDebt(id: string, data: Partial<Debt>): Promise<Debt> {
+  1000→  await initializeDatabase();
+  1001→  await db.table('debts').update(id, { ...data, updatedAt: new Date() });
+  1002→  return (await db.table<Debt>('debts').get(id))!;
+  1003→}
+  1004→
+  1005→export async function deleteDebt(id: string): Promise<void> {
+  1006→  await initializeDatabase();
+  1007→  
+  1008→  // جلب الدين قبل الحذف لمعرفة تفاصيله
+  1009→  const debt = await db.table<Debt>('debts').get(id);
+  1010→  if (!debt) {
+  1011→    throw new Error('الدين غير موجود');
+  1012→  }
+  1013→  
+  1014→  // ============================================
+  1015→  // 🔹 التأثير العكسي على الصندوق عند الحذف
+  1016→  // 🔸 فقط إذا كان الدين نقدي (CASH)
+  1017→  // 🔸 علينا (PAYABLE): كان زاد الصندوق => ننقصه
+  1018→  // 🔸 لنا (RECEIVABLE): كان أنقص الصندوق => نزيده
+  1019→  // 🔸 آجل (DEFERRED): لا يوجد تأثير عكسي
+  1020→  // ============================================
+  1021→  
+  1022→  if (debt.debtMode === 'CASH') {
+  1023→    const vault = await db.table<Vault>('vaults')
+  1024→      .where('currencyId').equals(debt.currencyId).first();
+  1025→    
+  1026→    if (vault) {
+  1027→      let newBalance = vault.balance;
+  1028→      
+  1029→      if (debt.debtType === 'PAYABLE') {
+  1030→        // كان زاد الصندوق => ننقصه (عكس العملية الأصلية)
+  1031→        newBalance = vault.balance - debt.amount;
+  1032→      } else {
+  1033→        // كان أنقص الصندوق => نزيده (عكس العملية الأصلية)
+  1034→        newBalance = vault.balance + debt.amount;
+  1035→      }
+  1036→      
+  1037→      await db.table('vaults').update(vault.id, { 
+  1038→        balance: newBalance, 
+  1039→        updatedAt: new Date() 
+  1040→      });
+  1041→    }
+  1042→  }
+  1043→  
+  1044→  // ============================================
+  1045→  // 🔹 معالجة الدفعات المرتبطة بالدين
+  1046→  // 🔸 نحذف الدفعات المرتبطة
+  1047→  // 🔸 نحذف حركات الفائض المرتبطة بها إن وجدت
+  1048→  // 🔸 نعكس تأثيرها على الصندوق إذا كانت كاش
+  1049→  // ============================================
+  1050→  
+  1051→  const payments = await db.table<DebtPayment>('debtPayments')
+  1052→    .where('debtId').equals(id).toArray();
+  1053→  
+  1054→  for (const payment of payments) {
+  1055→    // ============================================
+  1056→    // 🔹 عكس تأثير الدفعة على الصندوق
+  1057→    // 🔸 فقط إذا كانت كاش (CASH)
+  1058→    // 🔸 RECEIVABLE = كان خصم من الصندوق → نزيده
+  1059→    // 🔸 PAYABLE = كان إضافة للصندوق → ننقصه
+  1060→    // ============================================
+  1061→    const paymentMode = payment.paymentMode || 'CASH';
+  1062→    const paymentDirection = payment.paymentDirection || debt.debtType || 'RECEIVABLE';
+  1063→    
+  1064→    if (paymentMode === 'CASH') {
+  1065→      const paymentVault = await db.table<Vault>('vaults')
+  1066→        .where('currencyId').equals(payment.currencyId).first();
+  1067→      
+  1068→      if (paymentVault) {
+  1069→        let newPaymentBalance = paymentVault.balance;
+  1070→        
+  1071→        if (paymentDirection === 'RECEIVABLE') {
+  1072→          // كان خصم من الصندوق → نزيده
+  1073→          newPaymentBalance = paymentVault.balance + payment.amount;
+  1074→        } else {
+  1075→          // كان إضافة للصندوق → ننقصه
+  1076→          newPaymentBalance = paymentVault.balance - payment.amount;
+  1077→        }
+  1078→        
+  1079→        await db.table('vaults').update(paymentVault.id, { 
+  1080→          balance: newPaymentBalance, 
+  1081→          updatedAt: new Date() 
+  1082→        });
+  1083→      }
+  1084→    }
+  1085→    
+  1086→    // إذا كان للدفعة حركة فائض مرتبطة
+  1087→    if (payment.overflowTransactionId) {
+  1088→      const overflowTransaction = await db.table<Transaction>('transactions')
+  1089→        .get(payment.overflowTransactionId);
+  1090→      
+  1091→      if (overflowTransaction) {
+  1092→        // ============================================
+  1093→        // 🔹 عكس تأثير حركة الفائض على الصندوق
+  1094→        // 🔸 فقط إذا كانت كاش (CASH)
+  1095→        // 🔸 INCOME = كان خصم من الصندوق → نزيده
+  1096→        // 🔸 EXPENSE = كان إضافة للصندوق → ننقصه
+  1097→        // ============================================
+  1098→        if (overflowTransaction.paymentType === 'CASH') {
+  1099→          const overflowVault = await db.table<Vault>('vaults')
+  1100→            .where('currencyId').equals(overflowTransaction.currencyId).first();
+  1101→          
+  1102→          if (overflowVault) {
+  1103→            let newOverflowBalance = overflowVault.balance;
+  1104→            
+  1105→            if (overflowTransaction.type === 'INCOME') {
+  1106→              // كان خصم من الصندوق → نزيده
+  1107→              newOverflowBalance = overflowVault.balance + overflowTransaction.amount;
+  1108→            } else {
+  1109→              // كان إضافة للصندوق → ننقصه
+  1110→              newOverflowBalance = overflowVault.balance - overflowTransaction.amount;
+  1111→            }
+  1112→            
+  1113→            await db.table('vaults').update(overflowVault.id, { 
+  1114→              balance: newOverflowBalance, 
+  1115→              updatedAt: new Date() 
+  1116→            });
+  1117→          }
+  1118→        }
+  1119→        
+  1120→        // حذف حركة الفائض
+  1121→        await db.table('transactions').delete(payment.overflowTransactionId);
+  1122→      }
+  1123→    }
+  1124→    
+  1125→    // حذف الدفعة
+  1126→    await db.table('debtPayments').delete(payment.id);
+  1127→  }
+  1128→  
+  1129→  // ============================================
+  1130→  // 🔹 حذف الدين
+  1131→  // ============================================
+  1132→  await db.table('debts').delete(id);
+  1133→}
+  1134→
+  1135→// Debt Payment functions
+  1136→export async function getDebtPayments(debtId?: string): Promise<DebtPayment[]> {
+  1137→  await initializeDatabase();
+  1138→  if (debtId) {
+  1139→    return db.table<DebtPayment>('debtPayments').where('debtId').equals(debtId).toArray();
+  1140→  }
+  1141→  return db.table<DebtPayment>('debtPayments').orderBy('date').reverse().toArray();
+  1142→}
+  1143→
+  1144→export async function updateDebtPayment(id: string, data: Partial<DebtPayment>): Promise<DebtPayment> {
+  1145→  await initializeDatabase();
+  1146→  await db.table('debtPayments').update(id, { ...data, updatedAt: new Date() });
+  1147→  return (await db.table<DebtPayment>('debtPayments').get(id))!;
+  1148→}
+  1149→
+  1150→export async function addDebtPayment(data: { 
+  1151→  debtId: string; 
+  1152→  amount: number; 
+  1153→  currencyId: string;  // عملة الدفعة
+  1154→  description?: string; 
+  1155→  date: string;
+  1156→  paymentMode?: 'CASH' | 'DEFERRED';        // نوع الدفع: كاش أو آجل
+  1157→  direction?: 'RECEIVABLE' | 'PAYABLE';     // اتجاه الرصيد التراكمي
+  1158→  currentBalance?: number;                  // الرصيد الحالي التراكمي
+  1159→}): Promise<DebtPayment> {
+  1160→  await initializeDatabase();
+  1161→  const now = new Date();
+  1162→  
+  1163→  // الحصول على الدين لمعرفة تفاصيله
+  1164→  const debt = await db.table<Debt>('debts').get(data.debtId);
+  1165→  if (!debt) {
+  1166→    throw new Error('الدين غير موجود');
+  1167→  }
+  1168→  
+  1169→  // ============================================
+  1170→  // تحديد نوع الدفع
+  1171→  // ============================================
+  1172→  const paymentMode = data.paymentMode || 'CASH';
+  1173→  
+  1174→  // ============================================
+  1175→  // 🔹 المنطق المحاسبي الصحيح للرصيد:
+  1176→  // 🔸 الرصيد السالب (علينا) = الطرف الآخر مدين لنا
+  1177→  // 🔸 الرصيد الموجب (لنا) = نحن مدينون للطرف الآخر
+  1178→  // ============================================
+  1179→  
+  1180→  // إذا تم تمرير currentBalance، نستخدمه لتحديد الاتجاه الصحيح
+  1181→  // وإلا نستخدم direction الممرر أو debtType كافتراضي
+  1182→  let paymentDirection: 'RECEIVABLE' | 'PAYABLE';
+  1183→  
+  1184→  if (data.currentBalance !== undefined) {
+  1185→    // 🔹 القاعدة المحاسبية الصحيحة:
+  1186→    // الرصيد السالب (علينا) → عند الدفع نزيد الرصيد (جمع) → direction = RECEIVABLE
+  1187→    // الرصيد الموجب (لنا) → عند الدفع ننقص الرصيد (طرح) → direction = PAYABLE
+  1188→    paymentDirection = data.currentBalance < 0 ? 'RECEIVABLE' : 'PAYABLE';
+  1189→  } else {
+  1190→    paymentDirection = data.direction || debt.debtType || 'RECEIVABLE';
+  1191→  }
+  1192→  
+  1193→  const payment: DebtPayment = {
+  1194→    id: generateId(),
+  1195→    debtId: data.debtId,
+  1196→    amount: data.amount,
+  1197→    currencyId: data.currencyId,
+  1198→    description: data.description,
+  1199→    date: new Date(data.date),
+  1200→    paymentMode,
+  1201→    paymentDirection,
+  1202→    overflowTransactionId: null,
+  1203→    createdAt: now,
+  1204→    updatedAt: now,
+  1205→  };
+  1206→  
+  1207→  // إضافة الدفعة
+  1208→  await db.table('debtPayments').add(payment);
+  1209→  
+  1210→  // ============================================
+  1211→  // تحديث حالة الدين (الرصيد النهائي)
+  1212→  // ============================================
+  1213→  const allPayments = await db.table<DebtPayment>('debtPayments')
+  1214→    .where('debtId').equals(data.debtId).toArray();
+  1215→  const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+  1216→  
+  1217→  if (totalPaid >= debt.finalBalance) {
+  1218→    await db.table('debts').update(data.debtId, { 
+  1219→      isPaid: true, 
+  1220→      paidAt: now,
+  1221→      updatedAt: now 
+  1222→    });
+  1223→  }
+  1224→  
+  1225→  // ============================================
+  1226→  // 🔹 تأثير الدفعة على الصندوق الفرعي
+  1227→  // 🔸 القاعدة المحاسبية الصحيحة:
+  1228→  // 🔸 الرصيد السالب (علينا) = نحن مدينون → عند الدفع ندفع للطرف → خصم من الصندوق
+  1229→  // 🔸 الرصيد الموجب (لنا) = الطرف مدين → عند الدفع نقبض من الطرف → إضافة للصندوق
+  1230→  // 🔸 آجل = لا تأثير على الصندوق
+  1231→  // ============================================
+  1232→  
+  1233→  if (paymentMode === 'CASH') {
+  1234→    const vault = await db.table<Vault>('vaults')
+  1235→      .where('currencyId').equals(data.currencyId).first();
+  1236→    
+  1237→    if (vault) {
+  1238→      let newVaultBalance = vault.balance;
+  1239→      
+  1240→      // 🔹 استخدام الرصيد التراكمي لتحديد تأثير الصندوق
+  1241→      if (data.currentBalance !== undefined) {
+  1242→        if (data.currentBalance < 0) {
+  1243→          // الرصيد علينا (سالب) = ندفع للطرف = خصم من الصندوق
+  1244→          newVaultBalance = vault.balance - data.amount;
+  1245→        } else {
+  1246→          // الرصيد لنا (موجب) = نقبض من الطرف = إضافة للصندوق
+  1247→          newVaultBalance = vault.balance + data.amount;
+  1248→        }
+  1249→      } else {
+  1250→        // التوافق مع البيانات القديمة
+  1251→        if (paymentDirection === 'RECEIVABLE') {
+  1252→          newVaultBalance = vault.balance - data.amount;
+  1253→        } else {
+  1254→          newVaultBalance = vault.balance + data.amount;
+  1255→        }
+  1256→      }
+  1257→      
+  1258→      await db.table('vaults').update(vault.id, { 
+  1259→        balance: newVaultBalance, 
+  1260→        updatedAt: now 
+  1261→      });
+  1262→    }
+  1263→  }
+  1264→  // آجل = لا تأثير على الصندوق
+  1265→  
+  1266→  return payment;
+  1267→}
+  1268→
+  1269→export async function deleteDebtPayment(id: string): Promise<void> {
+  1270→  await initializeDatabase();
+  1271→  
+  1272→  // جلب الدفعة قبل الحذف
+  1273→  const payment = await db.table<DebtPayment>('debtPayments').get(id);
+  1274→  if (!payment) {
+  1275→    throw new Error('الدفعة غير موجودة');
+  1276→  }
+  1277→  
+  1278→  // جلب الدين لمعرفة تفاصيله
+  1279→  const debt = await db.table<Debt>('debts').get(payment.debtId);
+  1280→  
+  1281→  if (debt) {
+  1282→    // ============================================
+  1283→    // 🔹 التأثير العكسي للدفعة على الصندوق
+  1284→    // 🔸 عكس التأثير بناءً على paymentMode
+  1285→    // 🔸 كاش = عكس التأثير على الصندوق
+  1286→    // 🔸 آجل = لا تأثير
+  1287→    // ============================================
+  1288→    const paymentMode = payment.paymentMode || 'CASH';
+  1289→    const paymentDirection = payment.paymentDirection || debt.debtType || 'RECEIVABLE';
+  1290→    
+  1291→    if (paymentMode === 'CASH') {
+  1292→      const vault = await db.table<Vault>('vaults')
+  1293→        .where('currencyId').equals(payment.currencyId).first();
+  1294→      
+  1295→      if (vault) {
+  1296→        let newBalance = vault.balance;
+  1297→        
+  1298→        // 🔹 عكس العملية الأصلية:
+  1299→        // 🔸 إذا كان paymentDirection === 'RECEIVABLE':
+  1300→        //     - الكود القديم: كان خصم من الصندوق → نزيده
+  1301→        // 🔸 إذا كان paymentDirection === 'PAYABLE':
+  1302→        //     - الكود القديم: كان إضافة للصندوق → ننقصه
+  1303→        if (paymentDirection === 'RECEIVABLE') {
+  1304→          // كانت خصم من الصندوق → نزيده
+  1305→          newBalance = vault.balance + payment.amount;
+  1306→        } else {
+  1307→          // كانت إضافة للصندوق → ننقصه
+  1308→          newBalance = vault.balance - payment.amount;
+  1309→        }
+  1310→        
+  1311→        await db.table('vaults').update(vault.id, { 
+  1312→          balance: newBalance, 
+  1313→          updatedAt: new Date() 
+  1314→        });
+  1315→      }
+  1316→    }
+  1317→    // آجل = لا تأثير على الصندوق
+  1318→    
+  1319→    // ============================================
+  1320→    // 🔹 حذف حركة الفائض المرتبطة إن وجدت
+  1321→    // 🔸 إذا كان الفائض كاش (paymentType === 'CASH') → عكس التأثير على الصندوق
+  1322→    // 🔸 إذا كان الفائض آجل (paymentType === 'DEFERRED') → لا تأثير على الصندوق
+  1323→    // ============================================
+  1324→    if (payment.overflowTransactionId) {
+  1325→      const overflowTransaction = await db.table<Transaction>('transactions').get(payment.overflowTransactionId);
+  1326→      if (overflowTransaction) {
+  1327→        // 🔹 إذا كان الفائض كاش، نعكس تأثيره على الصندوق
+  1328→        if (overflowTransaction.paymentType === 'CASH') {
+  1329→          const overflowVault = await db.table<Vault>('vaults')
+  1330→            .where('currencyId').equals(overflowTransaction.currencyId).first();
+  1331→          
+  1332→          if (overflowVault) {
+  1333→            let newOverflowBalance = overflowVault.balance;
+  1334→            
+  1335→            // عكس تأثير حركة الفائض على الصندوق:
+  1336→            // - INCOME (لنا): كان أضاف للصندوق → ننقصه
+  1337→            // - EXPENSE (علينا): كان خصم من الصندوق → نزيده
+  1338→            if (overflowTransaction.type === 'INCOME') {
+  1339→              newOverflowBalance = overflowVault.balance - overflowTransaction.amount;
+  1340→            } else {
+  1341→              newOverflowBalance = overflowVault.balance + overflowTransaction.amount;
+  1342→            }
+  1343→            
+  1344→            await db.table('vaults').update(overflowVault.id, { 
+  1345→              balance: newOverflowBalance, 
+  1346→              updatedAt: new Date() 
+  1347→            });
+  1348→          }
+  1349→        }
+  1350→        
+  1351→        // حذف حركة الفائض
+  1352→        await db.table('transactions').delete(payment.overflowTransactionId);
+  1353→      }
+  1354→    }
+  1355→    
+  1356→    // تحديث حالة الدين إذا لم يعد مسدداً بالكامل
+  1357→    const remainingPayments = await db.table<DebtPayment>('debtPayments')
+  1358→      .where('debtId').equals(payment.debtId)
+  1359→      .filter(p => p.id !== id)
+  1360→      .toArray();
+  1361→    
+  1362→    const totalPaid = remainingPayments.reduce((sum, p) => sum + p.amount, 0);
+  1363→    
+  1364→    if (totalPaid < debt.finalBalance && debt.isPaid) {
+  1365→      await db.table('debts').update(payment.debtId, { 
+  1366→        isPaid: false, 
+  1367→        paidAt: null,
+  1368→        updatedAt: new Date() 
+  1369→      });
+  1370→    }
+  1371→  }
+  1372→  
+  1373→  // حذف الدفعة
+  1374→  await db.table('debtPayments').delete(id);
+  1375→}
+  1376→
+  1377→// Get total debt remaining with separation by type and mode
+  1378→export async function getTotalDebtRemaining(): Promise<{
+  1379→  totalDebts: number;
+  1380→  totalPaid: number;
+  1381→  totalRemaining: number;
+  1382→  unpaidDebtsCount: number;
+  1383→  paidDebtsCount: number;
+  1384→  totalReceivable: number;   // إجمالي الديون لنا
+  1385→  totalPayable: number;      // إجمالي الديون علينا
+  1386→  totalReceivablePaid: number;  // المدفوع من الديون لنا
+  1387→  totalPayablePaid: number;     // المدفوع من الديون علينا
+  1388→  totalReceivableRemaining: number;  // المتبقي من الديون لنا
+  1389→  totalPayableRemaining: number;     // المتبقي من الديون علينا
+  1390→  // الديون الآجلة فقط (التي لم تؤثر على الصندوق)
+  1391→  deferredReceivable: number;       // إجمالي الديون الآجلة لنا
+  1392→  deferredPayable: number;          // إجمالي الديون الآجلة علينا
+  1393→  deferredReceivablePaid: number;   // المدفوع من الديون الآجلة لنا
+  1394→  deferredPayablePaid: number;      // المدفوع من الديون الآجلة علينا
+  1395→  deferredReceivableRemaining: number;  // المتبقي من الديون الآجلة لنا
+  1396→  deferredPayableRemaining: number;     // المتبقي من الديون الآجلة علينا
+  1397→  // الديون النقدية فقط (التي أثرت على الصندوق)
+  1398→  cashReceivable: number;           // إجمالي الديون النقدية لنا
+  1399→  cashPayable: number;              // إجمالي الديون النقدية علينا
+  1400→  cashReceivablePaid: number;       // المدفوع من الديون النقدية لنا
+  1401→  cashPayablePaid: number;          // المدفوع من الديون النقدية علينا
+  1402→  cashReceivableRemaining: number;  // المتبقي من الديون النقدية لنا
+  1403→  cashPayableRemaining: number;     // المتبقي من الديون النقدية علينا
+  1404→  // 🔸 تقسيم حسب العملة
+  1405→  currencyBreakdown: Array<{
+  1406→    currencyId: string;
+  1407→    receivable: number;
+  1408→    payable: number;
+  1409→    receivablePaid: number;
+  1410→    payablePaid: number;
+  1411→    receivableRemaining: number;
+  1412→    payableRemaining: number;
+  1413→    deferredReceivable: number;
+  1414→    deferredPayable: number;
+  1415→    deferredReceivablePaid: number;
+  1416→    deferredPayablePaid: number;
+  1417→    deferredReceivableRemaining: number;
+  1418→    deferredPayableRemaining: number;
+  1419→    cashReceivable: number;
+  1420→    cashPayable: number;
+  1421→    cashReceivablePaid: number;
+  1422→    cashPayablePaid: number;
+  1423→    cashReceivableRemaining: number;
+  1424→    cashPayableRemaining: number;
+  1425→  }>;
+  1426→}> {
+  1427→  await initializeDatabase();
+  1428→  const allDebts = await db.table<Debt>('debts').toArray();
+  1429→  const allPayments = await db.table<DebtPayment>('debtPayments').toArray();
+  1430→  
+  1431→  // فصل الديون حسب النوع (لنا / علينا)
+  1432→  const receivableDebts = allDebts.filter(d => d.debtType === 'RECEIVABLE' || !d.debtType);
+  1433→  const payableDebts = allDebts.filter(d => d.debtType === 'PAYABLE');
+  1434→  
+  1435→  // فصل الديون الآجلة عن النقدية
+  1436→  const deferredReceivableDebts = receivableDebts.filter(d => d.debtMode === 'DEFERRED' || !d.debtMode);
+  1437→  const deferredPayableDebts = payableDebts.filter(d => d.debtMode === 'DEFERRED' || !d.debtMode);
+  1438→  const cashReceivableDebts = receivableDebts.filter(d => d.debtMode === 'CASH');
+  1439→  const cashPayableDebts = payableDebts.filter(d => d.debtMode === 'CASH');
+  1440→  
+  1441→  // الإجماليات
+  1442→  const totalReceivable = receivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1443→  const totalPayable = payableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1444→  const totalDebts = allDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1445→  
+  1446→  // الديون الآجلة
+  1447→  const deferredReceivable = deferredReceivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1448→  const deferredPayable = deferredPayableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1449→  
+  1450→  // الديون النقدية
+  1451→  const cashReceivable = cashReceivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1452→  const cashPayable = cashPayableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1453→  
+  1454→  // حساب المدفوع لكل دين
+  1455→  const paymentsByDebt = new Map<string, number>();
+  1456→  for (const payment of allPayments) {
+  1457→    const current = paymentsByDebt.get(payment.debtId) || 0;
+  1458→    paymentsByDebt.set(payment.debtId, current + payment.amount);
+  1459→  }
+  1460→  
+  1461→  const totalPaid = allPayments.reduce((sum, p) => sum + p.amount, 0);
+  1462→  
+  1463→  // حساب المدفوع لكل نوع (إجمالي)
+  1464→  let totalReceivablePaid = 0;
+  1465→  let totalPayablePaid = 0;
+  1466→  for (const debt of receivableDebts) {
+  1467→    totalReceivablePaid += paymentsByDebt.get(debt.id) || 0;
+  1468→  }
+  1469→  for (const debt of payableDebts) {
+  1470→    totalPayablePaid += paymentsByDebt.get(debt.id) || 0;
+  1471→  }
+  1472→  
+  1473→  // حساب المدفوع للديون الآجلة
+  1474→  let deferredReceivablePaid = 0;
+  1475→  let deferredPayablePaid = 0;
+  1476→  for (const debt of deferredReceivableDebts) {
+  1477→    deferredReceivablePaid += paymentsByDebt.get(debt.id) || 0;
+  1478→  }
+  1479→  for (const debt of deferredPayableDebts) {
+  1480→    deferredPayablePaid += paymentsByDebt.get(debt.id) || 0;
+  1481→  }
+  1482→  
+  1483→  // حساب المدفوع للديون النقدية
+  1484→  let cashReceivablePaid = 0;
+  1485→  let cashPayablePaid = 0;
+  1486→  for (const debt of cashReceivableDebts) {
+  1487→    cashReceivablePaid += paymentsByDebt.get(debt.id) || 0;
+  1488→  }
+  1489→  for (const debt of cashPayableDebts) {
+  1490→    cashPayablePaid += paymentsByDebt.get(debt.id) || 0;
+  1491→  }
+  1492→  
+  1493→  // حساب المتبقي
+  1494→  const totalReceivableRemaining = totalReceivable - totalReceivablePaid;
+  1495→  const totalPayableRemaining = totalPayable - totalPayablePaid;
+  1496→  const totalRemaining = totalDebts - totalPaid;
+  1497→  
+  1498→  const deferredReceivableRemaining = deferredReceivable - deferredReceivablePaid;
+  1499→  const deferredPayableRemaining = deferredPayable - deferredPayablePaid;
+  1500→  
+  1501→  const cashReceivableRemaining = cashReceivable - cashReceivablePaid;
+  1502→  const cashPayableRemaining = cashPayable - cashPayablePaid;
+  1503→  
+  1504→  // حساب الديون المدفوعة بالكامل
+  1505→  let paidDebtsCount = 0;
+  1506→  for (const debt of allDebts) {
+  1507→    const paid = paymentsByDebt.get(debt.id) || 0;
+  1508→    if (paid >= debt.finalBalance) {
+  1509→      paidDebtsCount++;
+  1510→    }
+  1511→  }
+  1512→
+  1513→  // 🔸 تقسيم الديون حسب العملة — كل عملة كيان مستقل
+  1514→  const currencyMap = new Map<string, {
+  1515→    currencyId: string;
+  1516→    receivable: number; payable: number;
+  1517→    receivablePaid: number; payablePaid: number;
+  1518→    receivableRemaining: number; payableRemaining: number;
+  1519→    deferredReceivable: number; deferredPayable: number;
+  1520→    deferredReceivablePaid: number; deferredPayablePaid: number;
+  1521→    deferredReceivableRemaining: number; deferredPayableRemaining: number;
+  1522→    cashReceivable: number; cashPayable: number;
+  1523→    cashReceivablePaid: number; cashPayablePaid: number;
+  1524→    cashReceivableRemaining: number; cashPayableRemaining: number;
+  1525→  }>();
+  1526→
+  1527→  for (const debt of allDebts) {
+  1528→    const cid = debt.currencyId;
+  1529→    if (!currencyMap.has(cid)) {
+  1530→      currencyMap.set(cid, {
+  1531→        currencyId: cid,
+  1532→        receivable: 0, payable: 0,
+  1533→        receivablePaid: 0, payablePaid: 0,
+  1534→        receivableRemaining: 0, payableRemaining: 0,
+  1535→        deferredReceivable: 0, deferredPayable: 0,
+  1536→        deferredReceivablePaid: 0, deferredPayablePaid: 0,
+  1537→        deferredReceivableRemaining: 0, deferredPayableRemaining: 0,
+  1538→        cashReceivable: 0, cashPayable: 0,
+  1539→        cashReceivablePaid: 0, cashPayablePaid: 0,
+  1540→        cashReceivableRemaining: 0, cashPayableRemaining: 0,
+  1541→      });
+  1542→    }
+  1543→    const cb = currencyMap.get(cid)!;
+  1544→    const paid = paymentsByDebt.get(debt.id) || 0;
+  1545→    const isReceivable = debt.debtType === 'RECEIVABLE' || !debt.debtType;
+  1546→    const isCash = debt.debtMode === 'CASH';
+  1547→
+  1548→    if (isReceivable) {
+  1549→      cb.receivable += debt.finalBalance;
+  1550→      cb.receivablePaid += paid;
+  1551→      cb.receivableRemaining += debt.finalBalance - paid;
+  1552→      if (isCash) {
+  1553→        cb.cashReceivable += debt.finalBalance;
+  1554→        cb.cashReceivablePaid += paid;
+  1555→        cb.cashReceivableRemaining += debt.finalBalance - paid;
+  1556→      } else {
+  1557→        cb.deferredReceivable += debt.finalBalance;
+  1558→        cb.deferredReceivablePaid += paid;
+  1559→        cb.deferredReceivableRemaining += debt.finalBalance - paid;
+  1560→      }
+  1561→    } else {
+  1562→      cb.payable += debt.finalBalance;
+  1563→      cb.payablePaid += paid;
+  1564→      cb.payableRemaining += debt.finalBalance - paid;
+  1565→      if (isCash) {
+  1566→        cb.cashPayable += debt.finalBalance;
+  1567→        cb.cashPayablePaid += paid;
+  1568→        cb.cashPayableRemaining += debt.finalBalance - paid;
+  1569→      } else {
+  1570→        cb.deferredPayable += debt.finalBalance;
+  1571→        cb.deferredPayablePaid += paid;
+  1572→        cb.deferredPayableRemaining += debt.finalBalance - paid;
+  1573→      }
+  1574→    }
+  1575→  }
+  1576→
+  1577→  const currencyBreakdown = Array.from(currencyMap.values());
+  1578→
+  1579→  return {
+  1580→    totalDebts,
+  1581→    totalPaid,
+  1582→    totalRemaining,
+  1583→    unpaidDebtsCount: allDebts.length - paidDebtsCount,
+  1584→    paidDebtsCount,
+  1585→    totalReceivable,
+  1586→    totalPayable,
+  1587→    totalReceivablePaid,
+  1588→    totalPayablePaid,
+  1589→    totalReceivableRemaining,
+  1590→    totalPayableRemaining,
+  1591→    // الديون الآجلة
+  1592→    deferredReceivable,
+  1593→    deferredPayable,
+  1594→    deferredReceivablePaid,
+  1595→    deferredPayablePaid,
+  1596→    deferredReceivableRemaining,
+  1597→    deferredPayableRemaining,
+  1598→    // الديون النقدية
+  1599→    cashReceivable,
+  1600→    cashPayable,
+  1601→    cashReceivablePaid,
+  1602→    cashPayablePaid,
+  1603→    cashReceivableRemaining,
+  1604→    cashPayableRemaining,
+  1605→    // 🔸 تقسيم حسب العملة
+  1606→    currencyBreakdown,
+  1607→  };
+  1608→}
+  1609→
+  1610→// ============================================
+  1611→// Account-Specific Debt Statistics
+  1612→// ============================================
+  1613→
+  1614→export interface CurrencyDebtSummary {
+  1615→  currencyId: string;
+  1616→  receivable: number;
+  1617→  payable: number;
+  1618→  receivablePaid: number;
+  1619→  payablePaid: number;
+  1620→  receivableRemaining: number;
+  1621→  payableRemaining: number;
+  1622→  netBalance: number;  // positive = لنا, negative = علينا
+  1623→}
+  1624→
+  1625→export interface AccountDebtSummary {
+  1626→  accountId: string;
+  1627→  account: Account | undefined;
+  1628→  totalReceivable: number;      // إجمالي الديون لنا
+  1629→  totalPayable: number;         // إجمالي الديون علينا
+  1630→  totalReceivablePaid: number;  // المدفوع من الديون لنا
+  1631→  totalPayablePaid: number;     // المدفوع من الديون علينا
+  1632→  totalReceivableRemaining: number;  // المتبقي من الديون لنا
+  1633→  totalPayableRemaining: number;     // المتبقي من الديون علينا
+  1634→  finalBalance: number;         // الرصيد النهائي = لنا - علينا
+  1635→  debts: Debt[];               // جميع ديون الحساب
+  1636→  payments: DebtPayment[];     // جميع دفعات الحساب
+  1637→  currencyBreakdown: CurrencyDebtSummary[];
+  1638→}
+  1639→
+  1640→/**
+  1641→ * حساب رصيد الديون لحساب معين
+  1642→ */
+  1643→export async function getAccountDebtSummary(accountId: string): Promise<AccountDebtSummary> {
+  1644→  await initializeDatabase();
+  1645→  
+  1646→  const account = await db.table<Account>('accounts').get(accountId);
+  1647→  const allDebts = await db.table<Debt>('debts').where('accountId').equals(accountId).toArray();
+  1648→  
+  1649→  // جمع جميع معرفات الديون
+  1650→  const debtIds = allDebts.map(d => d.id);
+  1651→  
+  1652→  // جلب جميع الدفعات المرتبطة بهذه الديون
+  1653→  const allPayments: DebtPayment[] = [];
+  1654→  for (const debtId of debtIds) {
+  1655→    const payments = await db.table<DebtPayment>('debtPayments').where('debtId').equals(debtId).toArray();
+  1656→    allPayments.push(...payments);
+  1657→  }
+  1658→  
+  1659→  // حساب المدفوع لكل دين
+  1660→  const paymentsByDebt = new Map<string, number>();
+  1661→  for (const payment of allPayments) {
+  1662→    const current = paymentsByDebt.get(payment.debtId) || 0;
+  1663→    paymentsByDebt.set(payment.debtId, current + payment.amount);
+  1664→  }
+  1665→  
+  1666→  // ============================================
+  1667→  // 🔹 حسابات حسب العملة (لا ندمج عملات مختلفة)
+  1668→  // ============================================
+  1669→  const currencyIds = [...new Set(allDebts.map(d => d.currencyId))];
+  1670→  
+  1671→  const currencyBreakdown: CurrencyDebtSummary[] = currencyIds.map(currencyId => {
+  1672→    const currencyDebts = allDebts.filter(d => d.currencyId === currencyId);
+  1673→    const receivableDebts = currencyDebts.filter(d => d.debtType === 'RECEIVABLE' || !d.debtType);
+  1674→    const payableDebts = currencyDebts.filter(d => d.debtType === 'PAYABLE');
+  1675→    
+  1676→    const receivable = receivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1677→    const payable = payableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1678→    
+  1679→    let receivablePaid = 0;
+  1680→    let payablePaid = 0;
+  1681→    
+  1682→    for (const debt of receivableDebts) {
+  1683→      receivablePaid += paymentsByDebt.get(debt.id) || 0;
+  1684→    }
+  1685→    for (const debt of payableDebts) {
+  1686→      payablePaid += paymentsByDebt.get(debt.id) || 0;
+  1687→    }
+  1688→    
+  1689→    const receivableRemaining = receivable - receivablePaid;
+  1690→    const payableRemaining = payable - payablePaid;
+  1691→    const netBalance = receivableRemaining - payableRemaining;
+  1692→    
+  1693→    return {
+  1694→      currencyId,
+  1695→      receivable,
+  1696→      payable,
+  1697→      receivablePaid,
+  1698→      payablePaid,
+  1699→      receivableRemaining,
+  1700→      payableRemaining,
+  1701→      netBalance,
+  1702→    };
+  1703→  });
+  1704→  
+  1705→  // فصل الديون حسب النوع
+  1706→  const receivableDebts = allDebts.filter(d => d.debtType === 'RECEIVABLE' || !d.debtType);
+  1707→  const payableDebts = allDebts.filter(d => d.debtType === 'PAYABLE');
+  1708→  
+  1709→  const totalReceivable = receivableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1710→  const totalPayable = payableDebts.reduce((sum, d) => sum + d.finalBalance, 0);
+  1711→  
+  1712→  // حساب المدفوع لكل نوع
+  1713→  let totalReceivablePaid = 0;
+  1714→  let totalPayablePaid = 0;
+  1715→  
+  1716→  for (const debt of receivableDebts) {
+  1717→    totalReceivablePaid += paymentsByDebt.get(debt.id) || 0;
+  1718→  }
+  1719→  for (const debt of payableDebts) {
+  1720→    totalPayablePaid += paymentsByDebt.get(debt.id) || 0;
+  1721→  }
+  1722→  
+  1723→  const totalReceivableRemaining = totalReceivable - totalReceivablePaid;
+  1724→  const totalPayableRemaining = totalPayable - totalPayablePaid;
+  1725→  
+  1726→  // الرصيد النهائي = (لنا - علينا)
+  1727→  // موجب = لنا أكثر مما علينا
+  1728→  // سالب = علينا أكثر مما لنا
+  1729→  const finalBalance = totalReceivableRemaining - totalPayableRemaining;
+  1730→  
+  1731→  return {
+  1732→    accountId,
+  1733→    account,
+  1734→    totalReceivable,
+  1735→    totalPayable,
+  1736→    totalReceivablePaid,
+  1737→    totalPayablePaid,
+  1738→    totalReceivableRemaining,
+  1739→    totalPayableRemaining,
+  1740→    finalBalance,
+  1741→    debts: allDebts,
+  1742→    payments: allPayments,
+  1743→    currencyBreakdown,
+  1744→  };
+  1745→}
+  1746→
+  1747→/**
+  1748→ * حساب رصيد الديون لجميع الحسابات
+  1749→ */
+  1750→export async function getAllAccountsDebtSummary(): Promise<AccountDebtSummary[]> {
+  1751→  await initializeDatabase();
+  1752→  
+  1753→  const accounts = await db.table<Account>('accounts').where('isActive').equals(1).toArray();
+  1754→  const summaries: AccountDebtSummary[] = [];
+  1755→  
+  1756→  for (const account of accounts) {
+  1757→    const summary = await getAccountDebtSummary(account.id);
+  1758→    // فقط الحسابات التي لديها ديون
+  1759→    if (summary.debts.length > 0) {
+  1760→      summaries.push(summary);
+  1761→    }
+  1762→  }
+  1763→  
+  1764→  return summaries;
+  1765→}
+  1766→
+  1767→// Export all data for backup
+  1768→export async function exportAllData(): Promise<{
+  1769→  currencies: Currency[];
+  1770→  vaults: Vault[];
+  1771→  accounts: Account[];
+  1772→  transactions: Transaction[];
+  1773→  debts: Debt[];
+  1774→  debtPayments: DebtPayment[];
+  1775→  currencyExchanges: CurrencyExchange[];
+  1776→  exportDate: string;
+  1777→  version: string;
+  1778→}> {
+  1779→  await initializeDatabase();
+  1780→  
+  1781→  const [currencies, vaults, accounts, transactions, debts, debtPayments, currencyExchanges] = await Promise.all([
+  1782→    db.table<Currency>('currencies').toArray(),
+  1783→    db.table<Vault>('vaults').toArray(),
+  1784→    db.table<Account>('accounts').toArray(),
+  1785→    db.table<Transaction>('transactions').toArray(),
+  1786→    db.table<Debt>('debts').toArray(),
+  1787→    db.table<DebtPayment>('debtPayments').toArray(),
+  1788→    db.table<CurrencyExchange>('currencyExchanges').toArray(),
+  1789→  ]);
+  1790→  
+  1791→  return {
+  1792→    currencies,
+  1793→    vaults,
+  1794→    accounts,
+  1795→    transactions,
+  1796→    debts,
+  1797→    debtPayments,
+  1798→    currencyExchanges,
+  1799→    exportDate: new Date().toISOString(),
+  1800→    version: '1.0.0',
+  1801→  };
+  1802→}
+  1803→
+  1804→// Import data with merge or replace option
+  1805→export async function importAllData(
+  1806→  data: {
+  1807→    currencies?: Currency[];
+  1808→    vaults?: Vault[];
+  1809→    accounts?: Account[];
+  1810→    transactions?: Transaction[];
+  1811→    debts?: Debt[];
+  1812→    debtPayments?: DebtPayment[];
+  1813→    currencyExchanges?: CurrencyExchange[];
+  1814→  },
+  1815→  mergeMode: boolean = true
+  1816→): Promise<{ success: boolean; message: string }> {
+  1817→  await initializeDatabase();
+  1818→  
+  1819→  try {
+  1820→    if (!mergeMode) {
+  1821→      // استبدال: حذف جميع البيانات الحالية
+  1822→      await Promise.all([
+  1823→        db.table('currencies').clear(),
+  1824→        db.table('vaults').clear(),
+  1825→        db.table('accounts').clear(),
+  1826→        db.table('transactions').clear(),
+  1827→        db.table('debts').clear(),
+  1828→        db.table('debtPayments').clear(),
+  1829→        db.table('currencyExchanges').clear(),
+  1830→      ]);
+  1831→    }
+  1832→    
+  1833→    // استيراد العملات
+  1834→    if (data.currencies && data.currencies.length > 0) {
+  1835→      for (const currency of data.currencies) {
+  1836→        if (mergeMode) {
+  1837→          const existing = await db.table<Currency>('currencies').get(currency.id);
+  1838→          if (existing) {
+  1839→            await db.table('currencies').update(currency.id, currency);
+  1840→          } else {
+  1841→            await db.table('currencies').add(currency);
+  1842→          }
+  1843→        } else {
+  1844→          await db.table('currencies').add(currency);
+  1845→        }
+  1846→      }
+  1847→    }
+  1848→    
+  1849→    // استيراد الصناديق
+  1850→    if (data.vaults && data.vaults.length > 0) {
+  1851→      for (const vault of data.vaults) {
+  1852→        if (mergeMode) {
+  1853→          const existing = await db.table<Vault>('vaults').get(vault.id);
+  1854→          if (existing) {
+  1855→            // في وضع الدمج: نجمع الأرصدة
+  1856→            await db.table('vaults').update(vault.id, {
+  1857→              ...vault,
+  1858→              balance: existing.balance + vault.balance,
+  1859→              openingBalance: existing.openingBalance + vault.openingBalance,
+  1860→            });
+  1861→          } else {
+  1862→            await db.table('vaults').add(vault);
+  1863→          }
+  1864→        } else {
+  1865→          await db.table('vaults').add(vault);
+  1866→        }
+  1867→      }
+  1868→    }
+  1869→    
+  1870→    // استيراد الحسابات
+  1871→    if (data.accounts && data.accounts.length > 0) {
+  1872→      for (const account of data.accounts) {
+  1873→        if (mergeMode) {
+  1874→          const existing = await db.table<Account>('accounts').get(account.id);
+  1875→          if (existing) {
+  1876→            await db.table('accounts').update(account.id, account);
+  1877→          } else {
+  1878→            await db.table('accounts').add(account);
+  1879→          }
+  1880→        } else {
+  1881→          await db.table('accounts').add(account);
+  1882→        }
+  1883→      }
+  1884→    }
+  1885→    
+  1886→    // استيراد الحركات (في وضع الدمج: إضافة فقط الجديدة)
+  1887→    if (data.transactions && data.transactions.length > 0) {
+  1888→      for (const transaction of data.transactions) {
+  1889→        if (mergeMode) {
+  1890→          const existing = await db.table<Transaction>('transactions').get(transaction.id);
+  1891→          if (!existing) {
+  1892→            await db.table('transactions').add(transaction);
+  1893→          }
+  1894→        } else {
+  1895→          await db.table('transactions').add(transaction);
+  1896→        }
+  1897→      }
+  1898→    }
+  1899→    
+  1900→    // استيراد الديون (في وضع الدمج: إضافة فقط الجديدة)
+  1901→    if (data.debts && data.debts.length > 0) {
+  1902→      for (const debt of data.debts) {
+  1903→        if (mergeMode) {
+  1904→          const existing = await db.table<Debt>('debts').get(debt.id);
+  1905→          if (!existing) {
+  1906→            await db.table('debts').add(debt);
+  1907→          }
+  1908→        } else {
+  1909→          await db.table('debts').add(debt);
+  1910→        }
+  1911→      }
+  1912→    }
+  1913→    
+  1914→    // استيراد دفعات الديون (في وضع الدمج: إضافة فقط الجديدة)
+  1915→    if (data.debtPayments && data.debtPayments.length > 0) {
+  1916→      for (const payment of data.debtPayments) {
+  1917→        if (mergeMode) {
+  1918→          const existing = await db.table<DebtPayment>('debtPayments').get(payment.id);
+  1919→          if (!existing) {
+  1920→            await db.table('debtPayments').add(payment);
+  1921→          }
+  1922→        } else {
+  1923→          await db.table('debtPayments').add(payment);
+  1924→        }
+  1925→      }
+  1926→    }
+  1927→    
+  1928→    // استيراد عمليات الصرافة (في وضع الدمج: إضافة فقط الجديدة)
+  1929→    if (data.currencyExchanges && data.currencyExchanges.length > 0) {
+  1930→      for (const exchange of data.currencyExchanges) {
+  1931→        if (mergeMode) {
+  1932→          const existing = await db.table<CurrencyExchange>('currencyExchanges').get(exchange.id);
+  1933→          if (!existing) {
+  1934→            await db.table('currencyExchanges').add(exchange);
+  1935→          }
+  1936→        } else {
+  1937→          await db.table('currencyExchanges').add(exchange);
+  1938→        }
+  1939→      }
+  1940→    }
+  1941→    
+  1942→    return { success: true, message: 'تم استيراد البيانات بنجاح' };
+  1943→  } catch (error) {
+  1944→    console.error('Error importing data:', error);
+  1945→    return { success: false, message: 'حدث خطأ أثناء استيراد البيانات' };
+  1946→  }
+  1947→}
+  1948→
+  1949→// Clear all data but keep accounts and currencies
+  1950→export async function clearAllData(): Promise<{ success: boolean; message: string }> {
+  1951→  await initializeDatabase();
+  1952→  
+  1953→  try {
+  1954→    // حذف الحركات
+  1955→    await db.table('transactions').clear();
+  1956→    
+  1957→    // حذف الديون والدفعات
+  1958→    await db.table('debts').clear();
+  1959→    await db.table('debtPayments').clear();
+  1960→    
+  1961→    // حذف عمليات الصرافة
+  1962→    await db.table('currencyExchanges').clear();
+  1963→    
+  1964→    // إعادة تعيين أرصدة الصناديق إلى الرصيد الافتتاحي
+  1965→    const vaults = await db.table<Vault>('vaults').toArray();
+  1966→    for (const vault of vaults) {
+  1967→      await db.table('vaults').update(vault.id, {
+  1968→        balance: vault.openingBalance || 0,
+  1969→        updatedAt: new Date(),
+  1970→      });
+  1971→    }
+  1972→    
+  1973→    return { success: true, message: 'تم مسح البيانات بنجاح مع الحفاظ على الحسابات والعملات' };
+  1974→  } catch (error) {
+  1975→    console.error('Error clearing data:', error);
+  1976→    return { success: false, message: 'حدث خطأ أثناء مسح البيانات' };
+  1977→  }
+  1978→}
+  1979→
+  1980→// ============================================
+  1981→// Currency Exchange Functions
+  1982→// ============================================
+  1983→
+  1984→/**
+  1985→ * حساب القيمة بالدولار بناءً على طريقة التحويل
+  1986→ */
+  1987→function calculateUsdValue(
+  1988→  amount: number,
+  1989→  exchangeRate: number,
+  1990→  conversionMethod: 'MULTIPLY' | 'DIVIDE'
+  1991→): number {
+  1992→  if (conversionMethod === 'MULTIPLY') {
+  1993→    return amount * exchangeRate;
+  1994→  } else {
+  1995→    return amount / exchangeRate;
+  1996→  }
+  1997→}
+  1998→
+  1999→/**
+  2000→ * جلب جميع عمليات الصرف
+
+[showing lines 1-2000 of 2715; use offset=2001 with limit to continue reading]

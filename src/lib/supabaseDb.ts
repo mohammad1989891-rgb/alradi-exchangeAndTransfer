@@ -240,11 +240,14 @@ export interface CurrencyExchange {
   isArchived?: boolean;
 }
 
+export type UserRole = 'admin' | 'user';
+
 export interface User {
   id: string;
   username: string;
   password: string;
   name?: string;
+  role: UserRole;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -438,6 +441,10 @@ function rowToUser(row: Record<string, unknown>): User {
   const obj = toCamelCase<User>(row);
   obj.createdAt = new Date(obj.createdAt as unknown as string);
   obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  // Fallback: if role column doesn't exist yet, default to 'admin'
+  if (!obj.role) {
+    obj.role = 'admin';
+  }
   return obj;
 }
 
@@ -3272,11 +3279,23 @@ export async function initializeDefaultUser(): Promise<User> {
       username: 'admin',
       password: hashPassword('admin'),
       name: 'المدير',
+      role: 'admin',
       createdAt: now,
       updatedAt: now,
     };
     const { error } = await supabase.from('users').insert([userToRow(defaultUser)]);
-    if (error) throw new Error(error.message);
+    if (error) {
+      // If role column doesn't exist yet, try inserting without role
+      if (error.message && (error.message.includes('role') || error.message.includes('column'))) {
+        const fallbackUser = { ...defaultUser };
+        const row = userToRow(fallbackUser);
+        delete row.role;
+        const { error: err2 } = await supabase.from('users').insert([row]);
+        if (err2) throw new Error(err2.message);
+        return defaultUser;
+      }
+      throw new Error(error.message);
+    }
     return defaultUser;
   }
   
@@ -3364,7 +3383,7 @@ export async function changeUsername(userId: string, newUsername: string): Promi
   return { success: true, message: 'تم تغيير اسم المستخدم بنجاح' };
 }
 
-export async function updateUser(userId: string, data: { name?: string }): Promise<User | null> {
+export async function updateUser(userId: string, data: { name?: string; role?: UserRole }): Promise<User | null> {
   await initializeDatabase();
   const { error } = await supabase.from('users').update({
     ...data,
@@ -3374,6 +3393,72 @@ export async function updateUser(userId: string, data: { name?: string }): Promi
   
   const { data: updatedRow } = await supabase.from('users').select('*').eq('id', userId).single();
   return updatedRow ? rowToUser(updatedRow) : null;
+}
+
+export async function getUserById(userId: string): Promise<User | null> {
+  await initializeDatabase();
+  if (!tablesExist) return null;
+  const { data, error } = await supabase.from('users').select('*').eq('id', userId).single();
+  if (error || !data) return null;
+  return rowToUser(data);
+}
+
+export async function createUser(userData: { username: string; password: string; name?: string; role?: UserRole }): Promise<{ success: boolean; user?: User; message: string }> {
+  await initializeDatabase();
+  
+  // Check if username already exists
+  const existing = await getUserByUsername(userData.username);
+  if (existing) {
+    return { success: false, message: 'اسم المستخدم موجود بالفعل' };
+  }
+  
+  const now = new Date();
+  const newUser: User = {
+    id: 'user_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    username: userData.username,
+    password: hashPassword(userData.password),
+    name: userData.name || userData.username,
+    role: userData.role || 'user',
+    createdAt: now,
+    updatedAt: now,
+  };
+  
+  const row = userToRow(newUser);
+  // Try inserting with role, fallback without if column doesn't exist
+  const { error } = await supabase.from('users').insert([row]);
+  if (error) {
+    if (error.message && (error.message.includes('role') || error.message.includes('column'))) {
+      const fallbackRow = { ...row };
+      delete fallbackRow.role;
+      const { error: err2 } = await supabase.from('users').insert([fallbackRow]);
+      if (err2) return { success: false, message: err2.message };
+      return { success: true, user: newUser, message: 'تم إنشاء المستخدم بنجاح' };
+    }
+    return { success: false, message: error.message };
+  }
+  
+  return { success: true, user: newUser, message: 'تم إنشاء المستخدم بنجاح' };
+}
+
+export async function deleteUser(userId: string): Promise<{ success: boolean; message: string }> {
+  await initializeDatabase();
+  // Prevent deleting the last admin
+  const { data: userRow } = await supabase.from('users').select('*').eq('id', userId).single();
+  if (!userRow) return { success: false, message: 'المستخدم غير موجود' };
+  
+  const user = rowToUser(userRow);
+  if (user.role === 'admin') {
+    // Check if this is the last admin
+    const { data: allUsers } = await supabase.from('users').select('*');
+    const admins = (allUsers || []).filter(u => (u as Record<string, unknown>).role === 'admin' || !(u as Record<string, unknown>).role);
+    if (admins.length <= 1) {
+      return { success: false, message: 'لا يمكن حذف آخر مدير في النظام' };
+    }
+  }
+  
+  const { error } = await supabase.from('users').delete().eq('id', userId);
+  if (error) return { success: false, message: error.message };
+  return { success: true, message: 'تم حذف المستخدم بنجاح' };
 }
 
 // ============================================

@@ -628,34 +628,67 @@ export function SettingsPage() {
       if (hasAllColumns) {
         setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓ عمود is_archived موجود في جميع الجداول.' });
       } else {
-        // Some columns are missing — provide SQL for manual execution
+        // Some columns are missing
         const missingTables: string[] = [];
         if (txError) missingTables.push('transactions');
         if (debtError) missingTables.push('debts');
         if (paymentError) missingTables.push('debt_payments');
         if (exchangeError) missingTables.push('currency_exchanges');
 
-        const sql = `-- أضف عمود الأرشفة للجداول الناقصة
-${missingTables.map(t => `ALTER TABLE ${t} ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;`).join('\n')}
+        // Full SQL for archive setup (uses IF NOT EXISTS for safety)
+        const sql = `-- أضف عمود الأرشفة للجداول
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+ALTER TABLE debts ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+ALTER TABLE debt_payments ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+ALTER TABLE currency_exchanges ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+
+-- أضف عمود تاريخ الرصيد الافتتاحي للصناديق
+ALTER TABLE vaults ADD COLUMN IF NOT EXISTS opening_balance_date TIMESTAMPTZ;
 
 -- أضف فهارس لتحسين الأداء
 CREATE INDEX IF NOT EXISTS idx_transactions_is_archived ON transactions(is_archived);
+CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
 CREATE INDEX IF NOT EXISTS idx_debts_is_archived ON debts(is_archived);
 CREATE INDEX IF NOT EXISTS idx_debt_payments_is_archived ON debt_payments(is_archived);
 CREATE INDEX IF NOT EXISTS idx_currency_exchanges_is_archived ON currency_exchanges(is_archived);
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
 CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
 
+        // If dbPassword is provided, try to add columns automatically
+        if (dbPassword) {
+          try {
+            const response = await fetch('/api/execute-sql', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sql, dbPassword }),
+            });
+            const result = await response.json();
+
+            if (result.success) {
+              setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓ تمت إضافة عمود is_archived والفهارس.' });
+              return;
+            } else if (result.error) {
+              setArchiveSetupResult({ success: false, message: result.error });
+              return;
+            }
+          } catch (fetchError) {
+            console.error('Execute SQL fetch error:', fetchError);
+            setArchiveSetupResult({ success: false, message: 'فشل الاتصال بالخادم لتنفيذ SQL. تأكد من اتصال الإنترنت.' });
+            return;
+          }
+        }
+
+        // No password provided — provide SQL for manual execution
         setArchiveSetupResult({
           success: false,
-          message: `عمود is_archived غير موجود في: ${missingTables.join(', ')}. يرجى تشغيل SQL التالي في Supabase SQL Editor:\n\n${sql}`,
+          message: `⚠️ عمود is_archived غير موجود في: ${missingTables.join(', ')}. أدخل كلمة مرور قاعدة البيانات أعلاه للإضافة التلقائية، أو قم بتشغيل SQL التالي يدوياً في Supabase SQL Editor:\n\n${sql}`,
         });
       }
     } catch (error) {
       console.error('Archive setup error:', error);
-      setArchiveSetupResult({ 
-        success: false, 
-        message: 'خطأ في إعداد نظام الأرشفة. حاول مرة أخرى.' 
+      setArchiveSetupResult({
+        success: false,
+        message: 'خطأ في إعداد نظام الأرشفة. حاول مرة أخرى.'
       });
     } finally {
       setIsSettingUp(false);
@@ -774,7 +807,7 @@ CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
     }
   };
 
-  // Setup backups table — works directly with Supabase client (no API route needed)
+  // Setup backups table — uses /api/execute-sql with dbPassword for auto-creation
   const handleSetupBackups = async () => {
     setIsSettingUpBackups(true);
     setBackupSetupResult(null);
@@ -788,27 +821,8 @@ CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
         return;
       }
 
-      // Try to create the backups table by inserting a test record
-      // This will fail if the table doesn't exist, confirming we need manual SQL
-      const testId = 'bkp_test_' + Date.now();
-      const { error: insertError } = await supabase.from('backups').insert([{
-        id: testId,
-        reason: 'test',
-        data: {},
-        record_counts: {},
-        size_bytes: 0,
-        created_at: new Date().toISOString(),
-      }]);
-
-      if (!insertError) {
-        // Table exists! Clean up test record
-        await supabase.from('backups').delete().eq('id', testId);
-        setBackupSetupResult({ success: true, message: 'تم إعداد جدول النسخ الاحتياطي بنجاح ✓' });
-        setBackupsTableExists(true);
-        await loadBackups();
-      } else {
-        // Table doesn't exist — provide SQL for manual creation
-        const sql = `-- إنشاء جدول النسخ الاحتياطي
+      // SQL to create the backups table
+      const sql = `-- إنشاء جدول النسخ الاحتياطي
 CREATE TABLE IF NOT EXISTS backups (
   id TEXT PRIMARY KEY,
   reason TEXT NOT NULL DEFAULT 'manual',
@@ -818,20 +832,52 @@ CREATE TABLE IF NOT EXISTS backups (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- إضافة فهارس
+CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_backups_reason ON backups(reason);
+
 -- تفعيل RLS والسماح بجميع العمليات
 ALTER TABLE backups ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Allow all operations on backups" ON backups FOR ALL USING (true) WITH CHECK (true);`;
+DROP POLICY IF EXISTS "Allow all on backups" ON backups;
+DROP POLICY IF EXISTS "Allow all operations on backups" ON backups;
+CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK (true);`;
 
-        setBackupSetupResult({
-          success: false,
-          message: `لا يمكن إنشاء الجدول تلقائياً. يرجى تشغيل SQL التالي في Supabase SQL Editor:\n\n${sql}`,
-        });
+      // If dbPassword is provided, try to create the table automatically
+      if (dbPassword) {
+        try {
+          const response = await fetch('/api/execute-sql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sql, dbPassword }),
+          });
+          const result = await response.json();
+
+          if (result.success) {
+            setBackupSetupResult({ success: true, message: 'تم إنشاء جدول النسخ الاحتياطي بنجاح ✓' });
+            setBackupsTableExists(true);
+            await loadBackups();
+            return;
+          } else if (result.error) {
+            setBackupSetupResult({ success: false, message: result.error });
+            return;
+          }
+        } catch (fetchError) {
+          console.error('Execute SQL fetch error:', fetchError);
+          setBackupSetupResult({ success: false, message: 'فشل الاتصال بالخادم لتنفيذ SQL. تأكد من اتصال الإنترنت.' });
+          return;
+        }
       }
+
+      // No password provided — provide SQL for manual execution
+      setBackupSetupResult({
+        success: false,
+        message: `⚠️ أدخل كلمة مرور قاعدة البيانات أعلاه للإنشاء التلقائي، أو قم بتشغيل SQL التالي يدوياً في Supabase SQL Editor:\n\n${sql}`,
+      });
     } catch (error) {
       console.error('Backup setup error:', error);
-      setBackupSetupResult({ 
-        success: false, 
-        message: 'خطأ في إعداد نظام النسخ الاحتياطية. حاول مرة أخرى.' 
+      setBackupSetupResult({
+        success: false,
+        message: 'خطأ في إعداد نظام النسخ الاحتياطية. حاول مرة أخرى.'
       });
     } finally {
       setIsSettingUpBackups(false);

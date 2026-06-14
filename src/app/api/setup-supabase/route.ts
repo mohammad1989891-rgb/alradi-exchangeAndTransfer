@@ -11,7 +11,8 @@ export async function POST(request: NextRequest) {
     // If only password is provided, construct the Supabase pooler URL
     if (!connectionString && dbPassword) {
       const projectRef = 'hdlpvtuplwthqcksaynt';
-      connectionString = `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`;
+      const encodedPassword = encodeURIComponent(dbPassword);
+      connectionString = `postgresql://postgres.${projectRef}:${encodedPassword}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`;
     }
 
     if (!connectionString) {

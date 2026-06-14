@@ -112,7 +112,8 @@ export async function POST(request: NextRequest) {
       try {
         const { Client } = await import('pg');
         const projectRef = 'hdlpvtuplwthqcksaynt';
-        const connectionString = `postgresql://postgres.${projectRef}:${dbPassword}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`;
+        const encodedPassword = encodeURIComponent(dbPassword);
+        const connectionString = `postgresql://postgres.${projectRef}:${encodedPassword}@aws-0-eu-central-1.pooler.supabase.com:6543/postgres`;
 
         const client = new Client({
           connectionString,

@@ -54,26 +54,63 @@ export function AccountStatementModal() {
   const [accountSales, setAccountSales] = useState<Sale[]>([]);
   const [isLoadingSales, setIsLoadingSales] = useState(false);
 
-  // Fetch sales whenever the selected account changes
+  // 🔸 Keep the statement's sales section in sync with the latest data.
+  //    The modal fetches sales from the `sales` table via getSalesByAccount
+  //    (which selects ALL sales for the account — no payment_method filter —
+  //    so both cash and credit sales are always returned).
+  //
+  //    Root cause of "credit sales don't appear in the statement": the
+  //    original effect only refetched when `selectedAccountId` changed, so
+  //    sales created/edited/deleted while the modal was closed (or while a
+  //    different account was selected) never appeared until the user
+  //    manually switched accounts. The fix below adds two more triggers:
+  //      1. Refetch when the modal opens (isAccountStatementOpen turns true)
+  //         — picks up sales created since the last view.
+  //      2. Listen for `sales-updated` + `app-data-refreshed` window events
+  //         (dispatched by SaleDialog and SalesPage after create/edit/delete)
+  //         and refetch live, so the statement + final balance update
+  //         immediately without requiring the user to reopen the modal.
   useEffect(() => {
     if (!selectedAccountId) {
+      // No account selected — nothing to fetch. (We intentionally do NOT call
+      // setAccountSales([]) here to avoid the set-state-in-effect lint rule;
+      // accountSales is reset via the empty result path of getSalesByAccount
+      // when a real account is selected, and the modal is hidden when no
+      // account exists anyway.)
       return;
     }
     let cancelled = false;
-    getSalesByAccount(selectedAccountId)
-      .then((sales) => {
-        if (cancelled) return;
-        setAccountSales(sales);
-      })
-      .catch((err) => {
-        console.error('Error fetching sales for account:', err);
-        if (!cancelled) setAccountSales([]);
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoadingSales(false);
-      });
-    return () => { cancelled = true; };
-  }, [selectedAccountId]);
+
+    const load = () => {
+      setIsLoadingSales(true);
+      getSalesByAccount(selectedAccountId)
+        .then((sales) => {
+          if (!cancelled) setAccountSales(sales);
+        })
+        .catch((err) => {
+          console.error('Error fetching sales for account:', err);
+          if (!cancelled) setAccountSales([]);
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingSales(false);
+        });
+    };
+
+    // Initial load (fires on mount, on account change, and on modal open)
+    load();
+
+    // Live refresh: refetch whenever a sale is created/edited/deleted anywhere
+    // in the app, so the statement's balance stays accurate in real time.
+    const handleSalesUpdated = () => load();
+    window.addEventListener('sales-updated', handleSalesUpdated);
+    window.addEventListener('app-data-refreshed', handleSalesUpdated);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener('sales-updated', handleSalesUpdated);
+      window.removeEventListener('app-data-refreshed', handleSalesUpdated);
+    };
+  }, [selectedAccountId, isAccountStatementOpen]);
   
   // Date filter state
   const [dateFrom, setDateFrom] = useState('');

@@ -1,0 +1,2002 @@
+     1→'use client';
+     2→
+     3→import { useState, useRef, useEffect, useCallback } from 'react';
+     4→import { useAppStore } from '@/store/useAppStore';
+     5→import { useSupabaseData } from '@/hooks/useSupabaseData';
+     6→import { useAuth } from '@/hooks/useAuth';
+     7→import { useTheme } from 'next-themes';
+     8→import { motion } from 'framer-motion';
+     9→import {
+    10→  Settings,
+    11→  Moon,
+    12→  Sun,
+    13→  Palette,
+    14→  Currency,
+    15→  Database,
+    16→  ChevronLeft,
+    17→  Plus,
+    18→  Trash2,
+    19→  Download,
+    20→  Upload,
+    21→  AlertTriangle,
+    22→  FileJson,
+    23→  Merge,
+    24→  Replace,
+    25→  Lock,
+    26→  User,
+    27→  Eye,
+    28→  EyeOff,
+    29→  Archive,
+    30→  Loader2,
+    31→  Shield,
+    32→  RotateCcw,
+    33→  Clock,
+    34→  HardDrive,
+    35→  Users,
+    36→  UserPlus,
+    37→  ShieldCheck,
+    38→  ShieldAlert,
+    39→  Ruler,
+    40→  Package,
+    41→  ShoppingCart,
+    42→  Copy,
+    43→  Check,
+    44→} from 'lucide-react';
+    45→import { Button } from '@/components/ui/button';
+    46→import { Input } from '@/components/ui/input';
+    47→import { Label } from '@/components/ui/label';
+    48→import { Switch } from '@/components/ui/switch';
+    49→import {
+    50→  Dialog,
+    51→  DialogContent,
+    52→  DialogHeader,
+    53→  DialogTitle,
+    54→  DialogTrigger,
+    55→  DialogFooter,
+    56→} from '@/components/ui/dialog';
+    57→import {
+    58→  AlertDialog,
+    59→  AlertDialogAction,
+    60→  AlertDialogCancel,
+    61→  AlertDialogContent,
+    62→  AlertDialogDescription,
+    63→  AlertDialogFooter,
+    64→  AlertDialogHeader,
+    65→  AlertDialogTitle,
+    66→} from '@/components/ui/alert-dialog';
+    67→import {
+    68→  Select,
+    69→  SelectContent,
+    70→  SelectItem,
+    71→  SelectTrigger,
+    72→  SelectValue,
+    73→} from '@/components/ui/select';
+    74→import { useToast } from '@/hooks/use-toast';
+    75→import { cn } from '@/lib/utils';
+    76→import { exportAllData, importAllData, clearAllData, changePassword, changeUsername, getUsers, addCustomCurrency, deleteCurrencyFromDb, createBackup, getBackups, restoreBackup, deleteBackup, checkBackupsTableExists, exportBackupAsJson, createUser, deleteUser as deleteUserFromDb, getUserById } from '@/lib/supabaseDb';
+    77→import { supabase } from '@/lib/supabase';
+    78→import type { Currency as CurrencyType } from '@/types';
+    79→import { StorageDashboard } from '@/components/exchange/StorageDashboard';
+    80→import { UnitsManager } from '@/components/exchange/UnitsManager';
+    81→import { MaterialsManager } from '@/components/exchange/MaterialsManager';
+    82→
+    83→export function SettingsPage() {
+    84→  const { theme, setTheme } = useTheme();
+    85→  const { currencies, setCurrencies, vaults, accounts, transactions, debts } = useAppStore();
+    86→  const { refreshData: refreshLocalData, autoArchiveOldRecords } = useSupabaseData();
+    87→  const { isAdmin, userId: currentAuthUserId, role: currentRole } = useAuth();
+    88→  const { toast } = useToast();
+    89→  
+    90→  const [expandedSection, setExpandedSection] = useState<string | null>('appearance');
+    91→  const [isAddCurrencyOpen, setIsAddCurrencyOpen] = useState(false);
+    92→  const [newCurrency, setNewCurrency] = useState({ code: '', name: '', symbol: '' });
+    93→  const [deleteCurrency, setDeleteCurrency] = useState<CurrencyType | null>(null);
+    94→  
+    95→  // Backup & Restore
+    96→  const [isExporting, setIsExporting] = useState(false);
+    97→  const [isImporting, setIsImporting] = useState(false);
+    98→  const [importMode, setImportMode] = useState<'merge' | 'replace'>('merge');
+    99→  const [showImportDialog, setShowImportDialog] = useState(false);
+   100→  const [showClearDialog, setShowClearDialog] = useState(false);
+   101→  const fileInputRef = useRef<HTMLInputElement>(null);
+   102→
+   103→  // Password Change
+   104→  const [oldPassword, setOldPassword] = useState('');
+   105→  const [newPassword, setNewPassword] = useState('');
+   106→  const [confirmPassword, setConfirmPassword] = useState('');
+   107→  const [showOldPassword, setShowOldPassword] = useState(false);
+   108→  const [showNewPassword, setShowNewPassword] = useState(false);
+   109→  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+   110→  const [isChangingPassword, setIsChangingPassword] = useState(false);
+   111→  const [currentUsername, setCurrentUsername] = useState('');
+   112→  const [newUsername, setNewUsername] = useState('');
+   113→  const [isChangingUsername, setIsChangingUsername] = useState(false);
+   114→
+   115→  // Database Password (for backup & archive setup)
+   116→  const [dbPassword, setDbPassword] = useState('');
+   117→  const [showDbPassword, setShowDbPassword] = useState(false);
+   118→
+   119→  // Archive
+   120→  const [archiveMonths, setArchiveMonths] = useState(6);
+   121→  const [isArchiving, setIsArchiving] = useState(false);
+   122→  const [isSettingUp, setIsSettingUp] = useState(false);
+   123→  const [archiveSetupResult, setArchiveSetupResult] = useState<{ success: boolean; message: string } | null>(null);
+   124→
+   125→  // Purchases & Sales Database Setup
+   126→  const [isSettingUpPurchasesSales, setIsSettingUpPurchasesSales] = useState(false);
+   127→  const [purchasesSalesSetupResult, setPurchasesSalesSetupResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
+   128→  const [sqlCopied, setSqlCopied] = useState(false);
+   129→
+   130→  // Backup System
+   131→  const [backups, setBackups] = useState<Array<{
+   132→    id: string;
+   133→    reason: string;
+   134→    recordCounts: { currencies: number; vaults: number; accounts: number; transactions: number; debts: number; debtPayments: number; currencyExchanges: number };
+   135→    sizeBytes: number;
+   136→    createdAt: Date;
+   137→  }>>([]);
+   138→  const [isLoadingBackups, setIsLoadingBackups] = useState(false);
+   139→  const [isCreatingDbBackup, setIsCreatingDbBackup] = useState(false);
+   140→  const [isRestoring, setIsRestoring] = useState<string | null>(null);
+   141→  const [backupsTableExists, setBackupsTableExists] = useState(false);
+   142→  const [isSettingUpBackups, setIsSettingUpBackups] = useState(false);
+   143→  const [backupSetupResult, setBackupSetupResult] = useState<{ success: boolean; message: string } | null>(null);
+   144→  const [showRestoreConfirm, setShowRestoreConfirm] = useState<string | null>(null);
+   145→
+   146→  // User Management (Admin only)
+   147→  const [usersList, setUsersList] = useState<Array<{ id: string; username: string; name?: string; role: string; createdAt: Date }>>([]);
+   148→  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
+   149→  const [newUserUsername, setNewUserUsername] = useState('');
+   150→  const [newUserPassword, setNewUserPassword] = useState('');
+   151→  const [newUserName, setNewUserName] = useState('');
+   152→  const [newUserRole, setNewUserRole] = useState<'admin' | 'user'>('user');
+   153→  const [isCreatingUser, setIsCreatingUser] = useState(false);
+   154→  const [showAddUserDialog, setShowAddUserDialog] = useState(false);
+   155→  const [showDeleteUserDialog, setShowDeleteUserDialog] = useState<string | null>(null);
+   156→
+   157→  // Load current username on mount
+   158→  useEffect(() => {
+   159→    const savedUsername = localStorage.getItem('currentUsername');
+   160→    if (savedUsername) {
+   161→      setCurrentUsername(savedUsername);
+   162→    }
+   163→    // Also check if backups table exists on mount
+   164→    checkBackupsTableExists().then(exists => {
+   165→      setBackupsTableExists(exists);
+   166→    }).catch(() => {
+   167→      setBackupsTableExists(false);
+   168→    });
+   169→    // Load saved database password
+   170→    const savedDbPassword = localStorage.getItem('dbPassword');
+   171→    if (savedDbPassword) {
+   172→      setDbPassword(savedDbPassword);
+   173→    }
+   174→  }, []);
+   175→
+   176→  // Save database password to localStorage when it changes
+   177→  useEffect(() => {
+   178→    if (dbPassword) {
+   179→      localStorage.setItem('dbPassword', dbPassword);
+   180→    } else {
+   181→      localStorage.removeItem('dbPassword');
+   182→    }
+   183→  }, [dbPassword]);
+   184→
+   185→  // Check backups table existence when backup-management section is expanded
+   186→  // (handled in the section toggle click handler below)
+   187→
+   188→  // Statistics
+   189→  const stats = {
+   190→    currencies: currencies.length,
+   191→    vaults: vaults.length,
+   192→    accounts: accounts.length,
+   193→    transactions: transactions.length,
+   194→    debts: debts.length,
+   195→  };
+   196→
+   197→  // Add Currency (بدون إنترنت - يستخدم قاعدة البيانات المحلية)
+   198→  const handleAddCurrency = async () => {
+   199→    if (!newCurrency.code || !newCurrency.name || !newCurrency.symbol) return;
+   200→
+   201→    try {
+   202→      const result = await addCustomCurrency({
+   203→        code: newCurrency.code,
+   204→        name: newCurrency.name,
+   205→        symbol: newCurrency.symbol,
+   206→      });
+   207→
+   208→      // 🔸 تحديث الحالة محلياً
+   209→      setCurrencies([...currencies, result]);
+   210→      setNewCurrency({ code: '', name: '', symbol: '' });
+   211→      setIsAddCurrencyOpen(false);
+   212→      
+   213→      // 🔸 إعادة تحميل البيانات من قاعدة البيانات المحلية
+   214→      await refreshLocalData();
+   215→      
+   216→      toast({
+   217→        title: 'تمت الإضافة',
+   218→        description: `تمت إضافة عملة ${result.name} بنجاح`,
+   219→      });
+   220→    } catch (error) {
+   221→      console.error('Error adding currency:', error);
+   222→      toast({
+   223→        title: 'خطأ',
+   224→        description: error instanceof Error ? error.message : 'حدث خطأ أثناء إضافة العملة',
+   225→        variant: 'destructive',
+   226→      });
+   227→    }
+   228→  };
+   229→
+   230→  // Delete Currency (بدون إنترنت - يستخدم قاعدة البيانات المحلية)
+   231→  const handleDeleteCurrency = async () => {
+   232→    if (!deleteCurrency) return;
+   233→
+   234→    try {
+   235→      await deleteCurrencyFromDb(deleteCurrency.id);
+   236→      setCurrencies(currencies.filter(c => c.id !== deleteCurrency.id));
+   237→      setDeleteCurrency(null);
+   238→      
+   239→      // 🔸 إعادة تحميل البيانات من قاعدة البيانات المحلية
+   240→      await refreshLocalData();
+   241→      
+   242→      toast({
+   243→        title: 'تم الحذف',
+   244→        description: 'تم حذف العملة بنجاح',
+   245→      });
+   246→    } catch (error) {
+   247→      console.error('Error deleting currency:', error);
+   248→      toast({
+   249→        title: 'خطأ',
+   250→        description: error instanceof Error ? error.message : 'حدث خطأ أثناء حذف العملة',
+   251→        variant: 'destructive',
+   252→      });
+   253→    }
+   254→  };
+   255→
+   256→  // Export Data
+   257→  const handleExportData = async () => {
+   258→    setIsExporting(true);
+   259→    try {
+   260→      const data = await exportAllData();
+   261→      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+   262→      const url = URL.createObjectURL(blob);
+   263→      const a = document.createElement('a');
+   264→      a.href = url;
+   265→      a.download = `backup-${new Date().toISOString().split('T')[0]}.json`;
+   266→      document.body.appendChild(a);
+   267→      a.click();
+   268→      document.body.removeChild(a);
+   269→      URL.revokeObjectURL(url);
+   270→
+   271→      toast({
+   272→        title: 'تم التصدير',
+   273→        description: 'تم إنشاء النسخة الاحتياطية بنجاح',
+   274→      });
+   275→    } catch (error) {
+   276→      console.error('Error exporting data:', error);
+   277→      toast({
+   278→        title: 'خطأ',
+   279→        description: 'حدث خطأ أثناء التصدير',
+   280→        variant: 'destructive',
+   281→      });
+   282→    } finally {
+   283→      setIsExporting(false);
+   284→    }
+   285→  };
+   286→
+   287→  // Import Data
+   288→  const handleImportData = async (event: React.ChangeEvent<HTMLInputElement>) => {
+   289→    const file = event.target.files?.[0];
+   290→    if (!file) return;
+   291→
+   292→    setIsImporting(true);
+   293→    try {
+   294→      const text = await file.text();
+   295→      const data = JSON.parse(text);
+   296→      const result = await importAllData(data, importMode === 'merge');
+   297→
+   298→      if (result.success) {
+   299→        await refreshLocalData();
+   300→        toast({
+   301→          title: 'تم الاستيراد',
+   302→          description: result.message,
+   303→        });
+   304→      } else {
+   305→        toast({
+   306→          title: 'خطأ',
+   307→          description: result.message,
+   308→          variant: 'destructive',
+   309→        });
+   310→      }
+   311→    } catch (error) {
+   312→      console.error('Error importing data:', error);
+   313→      toast({
+   314→        title: 'خطأ',
+   315→        description: 'فشل قراءة الملف. تأكد من صحة الملف',
+   316→        variant: 'destructive',
+   317→      });
+   318→    } finally {
+   319→      setIsImporting(false);
+   320→      setShowImportDialog(false);
+   321→      if (fileInputRef.current) {
+   322→        fileInputRef.current.value = '';
+   323→      }
+   324→    }
+   325→  };
+   326→
+   327→  // Clear Data - Multi-stage protection
+   328→  const [clearStep, setClearStep] = useState<0 | 1 | 2 | 3>(0); // 0=hidden, 1=warning+backup, 2=verify, 3=countdown
+   329→  const [isCreatingBackup, setIsCreatingBackup] = useState(false);
+   330→  const [backupCreated, setBackupCreated] = useState(false);
+   331→  const [backupError, setBackupError] = useState(false);
+   332→  const [verificationInput, setVerificationInput] = useState('');
+   333→  const [verificationError, setVerificationError] = useState('');
+   334→  const [isVerifying, setIsVerifying] = useState(false);
+   335→  const [hasPassword, setHasPassword] = useState(false);
+   336→  const [countdown, setCountdown] = useState(3);
+   337→  const [isDeleting, setIsDeleting] = useState(false);
+   338→  const countdownRef = useRef<NodeJS.Timeout | null>(null);
+   339→
+   340→  // Open clear dialog - start at step 1
+   341→  const handleOpenClearDialog = () => {
+   342→    setClearStep(1);
+   343→    setBackupCreated(false);
+   344→    setBackupError(false);
+   345→    setIsCreatingBackup(false);
+   346→    setVerificationInput('');
+   347→    setVerificationError('');
+   348→    setCountdown(3);
+   349→    setIsDeleting(false);
+   350→  };
+   351→
+   352→  // Close clear dialog
+   353→  const handleCloseClearDialog = () => {
+   354→    if (countdownRef.current) {
+   355→      clearInterval(countdownRef.current);
+   356→      countdownRef.current = null;
+   357→    }
+   358→    setClearStep(0);
+   359→    setVerificationInput('');
+   360→    setVerificationError('');
+   361→  };
+   362→
+   363→  // Step 1: Create auto-backup
+   364→  const handleCreateBackup = async () => {
+   365→    setIsCreatingBackup(true);
+   366→    setBackupError(false);
+   367→    try {
+   368→      const data = await exportAllData();
+   369→      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+   370→      const url = URL.createObjectURL(blob);
+   371→      const a = document.createElement('a');
+   372→      a.href = url;
+   373→      a.download = `pre-delete-backup-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+   374→      document.body.appendChild(a);
+   375→      a.click();
+   376→      document.body.removeChild(a);
+   377→      URL.revokeObjectURL(url);
+   378→      setBackupCreated(true);
+   379→    } catch (error) {
+   380→      console.error('Error creating backup:', error);
+   381→      setBackupError(true);
+   382→    } finally {
+   383→      setIsCreatingBackup(false);
+   384→    }
+   385→  };
+   386→
+   387→  // Step 1 → 3 (or 2 if password): Proceed from backup
+   388→  const handleProceedToVerify = async () => {
+   389→    // Check if user has a custom password
+   390→    const userId = localStorage.getItem('currentUserId');
+   391→    let userHasPassword = false;
+   392→    if (userId) {
+   393→      try {
+   394→        const { verifyUserPassword } = await import('@/lib/supabaseDb');
+   395→        const result = await verifyUserPassword(userId, 'admin');
+   396→        userHasPassword = result.hasPassword;
+   397→        setHasPassword(result.hasPassword);
+   398→      } catch {
+   399→        setHasPassword(false);
+   400→      }
+   401→    }
+   402→    // If user has password, go to step 2 for password verification
+   403→    // If no password, skip directly to step 3 (countdown)
+   404→    if (userHasPassword) {
+   405→      setClearStep(2);
+   406→    } else {
+   407→      setClearStep(3);
+   408→      startCountdown();
+   409→    }
+   410→  };
+   411→
+   412→  // Step 2: Verify user password only (no "احذف" text confirmation)
+   413→  const handleVerify = async () => {
+   414→    setIsVerifying(true);
+   415→    setVerificationError('');
+   416→
+   417→    const userId = localStorage.getItem('currentUserId');
+   418→
+   419→    if (hasPassword && userId) {
+   420→      // Verify password
+   421→      try {
+   422→        const { verifyUserPassword } = await import('@/lib/supabaseDb');
+   423→        const result = await verifyUserPassword(userId, verificationInput);
+   424→        if (result.valid) {
+   425→          setClearStep(3);
+   426→          startCountdown();
+   427→        } else {
+   428→          setVerificationError('كلمة المرور غير صحيحة');
+   429→        }
+   430→      } catch {
+   431→        setVerificationError('حدث خطأ أثناء التحقق');
+   432→      }
+   433→    }
+   434→
+   435→    setIsVerifying(false);
+   436→  };
+   437→
+   438→  // Step 3: Start countdown
+   439→  const startCountdown = () => {
+   440→    setCountdown(3);
+   441→    if (countdownRef.current) clearInterval(countdownRef.current);
+   442→    countdownRef.current = setInterval(() => {
+   443→      setCountdown(prev => {
+   444→        if (prev <= 1) {
+   445→          if (countdownRef.current) clearInterval(countdownRef.current);
+   446→          return 0;
+   447→        }
+   448→        return prev - 1;
+   449→      });
+   450→    }, 1000);
+   451→  };
+   452→
+   453→  // Step 3: Execute deletion after countdown
+   454→  const handleExecuteDeletion = async () => {
+   455→    setIsDeleting(true);
+   456→    try {
+   457→      const result = await clearAllData();
+   458→      if (result.success) {
+   459→        await refreshLocalData();
+   460→        toast({
+   461→          title: 'تم المسح',
+   462→          description: 'تم حذف جميع البيانات بنجاح. يمكنك استرجاعها من النسخة الاحتياطية.',
+   463→        });
+   464→        handleCloseClearDialog();
+   465→      } else {
+   466→        toast({
+   467→          title: 'خطأ',
+   468→          description: result.message,
+   469→          variant: 'destructive',
+   470→        });
+   471→      }
+   472→    } catch (error) {
+   473→      console.error('Error clearing data:', error);
+   474→      toast({
+   475→        title: 'خطأ',
+   476→        description: 'حدث خطأ أثناء مسح البيانات',
+   477→        variant: 'destructive',
+   478→      });
+   479→    } finally {
+   480→      setIsDeleting(false);
+   481→    }
+   482→  };
+   483→
+   484→  // Cleanup countdown on unmount
+   485→  useEffect(() => {
+   486→    return () => {
+   487→      if (countdownRef.current) clearInterval(countdownRef.current);
+   488→    };
+   489→  }, []);
+   490→
+   491→  // Change Password
+   492→  const handleChangePassword = async () => {
+   493→    if (!oldPassword || !newPassword || !confirmPassword) {
+   494→      toast({
+   495→        title: 'خطأ',
+   496→        description: 'يرجى ملء جميع الحقول',
+   497→        variant: 'destructive',
+   498→      });
+   499→      return;
+   500→    }
+   501→
+   502→    if (newPassword !== confirmPassword) {
+   503→      toast({
+   504→        title: 'خطأ',
+   505→        description: 'كلمة المرور الجديدة غير متطابقة',
+   506→        variant: 'destructive',
+   507→      });
+   508→      return;
+   509→    }
+   510→
+   511→    if (newPassword.length < 4) {
+   512→      toast({
+   513→        title: 'خطأ',
+   514→        description: 'كلمة المرور يجب أن تكون 4 أحرف على الأقل',
+   515→        variant: 'destructive',
+   516→      });
+   517→      return;
+   518→    }
+   519→
+   520→    setIsChangingPassword(true);
+   521→    try {
+   522→      const userId = localStorage.getItem('currentUserId');
+   523→      if (!userId) {
+   524→        toast({
+   525→          title: 'خطأ',
+   526→          description: 'لم يتم العثور على المستخدم',
+   527→          variant: 'destructive',
+   528→        });
+   529→        return;
+   530→      }
+   531→
+   532→      const result = await changePassword(userId, oldPassword, newPassword);
+   533→      
+   534→      if (result.success) {
+   535→        toast({
+   536→          title: 'تم بنجاح',
+   537→          description: result.message,
+   538→        });
+   539→        setOldPassword('');
+   540→        setNewPassword('');
+   541→        setConfirmPassword('');
+   542→      } else {
+   543→        toast({
+   544→          title: 'خطأ',
+   545→          description: result.message,
+   546→          variant: 'destructive',
+   547→        });
+   548→      }
+   549→    } catch (error) {
+   550→      toast({
+   551→        title: 'خطأ',
+   552→        description: 'حدث خطأ غير متوقع',
+   553→        variant: 'destructive',
+   554→      });
+   555→    } finally {
+   556→      setIsChangingPassword(false);
+   557→    }
+   558→  };
+   559→
+   560→  // Change Username
+   561→  const handleChangeUsername = async () => {
+   562→    if (!newUsername.trim()) {
+   563→      toast({
+   564→        title: 'خطأ',
+   565→        description: 'يرجى إدخال اسم المستخدم الجديد',
+   566→        variant: 'destructive',
+   567→      });
+   568→      return;
+   569→    }
+   570→
+   571→    if (newUsername.length < 3) {
+   572→      toast({
+   573→        title: 'خطأ',
+   574→        description: 'اسم المستخدم يجب أن يكون 3 أحرف على الأقل',
+   575→        variant: 'destructive',
+   576→      });
+   577→      return;
+   578→    }
+   579→
+   580→    setIsChangingUsername(true);
+   581→    try {
+   582→      const userId = localStorage.getItem('currentUserId');
+   583→      if (!userId) {
+   584→        toast({
+   585→          title: 'خطأ',
+   586→          description: 'لم يتم العثور على المستخدم',
+   587→          variant: 'destructive',
+   588→        });
+   589→        return;
+   590→      }
+   591→
+   592→      const result = await changeUsername(userId, newUsername);
+   593→      
+   594→      if (result.success) {
+   595→        toast({
+   596→          title: 'تم بنجاح',
+   597→          description: result.message,
+   598→        });
+   599→        setCurrentUsername(newUsername);
+   600→        setNewUsername('');
+   601→      } else {
+   602→        toast({
+   603→          title: 'خطأ',
+   604→          description: result.message,
+   605→          variant: 'destructive',
+   606→        });
+   607→      }
+   608→    } catch (error) {
+   609→      toast({
+   610→        title: 'خطأ',
+   611→        description: 'حدث خطأ غير متوقع',
+   612→        variant: 'destructive',
+   613→      });
+   614→    } finally {
+   615→      setIsChangingUsername(false);
+   616→    }
+   617→  };
+   618→
+   619→  // Auto Archive
+   620→  const handleAutoArchive = async () => {
+   621→    setIsArchiving(true);
+   622→    try {
+   623→      const result = await autoArchiveOldRecords(archiveMonths);
+   624→      await refreshLocalData();
+   625→      const total = result.archived.transactions + result.archived.debts + result.archived.debtPayments + result.archived.currencyExchanges;
+   626→      toast({
+   627→        title: total > 0 ? 'تمت الأرشفة' : 'لا توجد حركات للأرشفة',
+   628→        description: total > 0
+   629→          ? `تم أرشفة ${result.archived.transactions} حركة، ${result.archived.debts} دين، ${result.archived.debtPayments} دفعة، ${result.archived.currencyExchanges} عملية صرافة`
+   630→          : 'جميع الحركات حديثة',
+   631→      });
+   632→    } catch (error) {
+   633→      console.error('Error auto-archiving:', error);
+   634→      toast({
+   635→        title: 'خطأ',
+   636→        description: 'حدث خطأ أثناء الأرشفة',
+   637→        variant: 'destructive',
+   638→      });
+   639→    } finally {
+   640→      setIsArchiving(false);
+   641→    }
+   642→  };
+   643→
+   644→  // Setup Archive Database — works directly with Supabase client (no API route needed)
+   645→  const handleSetupArchive = async () => {
+   646→    setIsSettingUp(true);
+   647→    setArchiveSetupResult(null);
+   648→    try {
+   649→      // Check if is_archived column exists by trying to query with it
+   650→      const { error: txError } = await supabase.from('transactions').select('id').eq('is_archived', false).limit(1);
+   651→      const { error: debtError } = await supabase.from('debts').select('id').eq('is_archived', false).limit(1);
+   652→      const { error: paymentError } = await supabase.from('debt_payments').select('id').eq('is_archived', false).limit(1);
+   653→      const { error: exchangeError } = await supabase.from('currency_exchanges').select('id').eq('is_archived', false).limit(1);
+   654→
+   655→      const hasAllColumns = !txError && !debtError && !paymentError && !exchangeError;
+   656→
+   657→      if (hasAllColumns) {
+   658→        setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓ عمود is_archived موجود في جميع الجداول.' });
+   659→      } else {
+   660→        // Some columns are missing
+   661→        const missingTables: string[] = [];
+   662→        if (txError) missingTables.push('transactions');
+   663→        if (debtError) missingTables.push('debts');
+   664→        if (paymentError) missingTables.push('debt_payments');
+   665→        if (exchangeError) missingTables.push('currency_exchanges');
+   666→
+   667→        // Full SQL for archive setup (uses IF NOT EXISTS for safety)
+   668→        const sql = `-- أضف عمود الأرشفة للجداول
+   669→ALTER TABLE transactions ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+   670→ALTER TABLE debts ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+   671→ALTER TABLE debt_payments ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+   672→ALTER TABLE currency_exchanges ADD COLUMN IF NOT EXISTS is_archived BOOLEAN DEFAULT false;
+   673→
+   674→-- أضف عمود تاريخ الرصيد الافتتاحي للصناديق
+   675→ALTER TABLE vaults ADD COLUMN IF NOT EXISTS opening_balance_date TIMESTAMPTZ;
+   676→
+   677→-- أضف فهارس لتحسين الأداء
+   678→CREATE INDEX IF NOT EXISTS idx_transactions_is_archived ON transactions(is_archived);
+   679→CREATE INDEX IF NOT EXISTS idx_transactions_type ON transactions(type);
+   680→CREATE INDEX IF NOT EXISTS idx_debts_is_archived ON debts(is_archived);
+   681→CREATE INDEX IF NOT EXISTS idx_debt_payments_is_archived ON debt_payments(is_archived);
+   682→CREATE INDEX IF NOT EXISTS idx_currency_exchanges_is_archived ON currency_exchanges(is_archived);
+   683→CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(date);
+   684→CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
+   685→
+   686→        // If dbPassword is provided, try to add columns automatically
+   687→        if (dbPassword) {
+   688→          try {
+   689→            const response = await fetch('/api/execute-sql', {
+   690→              method: 'POST',
+   691→              headers: { 'Content-Type': 'application/json' },
+   692→              body: JSON.stringify({ sql, dbPassword, userRole: currentRole }),
+   693→            });
+   694→            const result = await response.json();
+   695→
+   696→            if (result.success) {
+   697→              setArchiveSetupResult({ success: true, message: 'تم إعداد نظام الأرشفة بنجاح ✓ تمت إضافة عمود is_archived والفهارس.' });
+   698→              return;
+   699→            } else if (result.error) {
+   700→              setArchiveSetupResult({ success: false, message: result.error });
+   701→              return;
+   702→            }
+   703→          } catch (fetchError) {
+   704→            console.error('Execute SQL fetch error:', fetchError);
+   705→            setArchiveSetupResult({ success: false, message: 'فشل الاتصال بالخادم لتنفيذ SQL. تأكد من اتصال الإنترنت.' });
+   706→            return;
+   707→          }
+   708→        }
+   709→
+   710→        // No password provided — provide SQL for manual execution
+   711→        setArchiveSetupResult({
+   712→          success: false,
+   713→          message: `⚠️ عمود is_archived غير موجود في: ${missingTables.join(', ')}. أدخل كلمة مرور قاعدة البيانات أعلاه للإضافة التلقائية، أو قم بتشغيل SQL التالي يدوياً في Supabase SQL Editor:\n\n${sql}`,
+   714→        });
+   715→      }
+   716→    } catch (error) {
+   717→      console.error('Archive setup error:', error);
+   718→      setArchiveSetupResult({
+   719→        success: false,
+   720→        message: 'خطأ في إعداد نظام الأرشفة. حاول مرة أخرى.'
+   721→      });
+   722→    } finally {
+   723→      setIsSettingUp(false);
+   724→    }
+   725→  };
+   726→
+   727→  // ============================================
+   728→  // Purchases & Sales Database Setup Handler
+   729→  // ============================================
+   730→
+   731→  // Full migration SQL for purchases & sales system (units, materials, material_units, purchases, sales)
+   732→  // Mirrors supabase/migration-purchases-sales.sql — kept inline so the user never needs to
+   733→  // manually open/copy the .sql file (which caused the "syntax error at or near 'supabase'" issue
+   734→  // when the file PATH was pasted instead of file CONTENT).
+   735→  const PURCHASES_SALES_MIGRATION_SQL = `-- ============================================
+   736→-- Migration: المشتريات والمبيعات (Purchases & Sales)
+   737→-- Adds: units, materials, material_units, purchases, sales
+   738→-- Safe to re-run (uses IF NOT EXISTS)
+   739→-- ============================================
+   740→
+   741→-- Units Table (وحدات القياس — قائمة رئيسية)
+   742→CREATE TABLE IF NOT EXISTS units (
+   743→  id TEXT PRIMARY KEY,
+   744→  name TEXT NOT NULL UNIQUE,
+   745→  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+   746→  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   747→);
+   748→
+   749→-- Materials Table (المواد)
+   750→CREATE TABLE IF NOT EXISTS materials (
+   751→  id TEXT PRIMARY KEY,
+   752→  name TEXT NOT NULL UNIQUE,
+   753→  default_unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+   754→  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+   755→  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   756→);
+   757→
+   758→-- Material Units Table (ربط المواد بالوحدات + معامل التحويل)
+   759→CREATE TABLE IF NOT EXISTS material_units (
+   760→  id TEXT PRIMARY KEY,
+   761→  material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+   762→  unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+   763→  base_factor DOUBLE PRECISION NOT NULL DEFAULT 1,
+   764→  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+   765→  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+   766→  UNIQUE(material_id, unit_id)
+   767→);
+   768→
+   769→-- Purchases Table (المشتريات)
+   770→CREATE TABLE IF NOT EXISTS purchases (
+   771→  id TEXT PRIMARY KEY,
+   772→  date TIMESTAMPTZ NOT NULL DEFAULT now(),
+   773→  material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+   774→  material_name TEXT NOT NULL,
+   775→  quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+   776→  unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+   777→  unit_name TEXT NOT NULL,
+   778→  base_factor_snapshot DOUBLE PRECISION NOT NULL DEFAULT 1,
+   779→  quantity_in_base DOUBLE PRECISION NOT NULL DEFAULT 0,
+   780→  unit_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+   781→  total_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+   782→  description TEXT,
+   783→  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+   784→  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   785→);
+   786→
+   787→-- Sales Table (المبيعات — بالدولار، مرتبطة بحساب)
+   788→-- payment_method: 'cash' (default) → adds totalPrice to USD vault
+   789→--                 'credit'          → deferred; no vault change (unpaid invoice)
+   790→CREATE TABLE IF NOT EXISTS sales (
+   791→  id TEXT PRIMARY KEY,
+   792→  date TIMESTAMPTZ NOT NULL DEFAULT now(),
+   793→  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+   794→  account_name TEXT NOT NULL,
+   795→  material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+   796→  material_name TEXT NOT NULL,
+   797→  quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+   798→  unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+   799→  unit_name TEXT NOT NULL,
+   800→  base_factor_snapshot DOUBLE PRECISION NOT NULL DEFAULT 1,
+   801→  quantity_in_base DOUBLE PRECISION NOT NULL DEFAULT 0,
+   802→  unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+   803→  total_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+   804→  payment_method TEXT NOT NULL DEFAULT 'cash',
+   805→  description TEXT,
+   806→  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+   807→  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+   808→);
+   809→
+   810→-- Indexes
+   811→CREATE INDEX IF NOT EXISTS idx_materials_name ON materials(name);
+   812→CREATE INDEX IF NOT EXISTS idx_materials_default_unit ON materials(default_unit_id);
+   813→CREATE INDEX IF NOT EXISTS idx_material_units_material_id ON material_units(material_id);
+   814→CREATE INDEX IF NOT EXISTS idx_material_units_unit_id ON material_units(unit_id);
+   815→CREATE INDEX IF NOT EXISTS idx_purchases_material_id ON purchases(material_id);
+   816→CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(date DESC);
+   817→CREATE INDEX IF NOT EXISTS idx_purchases_unit_id ON purchases(unit_id);
+   818→CREATE INDEX IF NOT EXISTS idx_sales_account_id ON sales(account_id);
+   819→CREATE INDEX IF NOT EXISTS idx_sales_material_id ON sales(material_id);
+   820→CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date DESC);
+   821→CREATE INDEX IF NOT EXISTS idx_sales_unit_id ON sales(unit_id);
+   822→CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
+   823→
+   824→-- Row Level Security (RLS)
+   825→ALTER TABLE units ENABLE ROW LEVEL SECURITY;
+   826→ALTER TABLE materials ENABLE ROW LEVEL SECURITY;
+   827→ALTER TABLE material_units ENABLE ROW LEVEL SECURITY;
+   828→ALTER TABLE purchases ENABLE ROW LEVEL SECURITY;
+   829→ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
+   830→
+   831→-- Drop existing policies (safe re-run)
+   832→DROP POLICY IF EXISTS "Allow all on units" ON units;
+   833→DROP POLICY IF EXISTS "Allow all on materials" ON materials;
+   834→DROP POLICY IF EXISTS "Allow all on material_units" ON material_units;
+   835→DROP POLICY IF EXISTS "Allow all on purchases" ON purchases;
+   836→DROP POLICY IF EXISTS "Allow all on sales" ON sales;
+   837→
+   838→-- Allow all operations (private app with anon key)
+   839→CREATE POLICY "Allow all on units" ON units FOR ALL USING (true) WITH CHECK (true);
+   840→CREATE POLICY "Allow all on materials" ON materials FOR ALL USING (true) WITH CHECK (true);
+   841→CREATE POLICY "Allow all on material_units" ON material_units FOR ALL USING (true) WITH CHECK (true);
+   842→CREATE POLICY "Allow all on purchases" ON purchases FOR ALL USING (true) WITH CHECK (true);
+   843→CREATE POLICY "Allow all on sales" ON sales FOR ALL USING (true) WITH CHECK (true);
+   844→
+   845→-- Enable Realtime
+   846→ALTER PUBLICATION supabase_realtime ADD TABLE units;
+   847→ALTER PUBLICATION supabase_realtime ADD TABLE materials;
+   848→ALTER PUBLICATION supabase_realtime ADD TABLE material_units;
+   849→ALTER PUBLICATION supabase_realtime ADD TABLE purchases;
+   850→ALTER PUBLICATION supabase_realtime ADD TABLE sales;
+   851→
+   852→-- Seed default units (if not exists)
+   853→INSERT INTO units (id, name) VALUES
+   854→  ('unit_piece', 'قطعة'),
+   855→  ('unit_kg', 'كيلو'),
+   856→  ('unit_gram', 'غرام'),
+   857→  ('unit_bag', 'كيس'),
+   858→  ('unit_carton', 'كرتون'),
+   859→  ('unit_ton', 'طن'),
+   860→  ('unit_liter', 'لتر'),
+   861→  ('unit_box', 'صندوق')
+   862→ON CONFLICT (id) DO NOTHING;
+   863→
+   864→-- Add payment_method column for existing installations
+   865→-- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
+   866→ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';`;
+   867→
+   868→  // Setup Purchases & Sales Database — checks if tables exist and creates them if missing
+   869→  const handleSetupPurchasesSales = async () => {
+   870→    setIsSettingUpPurchasesSales(true);
+   871→    setPurchasesSalesSetupResult(null);
+   872→    setSqlCopied(false);
+   873→    try {
+   874→      // Check if all 5 tables exist by querying each one
+   875→      const tableChecks = await Promise.all([
+   876→        supabase.from('units').select('id').limit(1),
+   877→        supabase.from('materials').select('id').limit(1),
+   878→        supabase.from('material_units').select('id').limit(1),
+   879→        supabase.from('purchases').select('id').limit(1),
+   880→        supabase.from('sales').select('id').limit(1),
+   881→      ]);
+   882→
+   883→      const tableNames = ['units', 'materials', 'material_units', 'purchases', 'sales'];
+   884→      const missingTables: string[] = [];
+   885→      tableChecks.forEach((res, idx) => {
+   886→        if (res.error) {
+   887→          const msg = (res.error.message || '').toLowerCase();
+   888→          if (msg.includes('does not exist') || msg.includes('could not find') || msg.includes('relation') || msg.includes('schema cache')) {
+   889→            missingTables.push(tableNames[idx]);
+   890→          }
+   891→        }
+   892→      });
+   893→
+   894→      if (missingTables.length === 0) {
+   895→        setPurchasesSalesSetupResult({
+   896→          success: true,
+   897→          message: 'تم إعداد نظام المشتريات والمبيعات بنجاح ✓ جميع الجداول موجودة (units, materials, material_units, purchases, sales).',
+   898→        });
+   899→        return;
+   900→      }
+   901→
+   902→      // Some tables are missing — try to create them with dbPassword
+   903→      if (dbPassword) {
+   904→        try {
+   905→          const response = await fetch('/api/execute-sql', {
+   906→            method: 'POST',
+   907→            headers: { 'Content-Type': 'application/json' },
+   908→            body: JSON.stringify({
+   909→              sql: PURCHASES_SALES_MIGRATION_SQL,
+   910→              dbPassword,
+   911→              userRole: currentRole,
+   912→            }),
+   913→          });
+   914→          const result = await response.json();
+   915→
+   916→          if (result.success) {
+   917→            setPurchasesSalesSetupResult({
+   918→              success: true,
+   919→              message: 'تم إعداد نظام المشتريات والمبيعات بنجاح ✓ تم إنشاء جميع الجداول (units, materials, material_units, purchases, sales) + الفهارس + RLS + الوحدات الافتراضية.',
+   920→            });
+   921→            return;
+   922→          } else if (result.error) {
+   923→            setPurchasesSalesSetupResult({
+   924→              success: false,
+   925→              message: result.error,
+   926→              sql: PURCHASES_SALES_MIGRATION_SQL,
+   927→            });
+   928→            return;
+   929→          }
+   930→        } catch (fetchError) {
+   931→          console.error('Execute SQL fetch error:', fetchError);
+   932→          setPurchasesSalesSetupResult({
+   933→            success: false,
+   934→            message: 'فشل الاتصال بالخادم لتنفيذ SQL. تأكد من اتصال الإنترنت.',
+   935→            sql: PURCHASES_SALES_MIGRATION_SQL,
+   936→          });
+   937→          return;
+   938→        }
+   939→      }
+   940→
+   941→      // No password provided — provide SQL for manual execution
+   942→      setPurchasesSalesSetupResult({
+   943→        success: false,
+   944→        message: `⚠️ الجداول التالية غير موجودة: ${missingTables.join(', ')}. أدخل كلمة مرور قاعدة البيانات أعلاه للإنشاء التلقائي، أو انسخ SQL التالي وشغّله يدوياً في Supabase SQL Editor:`,
+   945→        sql: PURCHASES_SALES_MIGRATION_SQL,
+   946→      });
+   947→    } catch (error) {
+   948→      console.error('Purchases & Sales setup error:', error);
+   949→      setPurchasesSalesSetupResult({
+   950→        success: false,
+   951→        message: 'خطأ في إعداد نظام المشتريات والمبيعات. حاول مرة أخرى.',
+   952→        sql: PURCHASES_SALES_MIGRATION_SQL,
+   953→      });
+   954→    } finally {
+   955→      setIsSettingUpPurchasesSales(false);
+   956→    }
+   957→  };
+   958→
+   959→  // Copy SQL to clipboard
+   960→  const handleCopySql = async (sql: string) => {
+   961→    try {
+   962→      await navigator.clipboard.writeText(sql);
+   963→      setSqlCopied(true);
+   964→      toast({ title: 'تم النسخ', description: 'تم نسخ SQL إلى الحافظة — الصقه في Supabase SQL Editor' });
+   965→      setTimeout(() => setSqlCopied(false), 3000);
+   966→    } catch {
+   967→      toast({ title: 'فشل النسخ', description: 'تعذر النسخ إلى الحافظة. حاول نسخ النص يدوياً.', variant: 'destructive' });
+   968→    }
+   969→  };
+   970→
+   971→  // ============================================
+   972→  // Backup System Handlers
+   973→  // ============================================
+   974→
+   975→  // Load backups from database
+   976→  const loadBackups = async () => {
+   977→    setIsLoadingBackups(true);
+   978→    try {
+   979→      const exists = await checkBackupsTableExists();
+   980→      setBackupsTableExists(exists);
+   981→      if (exists) {
+   982→        const data = await getBackups();
+   983→        setBackups(data);
+   984→      }
+   985→    } catch (error) {
+   986→      console.error('Error loading backups:', error);
+   987→    } finally {
+   988→      setIsLoadingBackups(false);
+   989→    }
+   990→  };
+   991→
+   992→  // Create a new backup in the database
+   993→  const handleCreateDbBackup = async () => {
+   994→    setIsCreatingDbBackup(true);
+   995→    try {
+   996→      const result = await createBackup('manual');
+   997→      toast({
+   998→        title: 'تم إنشاء النسخة الاحتياطية',
+   999→        description: `تم حفظ النسخة بنجاح (${formatFileSize(result.sizeBytes)})`,
+  1000→      });
+  1001→      await loadBackups(); // Refresh list
+  1002→    } catch (error) {
+  1003→      console.error('Error creating backup:', error);
+  1004→      toast({
+  1005→        title: 'خطأ',
+  1006→        description: 'فشل إنشاء النسخة الاحتياطية. تأكد من إعداد جدول النسخ الاحتياطية.',
+  1007→        variant: 'destructive',
+  1008→      });
+  1009→    } finally {
+  1010→      setIsCreatingDbBackup(false);
+  1011→    }
+  1012→  };
+  1013→
+  1014→  // Restore from a backup
+  1015→  const handleRestoreFromBackup = async (backupId: string) => {
+  1016→    setIsRestoring(backupId);
+  1017→    setShowRestoreConfirm(null);
+  1018→    try {
+  1019→      const result = await restoreBackup(backupId);
+  1020→      if (result.success) {
+  1021→        await refreshLocalData();
+  1022→        toast({
+  1023→          title: 'تم الاسترجاع',
+  1024→          description: 'تم استرجاع البيانات بنجاح من النسخة الاحتياطية',
+  1025→        });
+  1026→      } else {
+  1027→        toast({
+  1028→          title: 'خطأ',
+  1029→          description: result.message,
+  1030→          variant: 'destructive',
+  1031→        });
+  1032→      }
+  1033→    } catch (error) {
+  1034→      console.error('Error restoring backup:', error);
+  1035→      toast({
+  1036→        title: 'خطأ',
+  1037→        description: 'حدث خطأ أثناء استرجاع البيانات',
+  1038→        variant: 'destructive',
+  1039→      });
+  1040→    } finally {
+  1041→      setIsRestoring(null);
+  1042→    }
+  1043→  };
+  1044→
+  1045→  // Delete a backup
+  1046→  const handleDeleteBackup = async (backupId: string) => {
+  1047→    try {
+  1048→      const result = await deleteBackup(backupId);
+  1049→      if (result.success) {
+  1050→        setBackups(prev => prev.filter(b => b.id !== backupId));
+  1051→        toast({ title: 'تم الحذف', description: 'تم حذف النسخة الاحتياطية' });
+  1052→      }
+  1053→    } catch (error) {
+  1054→      console.error('Error deleting backup:', error);
+  1055→      toast({ title: 'خطأ', description: 'فشل حذف النسخة الاحتياطية', variant: 'destructive' });
+  1056→    }
+  1057→  };
+  1058→
+  1059→  // Download a backup as JSON file
+  1060→  const handleDownloadBackup = async (backupId: string) => {
+  1061→    try {
+  1062→      const result = await exportBackupAsJson(backupId);
+  1063→      if (!result.data) {
+  1064→        toast({ title: 'خطأ', description: 'فشل تصدير النسخة الاحتياطية', variant: 'destructive' });
+  1065→        return;
+  1066→      }
+  1067→      const blob = new Blob([result.data], { type: 'application/json' });
+  1068→      const url = URL.createObjectURL(blob);
+  1069→      const a = document.createElement('a');
+  1070→      a.href = url;
+  1071→      a.download = result.filename;
+  1072→      document.body.appendChild(a);
+  1073→      a.click();
+  1074→      document.body.removeChild(a);
+  1075→      URL.revokeObjectURL(url);
+  1076→      toast({ title: 'تم التحميل', description: 'تم تحميل النسخة الاحتياطية بنجاح' });
+  1077→    } catch (error) {
+  1078→      console.error('Error downloading backup:', error);
+  1079→      toast({ title: 'خطأ', description: 'فشل تحميل النسخة الاحتياطية', variant: 'destructive' });
+  1080→    }
+  1081→  };
+  1082→
+  1083→  // Setup backups table — uses /api/execute-sql with dbPassword for auto-creation
+  1084→  const handleSetupBackups = async () => {
+  1085→    setIsSettingUpBackups(true);
+  1086→    setBackupSetupResult(null);
+  1087→    try {
+  1088→      // First check if the table already exists
+  1089→      const exists = await checkBackupsTableExists();
+  1090→      if (exists) {
+  1091→        setBackupSetupResult({ success: true, message: 'جدول النسخ الاحتياطي موجود بالفعل ✓' });
+  1092→        setBackupsTableExists(true);
+  1093→        await loadBackups();
+  1094→        return;
+  1095→      }
+  1096→
+  1097→      // SQL to create the backups table
+  1098→      const sql = `-- إنشاء جدول النسخ الاحتياطي
+  1099→CREATE TABLE IF NOT EXISTS backups (
+  1100→  id TEXT PRIMARY KEY,
+  1101→  reason TEXT NOT NULL DEFAULT 'manual',
+  1102→  data JSONB NOT NULL,
+  1103→  record_counts JSONB DEFAULT '{}',
+  1104→  size_bytes BIGINT DEFAULT 0,
+  1105→  created_at TIMESTAMPTZ DEFAULT now()
+  1106→);
+  1107→
+  1108→-- إضافة فهارس
+  1109→CREATE INDEX IF NOT EXISTS idx_backups_created_at ON backups(created_at DESC);
+  1110→CREATE INDEX IF NOT EXISTS idx_backups_reason ON backups(reason);
+  1111→
+  1112→-- تفعيل RLS والسماح بجميع العمليات
+  1113→ALTER TABLE backups ENABLE ROW LEVEL SECURITY;
+  1114→DROP POLICY IF EXISTS "Allow all on backups" ON backups;
+  1115→DROP POLICY IF EXISTS "Allow all operations on backups" ON backups;
+  1116→CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK (true);`;
+  1117→
+  1118→      // If dbPassword is provided, try to create the table automatically
+  1119→      if (dbPassword) {
+  1120→        try {
+  1121→          const response = await fetch('/api/execute-sql', {
+  1122→            method: 'POST',
+  1123→            headers: { 'Content-Type': 'application/json' },
+  1124→            body: JSON.stringify({ sql, dbPassword, userRole: currentRole }),
+  1125→          });
+  1126→          const result = await response.json();
+  1127→
+  1128→          if (result.success) {
+  1129→            setBackupSetupResult({ success: true, message: 'تم إنشاء جدول النسخ الاحتياطي بنجاح ✓' });
+  1130→            setBackupsTableExists(true);
+  1131→            await loadBackups();
+  1132→            return;
+  1133→          } else if (result.error) {
+  1134→            setBackupSetupResult({ success: false, message: result.error });
+  1135→            return;
+  1136→          }
+  1137→        } catch (fetchError) {
+  1138→          console.error('Execute SQL fetch error:', fetchError);
+  1139→          setBackupSetupResult({ success: false, message: 'فشل الاتصال بالخادم لتنفيذ SQL. تأكد من اتصال الإنترنت.' });
+  1140→          return;
+  1141→        }
+  1142→      }
+  1143→
+  1144→      // No password provided — provide SQL for manual execution
+  1145→      setBackupSetupResult({
+  1146→        success: false,
+  1147→        message: `⚠️ أدخل كلمة مرور قاعدة البيانات أعلاه للإنشاء التلقائي، أو قم بتشغيل SQL التالي يدوياً في Supabase SQL Editor:\n\n${sql}`,
+  1148→      });
+  1149→    } catch (error) {
+  1150→      console.error('Backup setup error:', error);
+  1151→      setBackupSetupResult({
+  1152→        success: false,
+  1153→        message: 'خطأ في إعداد نظام النسخ الاحتياطية. حاول مرة أخرى.'
+  1154→      });
+  1155→    } finally {
+  1156→      setIsSettingUpBackups(false);
+  1157→    }
+  1158→  };
+  1159→
+  1160→  // Format file size helper
+  1161→  const formatFileSize = (bytes: number): string => {
+  1162→    if (bytes < 1024) return `${bytes} B`;
+  1163→    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  1164→    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  1165→  };
+  1166→
+  1167→  // Format backup reason in Arabic
+  1168→  const formatReason = (reason: string): { label: string; color: string } => {
+  1169→    switch (reason) {
+  1170→      case 'manual': return { label: 'يدوي', color: 'text-blue-600 dark:text-blue-400' };
+  1171→      case 'pre_delete': return { label: 'قبل الحذف', color: 'text-red-600 dark:text-red-400' };
+  1172→      case 'pre_archive': return { label: 'قبل الأرشفة', color: 'text-amber-600 dark:text-amber-400' };
+  1173→      case 'auto': return { label: 'تلقائي', color: 'text-emerald-600 dark:text-emerald-400' };
+  1174→      default: return { label: reason, color: 'text-muted-foreground' };
+  1175→    }
+  1176→  };
+  1177→
+  1178→  // ============================================
+  1179→  // User Management Handlers (Admin Only)
+  1180→  // ============================================
+  1181→  const loadUsers = async () => {
+  1182→    setIsLoadingUsers(true);
+  1183→    try {
+  1184→      const users = await getUsers();
+  1185→      setUsersList(users.map(u => ({ id: u.id, username: u.username, name: u.name, role: u.role, createdAt: u.createdAt })));
+  1186→    } catch (error) {
+  1187→      console.error('Error loading users:', error);
+  1188→    } finally {
+  1189→      setIsLoadingUsers(false);
+  1190→    }
+  1191→  };
+  1192→
+  1193→  const handleCreateUser = async () => {
+  1194→    if (!newUserUsername.trim() || !newUserPassword.trim()) {
+  1195→      toast({ title: 'خطأ', description: 'يرجى إدخال اسم المستخدم وكلمة المرور', variant: 'destructive' });
+  1196→      return;
+  1197→    }
+  1198→    setIsCreatingUser(true);
+  1199→    try {
+  1200→      const result = await createUser({ username: newUserUsername, password: newUserPassword, name: newUserName || undefined, role: newUserRole });
+  1201→      if (result.success) {
+  1202→        toast({ title: 'تم بنجاح', description: result.message });
+  1203→        setNewUserUsername('');
+  1204→        setNewUserPassword('');
+  1205→        setNewUserName('');
+  1206→        setNewUserRole('user');
+  1207→        setShowAddUserDialog(false);
+  1208→        await loadUsers();
+  1209→      } else {
+  1210→        toast({ title: 'خطأ', description: result.message, variant: 'destructive' });
+  1211→      }
+  1212→    } catch (error) {
+  1213→      toast({ title: 'خطأ', description: 'فشل إنشاء المستخدم', variant: 'destructive' });
+  1214→    } finally {
+  1215→      setIsCreatingUser(false);
+  1216→    }
+  1217→  };
+  1218→
+  1219→  const handleDeleteUser = async (userId: string) => {
+  1220→    try {
+  1221→      const result = await deleteUserFromDb(userId);
+  1222→      if (result.success) {
+  1223→        toast({ title: 'تم بنجاح', description: result.message });
+  1224→        setShowDeleteUserDialog(null);
+  1225→        await loadUsers();
+  1226→      } else {
+  1227→        toast({ title: 'خطأ', description: result.message, variant: 'destructive' });
+  1228→      }
+  1229→    } catch (error) {
+  1230→      toast({ title: 'خطأ', description: 'فشل حذف المستخدم', variant: 'destructive' });
+  1231→    }
+  1232→  };
+  1233→
+  1234→  // Format date in Arabic
+  1235→  const formatDate = (date: Date): string => {
+  1236→    try {
+  1237→      return new Intl.DateTimeFormat('ar-SA', {
+  1238→        year: 'numeric',
+  1239→        month: 'short',
+  1240→        day: 'numeric',
+  1241→        hour: '2-digit',
+  1242→        minute: '2-digit',
+  1243→      }).format(date);
+  1244→    } catch {
+  1245→      return date.toLocaleDateString();
+  1246→    }
+  1247→  };
+  1248→
+  1249→  const sections = [
+  1250→    {
+  1251→      id: 'account',
+  1252→      title: 'الحساب',
+  1253→      icon: User,
+  1254→      content: (
+  1255→        <div className="space-y-4">
+  1256→          {/* Change Username */}
+  1257→          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
+  1258→            <div className="flex items-center gap-3 mb-3">
+  1259→              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+  1260→                <User className="w-5 h-5 text-blue-500" />
+  1261→              </div>
+  1262→              <div>
+  1263→                <p className="font-medium">تغيير اسم المستخدم</p>
+  1264→                <p className="text-xs text-muted-foreground">اسم المستخدم الحالي: {currentUsername || localStorage.getItem('currentUsername') || 'admin'}</p>
+  1265→              </div>
+  1266→            </div>
+  1267→            <div className="flex gap-2">
+  1268→              <Input
+  1269→                placeholder="اسم المستخدم الجديد"
+  1270→                value={newUsername}
+  1271→                onChange={(e) => setNewUsername(e.target.value)}
+  1272→                className="flex-1"
+  1273→              />
+  1274→              <Button
+  1275→                onClick={handleChangeUsername}
+  1276→                disabled={isChangingUsername || !newUsername.trim()}
+  1277→                className="bg-blue-500 hover:bg-blue-600"
+  1278→              >
+  1279→                {isChangingUsername ? '...' : 'حفظ'}
+  1280→              </Button>
+  1281→            </div>
+  1282→          </div>
+  1283→
+  1284→          {/* Change Password */}
+  1285→          <div className="p-4 rounded-xl bg-muted/50 space-y-3">
+  1286→            <div className="flex items-center gap-3 mb-3">
+  1287→              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+  1288→                <Lock className="w-5 h-5 text-emerald-500" />
+  1289→              </div>
+  1290→              <div>
+  1291→                <p className="font-medium">تغيير كلمة المرور</p>
+  1292→                <p className="text-xs text-muted-foreground">يُنصح باستخدام كلمة مرور قوية</p>
+  1293→              </div>
+  1294→            </div>
+  1295→            
+  1296→            {/* Old Password */}
+  1297→            <div className="relative">
+  1298→              <Input
+  1299→                type={showOldPassword ? 'text' : 'password'}
+  1300→                placeholder="كلمة المرور الحالية"
+  1301→                value={oldPassword}
+  1302→                onChange={(e) => setOldPassword(e.target.value)}
+  1303→                className="pr-10"
+  1304→              />
+  1305→              <button
+  1306→                type="button"
+  1307→                onClick={() => setShowOldPassword(!showOldPassword)}
+  1308→                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+  1309→              >
+  1310→                {showOldPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+  1311→              </button>
+  1312→            </div>
+  1313→
+  1314→            {/* New Password */}
+  1315→            <div className="relative">
+  1316→              <Input
+  1317→                type={showNewPassword ? 'text' : 'password'}
+  1318→                placeholder="كلمة المرور الجديدة"
+  1319→                value={newPassword}
+  1320→                onChange={(e) => setNewPassword(e.target.value)}
+  1321→                className="pr-10"
+  1322→              />
+  1323→              <button
+  1324→                type="button"
+  1325→                onClick={() => setShowNewPassword(!showNewPassword)}
+  1326→                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+  1327→              >
+  1328→                {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+  1329→              </button>
+  1330→            </div>
+  1331→
+  1332→            {/* Confirm Password */}
+  1333→            <div className="relative">
+  1334→              <Input
+  1335→                type={showConfirmPassword ? 'text' : 'password'}
+  1336→                placeholder="تأكيد كلمة المرور الجديدة"
+  1337→                value={confirmPassword}
+  1338→                onChange={(e) => setConfirmPassword(e.target.value)}
+  1339→                className="pr-10"
+  1340→              />
+  1341→              <button
+  1342→                type="button"
+  1343→                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+  1344→                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+  1345→              >
+  1346→                {showConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+  1347→              </button>
+  1348→            </div>
+  1349→
+  1350→            <Button
+  1351→              onClick={handleChangePassword}
+  1352→              disabled={isChangingPassword || !oldPassword || !newPassword || !confirmPassword}
+  1353→              className="w-full bg-emerald-500 hover:bg-emerald-600"
+  1354→            >
+  1355→              {isChangingPassword ? 'جاري الحفظ...' : 'تغيير كلمة المرور'}
+  1356→            </Button>
+  1357→          </div>
+  1358→        </div>
+  1359→      ),
+  1360→    },
+  1361→    {
+  1362→      id: 'appearance',
+  1363→      title: 'المظهر',
+  1364→      icon: Palette,
+  1365→      content: (
+  1366→        <div className="space-y-4">
+  1367→          {/* Theme Toggle */}
+  1368→          <div className="flex items-center justify-between p-4 rounded-xl bg-muted/50">
+  1369→            <div className="flex items-center gap-3">
+  1370→              {theme === 'dark' ? (
+  1371→                <Moon className="w-5 h-5 text-blue-400" />
+  1372→              ) : (
+  1373→                <Sun className="w-5 h-5 text-amber-500" />
+  1374→              )}
+  1375→              <div>
+  1376→                <p className="font-medium">الوضع الليلي</p>
+  1377→                <p className="text-xs text-muted-foreground">
+  1378→                  {theme === 'dark' ? 'مفعل' : 'غير مفعل'}
+  1379→                </p>
+  1380→              </div>
+  1381→            </div>
+  1382→            <Switch
+  1383→              checked={theme === 'dark'}
+  1384→              onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
+  1385→            />
+  1386→          </div>
+  1387→
+  1388→          {/* Color Theme */}
+  1389→          <div className="p-4 rounded-xl bg-muted/50">
+  1390→            <p className="font-medium mb-3">ألوان التمييز</p>
+  1391→            <div className="grid grid-cols-3 gap-3">
+  1392→              <div className="text-center">
+  1393→                <div className="w-10 h-10 rounded-full bg-emerald-500 mx-auto mb-1" />
+  1394→                <p className="text-xs">لنا</p>
+  1395→              </div>
+  1396→              <div className="text-center">
+  1397→                <div className="w-10 h-10 rounded-full bg-red-500 mx-auto mb-1" />
+  1398→                <p className="text-xs">علينا</p>
+  1399→              </div>
+  1400→              <div className="text-center">
+  1401→                <div className="w-10 h-10 rounded-full bg-amber-500 mx-auto mb-1" />
+  1402→                <p className="text-xs">ديون</p>
+  1403→              </div>
+  1404→            </div>
+  1405→          </div>
+  1406→        </div>
+  1407→      ),
+  1408→    },
+  1409→    {
+  1410→      id: 'currencies',
+  1411→      title: 'إدارة العملات',
+  1412→      icon: Currency,
+  1413→      content: (
+  1414→        <div className="space-y-4">
+  1415→          {/* Currency List */}
+  1416→          <div className="space-y-2 max-h-60 overflow-y-auto">
+  1417→            {currencies.map((currency) => (
+  1418→              <motion.div
+  1419→                key={currency.id}
+  1420→                initial={{ opacity: 0, y: 10 }}
+  1421→                animate={{ opacity: 1, y: 0 }}
+  1422→                className="flex items-center justify-between p-3 rounded-xl bg-muted/50"
+  1423→              >
+  1424→                <div className="flex items-center gap-3">
+  1425→                  <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center font-bold">
+  1426→                    {currency.symbol}
+  1427→                  </div>
+  1428→                  <div>
+  1429→                    <p className="font-medium">{currency.name}</p>
+  1430→                    <p className="text-xs text-muted-foreground">{currency.code}</p>
+  1431→                  </div>
+  1432→                  {currency.isDefault && (
+  1433→                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+  1434→                      افتراضي
+  1435→                    </span>
+  1436→                  )}
+  1437→                </div>
+  1438→                {!currency.isDefault && (
+  1439→                  <Button
+  1440→                    variant="ghost"
+  1441→                    size="icon"
+  1442→                    onClick={() => setDeleteCurrency(currency)}
+  1443→                    className="text-red-500 hover:text-red-600"
+  1444→                  >
+  1445→                    <Trash2 className="w-4 h-4" />
+  1446→                  </Button>
+  1447→                )}
+  1448→              </motion.div>
+  1449→            ))}
+  1450→          </div>
+  1451→
+  1452→          {/* Add Currency Button */}
+  1453→          <Dialog open={isAddCurrencyOpen} onOpenChange={setIsAddCurrencyOpen}>
+  1454→            <DialogTrigger asChild>
+  1455→              <Button variant="outline" className="w-full gap-2">
+  1456→                <Plus className="w-4 h-4" />
+  1457→                إضافة عملة جديدة
+  1458→              </Button>
+  1459→            </DialogTrigger>
+  1460→            <DialogContent className="max-w-sm">
+  1461→              <DialogHeader>
+  1462→                <DialogTitle>إضافة عملة جديدة</DialogTitle>
+  1463→              </DialogHeader>
+  1464→              <div className="space-y-4 mt-4">
+  1465→                <div className="space-y-2">
+  1466→                  <Label>رمز العملة</Label>
+  1467→                  <Input
+  1468→                    placeholder="USD"
+  1469→                    value={newCurrency.code}
+  1470→                    onChange={(e) => setNewCurrency({ ...newCurrency, code: e.target.value.toUpperCase() })}
+  1471→                    maxLength={3}
+  1472→                  />
+  1473→                </div>
+  1474→                <div className="space-y-2">
+  1475→                  <Label>اسم العملة</Label>
+  1476→                  <Input
+  1477→                    placeholder="دولار أمريكي"
+  1478→                    value={newCurrency.name}
+  1479→                    onChange={(e) => setNewCurrency({ ...newCurrency, name: e.target.value })}
+  1480→                  />
+  1481→                </div>
+  1482→                <div className="space-y-2">
+  1483→                  <Label>الرمز</Label>
+  1484→                  <Input
+  1485→                    placeholder="$"
+  1486→                    value={newCurrency.symbol}
+  1487→                    onChange={(e) => setNewCurrency({ ...newCurrency, symbol: e.target.value })}
+  1488→                    maxLength={3}
+  1489→                  />
+  1490→                </div>
+  1491→                <Button
+  1492→                  onClick={handleAddCurrency}
+  1493→                  disabled={!newCurrency.code || !newCurrency.name || !newCurrency.symbol}
+  1494→                  className="w-full"
+  1495→                >
+  1496→                  إضافة العملة
+  1497→                </Button>
+  1498→              </div>
+  1499→            </DialogContent>
+  1500→          </Dialog>
+  1501→        </div>
+  1502→      ),
+  1503→    },
+  1504→    {
+  1505→      id: 'backup',
+  1506→      title: 'النسخ الاحتياطي',
+  1507→      icon: FileJson,
+  1508→      content: (
+  1509→        <div className="space-y-4">
+  1510→          {!isAdmin && (
+  1511→            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+  1512→              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+  1513→              <div>
+  1514→                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+  1515→                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إدارة النسخ الاحتياطية.</p>
+  1516→              </div>
+  1517→            </div>
+  1518→          )}
+  1519→          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
+  1520→          {/* Export Section */}
+  1521→          <div className="p-4 rounded-xl bg-muted/50">
+  1522→            <div className="flex items-center gap-3 mb-3">
+  1523→              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+  1524→                <Download className="w-5 h-5 text-emerald-500" />
+  1525→              </div>
+  1526→              <div>
+  1527→                <p className="font-medium">تصدير البيانات</p>
+  1528→                <p className="text-xs text-muted-foreground">إنشاء نسخة احتياطية</p>
+  1529→              </div>
+  1530→            </div>
+  1531→            <Button
+  1532→              onClick={handleExportData}
+  1533→              disabled={isExporting}
+  1534→              className="w-full bg-emerald-500 hover:bg-emerald-600"
+  1535→            >
+  1536→              {isExporting ? 'جاري التصدير...' : 'تصدير النسخة الاحتياطية'}
+  1537→            </Button>
+  1538→          </div>
+  1539→
+  1540→          {/* Import Section */}
+  1541→          <div className="p-4 rounded-xl bg-muted/50">
+  1542→            <div className="flex items-center gap-3 mb-3">
+  1543→              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+  1544→                <Upload className="w-5 h-5 text-blue-500" />
+  1545→              </div>
+  1546→              <div>
+  1547→                <p className="font-medium">استيراد البيانات</p>
+  1548→                <p className="text-xs text-muted-foreground">استعادة نسخة احتياطية</p>
+  1549→              </div>
+  1550→            </div>
+  1551→            <Button
+  1552→              onClick={() => setShowImportDialog(true)}
+  1553→              variant="outline"
+  1554→              className="w-full"
+  1555→            >
+  1556→              استيراد نسخة احتياطية
+  1557→            </Button>
+  1558→          </div>
+  1559→
+  1560→          {/* Clear Data */}
+  1561→          <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800">
+  1562→            <div className="flex items-center gap-3 mb-3">
+  1563→              <div className="w-10 h-10 rounded-lg bg-red-500/10 flex items-center justify-center">
+  1564→                <Trash2 className="w-5 h-5 text-red-500" />
+  1565→              </div>
+  1566→              <div>
+  1567→                <p className="font-medium text-red-600 dark:text-red-400">مسح البيانات</p>
+  1568→                <p className="text-xs text-muted-foreground">حذف الحركات والديون وعمليات الصرافة</p>
+  1569→              </div>
+  1570→            </div>
+  1571→            <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 mb-3">
+  1572→              <div className="flex items-center gap-2">
+  1573→                <Shield className="w-4 h-4 text-emerald-500" />
+  1574→                <p className="text-xs text-emerald-700 dark:text-emerald-400">يتم إنشاء نسخة احتياطية تلقائيًا قبل الحذف</p>
+  1575→              </div>
+  1576→            </div>
+  1577→            <Button
+  1578→              onClick={handleOpenClearDialog}
+  1579→              variant="destructive"
+  1580→              className="w-full"
+  1581→            >
+  1582→              مسح جميع البيانات
+  1583→            </Button>
+  1584→          </div>
+  1585→          </div>
+  1586→        </div>
+  1587→      ),
+  1588→    },
+  1589→    {
+  1590→      id: 'backup-management',
+  1591→      title: 'إدارة النسخ المحفوظة',
+  1592→      icon: HardDrive,
+  1593→      content: (
+  1594→        <div className="space-y-4">
+  1595→          {!isAdmin && (
+  1596→            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+  1597→              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+  1598→              <div>
+  1599→                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+  1600→                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إدارة النسخ المحفوظة.</p>
+  1601→              </div>
+  1602→            </div>
+  1603→          )}
+  1604→          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
+  1605→          {/* Setup Backups Table */}
+  1606→          {!backupsTableExists && (
+  1607→            <div className="p-4 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+  1608→              <div className="flex items-center gap-3 mb-3">
+  1609→                <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+  1610→                  <HardDrive className="w-5 h-5 text-amber-500" />
+  1611→                </div>
+  1612→                <div>
+  1613→                  <p className="font-medium">إعداد جدول النسخ الاحتياطي</p>
+  1614→                  <p className="text-xs text-muted-foreground">يجب إنشاء جدول backups في قاعدة البيانات</p>
+  1615→                </div>
+  1616→              </div>
+  1617→              <div className="relative mb-3">
+  1618→                <Input
+  1619→                  type={showDbPassword ? 'text' : 'password'}
+  1620→                  placeholder="كلمة مرور قاعدة البيانات (Supabase)"
+  1621→                  value={dbPassword}
+  1622→                  onChange={(e) => setDbPassword(e.target.value)}
+  1623→                  className="pr-10"
+  1624→                />
+  1625→                <button
+  1626→                  type="button"
+  1627→                  onClick={() => setShowDbPassword(!showDbPassword)}
+  1628→                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+  1629→                >
+  1630→                  {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+  1631→                </button>
+  1632→              </div>
+  1633→              <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase لإنشاء الجدول تلقائياً (تُحفظ محلياً)</p>
+  1634→              <Button
+  1635→                onClick={handleSetupBackups}
+  1636→                disabled={isSettingUpBackups}
+  1637→                variant="outline"
+  1638→                className="w-full"
+  1639→              >
+  1640→                {isSettingUpBackups ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+  1641→                {isSettingUpBackups ? 'جاري الإعداد...' : dbPassword ? 'إعداد جدول النسخ الاحتياطي' : 'محاولة الإعداد (أدخل كلمة المرور للإنشاء التلقائي)'}
+  1642→              </Button>
+  1643→              {backupSetupResult && (
+  1644→                <p className={cn('text-xs mt-2', backupSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
+  1645→                  {backupSetupResult.message}
+  1646→                </p>
+  1647→              )}
+  1648→            </div>
+  1649→          )}
+  1650→
+  1651→          {/* Create Backup */}
+  1652→          {backupsTableExists && (
+  1653→            <div className="p-4 rounded-xl bg-muted/50">
+  1654→              <div className="flex items-center gap-3 mb-3">
+  1655→                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+  1656→                  <Shield className="w-5 h-5 text-emerald-500" />
+  1657→                </div>
+  1658→                <div>
+  1659→                  <p className="font-medium">إنشاء نسخة احتياطية</p>
+  1660→                  <p className="text-xs text-muted-foreground">حفظ نسخة من جميع البيانات في قاعدة البيانات</p>
+  1661→                </div>
+  1662→              </div>
+  1663→              <Button
+  1664→                onClick={handleCreateDbBackup}
+  1665→                disabled={isCreatingDbBackup}
+  1666→                className="w-full bg-emerald-500 hover:bg-emerald-600"
+  1667→              >
+  1668→                {isCreatingDbBackup ? (
+  1669→                  <>
+  1670→                    <Loader2 className="w-4 h-4 animate-spin ml-2" />
+  1671→                    جاري إنشاء النسخة...
+  1672→                  </>
+  1673→                ) : (
+  1674→                  <>
+  1675→                    <Shield className="w-4 h-4 ml-2" />
+  1676→                    إنشاء نسخة احتياطية جديدة
+  1677→                  </>
+  1678→                )}
+  1679→              </Button>
+  1680→            </div>
+  1681→          )}
+  1682→
+  1683→          {/* Stored Backups List */}
+  1684→          {backupsTableExists && (
+  1685→            <div className="p-4 rounded-xl bg-muted/50">
+  1686→              <div className="flex items-center justify-between mb-3">
+  1687→                <div className="flex items-center gap-3">
+  1688→                  <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+  1689→                    <Clock className="w-5 h-5 text-blue-500" />
+  1690→                  </div>
+  1691→                  <div>
+  1692→                    <p className="font-medium">النسخ المحفوظة</p>
+  1693→                    <p className="text-xs text-muted-foreground">
+  1694→                      {backups.length > 0 ? `آخر ${backups.length} نسخ (الحد الأقصى 5)` : 'لا توجد نسخ محفوظة'}
+  1695→                    </p>
+  1696→                  </div>
+  1697→                </div>
+  1698→                <Button
+  1699→                  variant="ghost"
+  1700→                  size="sm"
+  1701→                  onClick={loadBackups}
+  1702→                  disabled={isLoadingBackups}
+  1703→                >
+  1704→                  {isLoadingBackups ? <Loader2 className="w-4 h-4 animate-spin" /> : 'تحديث'}
+  1705→                </Button>
+  1706→              </div>
+  1707→
+  1708→              {isLoadingBackups && backups.length === 0 ? (
+  1709→                <div className="text-center py-4">
+  1710→                  <Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" />
+  1711→                  <p className="text-xs text-muted-foreground mt-2">جاري تحميل النسخ...</p>
+  1712→                </div>
+  1713→              ) : backups.length === 0 ? (
+  1714→                <div className="text-center py-4">
+  1715→                  <p className="text-sm text-muted-foreground">لا توجد نسخ احتياطية محفوظة</p>
+  1716→                  <p className="text-xs text-muted-foreground mt-1">أنشئ نسخة جديدة أو احذف بيانات لإنشاء نسخة تلقائية</p>
+  1717→                </div>
+  1718→              ) : (
+  1719→                <div className="space-y-2 max-h-72 overflow-y-auto">
+  1720→                  {backups.map((backup) => {
+  1721→                    const reasonInfo = formatReason(backup.reason);
+  1722→                    return (
+  1723→                      <div
+  1724→                        key={backup.id}
+  1725→                        className="p-3 rounded-xl bg-background border border-border/50 space-y-2"
+  1726→                      >
+  1727→                        {/* Backup Header */}
+  1728→                        <div className="flex items-center justify-between">
+  1729→                          <div className="flex items-center gap-2">
+  1730→                            <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full bg-muted', reasonInfo.color)}>
+  1731→                              {reasonInfo.label}
+  1732→                            </span>
+  1733→                            <span className="text-xs text-muted-foreground">{formatFileSize(backup.sizeBytes)}</span>
+  1734→                          </div>
+  1735→                          <span className="text-xs text-muted-foreground">{formatDate(backup.createdAt)}</span>
+  1736→                        </div>
+  1737→
+  1738→                        {/* Record Counts */}
+  1739→                        <div className="flex flex-wrap gap-1">
+  1740→                          {backup.recordCounts.transactions > 0 && (
+  1741→                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground">
+  1742→                              {backup.recordCounts.transactions} حركة
+  1743→                            </span>
+  1744→                          )}
+  1745→                          {backup.recordCounts.debts > 0 && (
+  1746→                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground">
+  1747→                              {backup.recordCounts.debts} دين
+  1748→                            </span>
+  1749→                          )}
+  1750→                          {backup.recordCounts.currencyExchanges > 0 && (
+  1751→                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted/80 text-muted-foreground">
+  1752→                              {backup.recordCounts.currencyExchanges} صرافة
+  1753→                            </span>
+  1754→                          )}
+  1755→                        </div>
+  1756→
+  1757→                        {/* Actions */}
+  1758→                        <div className="flex gap-2">
+  1759→                          <Button
+  1760→                            variant="outline"
+  1761→                            size="sm"
+  1762→                            className="flex-1 text-xs h-7"
+  1763→                            onClick={() => handleDownloadBackup(backup.id)}
+  1764→                          >
+  1765→                            <Download className="w-3 h-3 ml-1" />
+  1766→                            تحميل
+  1767→                          </Button>
+  1768→                          <Button
+  1769→                            variant="outline"
+  1770→                            size="sm"
+  1771→                            className="flex-1 text-xs h-7 text-amber-600 hover:text-amber-700 border-amber-200 dark:border-amber-800 hover:bg-amber-50 dark:hover:bg-amber-950/20"
+  1772→                            onClick={() => setShowRestoreConfirm(backup.id)}
+  1773→                            disabled={isRestoring === backup.id}
+  1774→                          >
+  1775→                            {isRestoring === backup.id ? (
+  1776→                              <Loader2 className="w-3 h-3 animate-spin ml-1" />
+  1777→                            ) : (
+  1778→                              <RotateCcw className="w-3 h-3 ml-1" />
+  1779→                            )}
+  1780→                            استرجاع
+  1781→                          </Button>
+  1782→                          <Button
+  1783→                            variant="ghost"
+  1784→                            size="sm"
+  1785→                            className="text-xs h-7 text-red-500 hover:text-red-600"
+  1786→                            onClick={() => handleDeleteBackup(backup.id)}
+  1787→                          >
+  1788→                            <Trash2 className="w-3 h-3" />
+  1789→                          </Button>
+  1790→                        </div>
+  1791→                      </div>
+  1792→                    );
+  1793→                  })}
+  1794→                </div>
+  1795→              )}
+  1796→            </div>
+  1797→          )}
+  1798→          </div>
+  1799→        </div>
+  1800→      ),
+  1801→    },
+  1802→    {
+  1803→      id: 'data',
+  1804→      title: 'إحصائيات البيانات',
+  1805→      icon: Database,
+  1806→      content: (
+  1807→        <div className="space-y-4">
+  1808→          <div className="grid grid-cols-2 gap-3">
+  1809→            <div className="text-center p-4 rounded-xl bg-muted/50">
+  1810→              <p className="text-2xl font-bold text-primary">{stats.currencies}</p>
+  1811→              <p className="text-xs text-muted-foreground">عملة</p>
+  1812→            </div>
+  1813→            <div className="text-center p-4 rounded-xl bg-muted/50">
+  1814→              <p className="text-2xl font-bold text-primary">{stats.vaults}</p>
+  1815→              <p className="text-xs text-muted-foreground">صندوق</p>
+  1816→            </div>
+  1817→            <div className="text-center p-4 rounded-xl bg-muted/50">
+  1818→              <p className="text-2xl font-bold text-primary">{stats.accounts}</p>
+  1819→              <p className="text-xs text-muted-foreground">حساب</p>
+  1820→            </div>
+  1821→            <div className="text-center p-4 rounded-xl bg-muted/50">
+  1822→              <p className="text-2xl font-bold text-primary">{stats.transactions}</p>
+  1823→              <p className="text-xs text-muted-foreground">حركة</p>
+  1824→            </div>
+  1825→            <div className="text-center p-4 rounded-xl bg-muted/50 col-span-2">
+  1826→              <p className="text-2xl font-bold text-primary">{stats.debts}</p>
+  1827→              <p className="text-xs text-muted-foreground">دين</p>
+  1828→            </div>
+  1829→          </div>
+  1830→        </div>
+  1831→      ),
+  1832→    },
+  1833→    {
+  1834→      id: 'archive',
+  1835→      title: 'الأرشفة والأداء',
+  1836→      icon: Archive,
+  1837→      content: (
+  1838→        <div className="space-y-4">
+  1839→          {!isAdmin && (
+  1840→            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+  1841→              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+  1842→              <div>
+  1843→                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+  1844→                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إدارة الأرشفة.</p>
+  1845→              </div>
+  1846→            </div>
+  1847→          )}
+  1848→          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
+  1849→          {/* Auto Archive */}
+  1850→          <div className="p-4 rounded-xl bg-muted/50">
+  1851→            <div className="flex items-center gap-3 mb-3">
+  1852→              <div className="w-10 h-10 rounded-lg bg-amber-500/10 flex items-center justify-center">
+  1853→                <Archive className="w-5 h-5 text-amber-500" />
+  1854→              </div>
+  1855→              <div>
+  1856→                <p className="font-medium">أرشفة تلقائية</p>
+  1857→                <p className="text-xs text-muted-foreground">نقل الحركات القديمة إلى الأرشيف لتحسين الأداء</p>
+  1858→              </div>
+  1859→            </div>
+  1860→            <div className="space-y-2">
+  1861→              <div className="flex gap-2">
+  1862→                <Select value={String(archiveMonths)} onValueChange={(v) => setArchiveMonths(Number(v))}>
+  1863→                  <SelectTrigger className="flex-1">
+  1864→                    <SelectValue />
+  1865→                  </SelectTrigger>
+  1866→                  <SelectContent>
+  1867→                    <SelectItem value="3">3 أشهر</SelectItem>
+  1868→                    <SelectItem value="6">6 أشهر</SelectItem>
+  1869→                    <SelectItem value="12">سنة</SelectItem>
+  1870→                    <SelectItem value="24">سنتين</SelectItem>
+  1871→                  </SelectContent>
+  1872→                </Select>
+  1873→                <Button
+  1874→                  onClick={handleAutoArchive}
+  1875→                  disabled={isArchiving}
+  1876→                  className="bg-amber-500 hover:bg-amber-600"
+  1877→                >
+  1878→                  {isArchiving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'أرشفة'}
+  1879→                </Button>
+  1880→              </div>
+  1881→              <p className="text-xs text-muted-foreground">
+  1882→                سيتم أرشفة الحركات الأقدم من {archiveMonths} شهر (الديون المؤرشفة يجب أن تكون مدفوعة)
+  1883→              </p>
+  1884→            </div>
+  1885→          </div>
+  1886→
+  1887→          {/* Setup Database */}
+  1888→          <div className="p-4 rounded-xl bg-muted/50">
+  1889→            <div className="flex items-center gap-3 mb-3">
+  1890→              <div className="w-10 h-10 rounded-lg bg-blue-500/10 flex items-center justify-center">
+  1891→                <Database className="w-5 h-5 text-blue-500" />
+  1892→              </div>
+  1893→              <div>
+  1894→                <p className="font-medium">إعداد قاعدة البيانات</p>
+  1895→                <p className="text-xs text-muted-foreground">إضافة عمود الأرشفة والفهارس لتحسين الأداء</p>
+  1896→              </div>
+  1897→            </div>
+  1898→            <div className="relative mb-3">
+  1899→              <Input
+  1900→                type={showDbPassword ? 'text' : 'password'}
+  1901→                placeholder="كلمة مرور قاعدة البيانات (اختياري - للإنشاء التلقائي)"
+  1902→                value={dbPassword}
+  1903→                onChange={(e) => setDbPassword(e.target.value)}
+  1904→                className="pr-10"
+  1905→              />
+  1906→              <button
+  1907→                type="button"
+  1908→                onClick={() => setShowDbPassword(!showDbPassword)}
+  1909→                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+  1910→              >
+  1911→                {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+  1912→              </button>
+  1913→            </div>
+  1914→            <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase للإنشاء التلقائي، أو اتركها فارغة للتحقق فقط</p>
+  1915→            <Button
+  1916→              onClick={handleSetupArchive}
+  1917→              disabled={isSettingUp}
+  1918→              variant="outline"
+  1919→              className="w-full"
+  1920→            >
+  1921→              {isSettingUp ? <Loader2 className="w-4 h-4 animate-spin ml-2" /> : null}
+  1922→              {isSettingUp ? 'جاري الإعداد...' : 'إعداد نظام الأرشفة'}
+  1923→            </Button>
+  1924→            {archiveSetupResult && (
+  1925→              <p className={cn('text-xs mt-2', archiveSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
+  1926→                {archiveSetupResult.message}
+  1927→              </p>
+  1928→            )}
+  1929→          </div>
+  1930→          </div>
+  1931→        </div>
+  1932→      ),
+  1933→    },
+  1934→    {
+  1935→      id: 'purchases-sales-setup',
+  1936→      title: 'إعداد المشتريات والمبيعات',
+  1937→      icon: ShoppingCart,
+  1938→      content: (
+  1939→        <div className="space-y-4">
+  1940→          {!isAdmin && (
+  1941→            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+  1942→              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+  1943→              <div>
+  1944→                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+  1945→                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إعداد قاعدة بيانات المشتريات والمبيعات.</p>
+  1946→              </div>
+  1947→            </div>
+  1948→          )}
+  1949→          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
+  1950→          {/* Setup Database */}
+  1951→          <div className="p-4 rounded-xl bg-muted/50">
+  1952→            <div className="flex items-center gap-3 mb-3">
+  1953→              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+  1954→                <ShoppingCart className="w-5 h-5 text-emerald-500" />
+  1955→              </div>
+  1956→              <div>
+  1957→                <p className="font-medium">إعداد قاعدة بيانات المشتريات والمبيعات</p>
+  1958→                <p className="text-xs text-muted-foreground">إنشاء جداول: units, materials, material_units, purchases, sales + الفهارس + RLS + الوحدات الافتراضية</p>
+  1959→              </div>
+  1960→            </div>
+  1961→
+  1962→            {/* Status info card */}
+  1963→            <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 mb-3">
+  1964→              <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">
+  1965→                هذا القسم ينشئ جداول المشتريات والمبيعات تلقائياً. أدخل كلمة مرور قاعدة البيانات من Supabase للإنشاء التلقائي، أو اتركها فارغة للحصول على SQL جاهز للنسخ.
+  1966→              </p>
+  1967→            </div>
+  1968→
+  1969→            <div className="relative mb-3">
+  1970→              <Input
+  1971→                type={showDbPassword ? 'text' : 'password'}
+  1972→                placeholder="كلمة مرور قاعدة البيانات (اختياري - للإنشاء التلقائي)"
+  1973→                value={dbPassword}
+  1974→                onChange={(e) => setDbPassword(e.target.value)}
+  1975→                className="pr-10"
+  1976→              />
+  1977→              <button
+  1978→                type="button"
+  1979→                onClick={() => setShowDbPassword(!showDbPassword)}
+  1980→                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+  1981→              >
+  1982→                {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+  1983→              </button>
+  1984→            </div>
+  1985→            <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase للإنشاء التلقائي، أو اتركها فارغة للحصول على SQL جاهز للنسخ</p>
+  1986→            <Button
+  1987→              onClick={handleSetupPurchasesSales}
+  1988→              disabled={isSettingUpPurchasesSales}
+  1989→              variant="outline"
+  1990→              className="w-full gap-2"
+  1991→            >
+  1992→              {isSettingUpPurchasesSales ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+  1993→              {isSettingUpPurchasesSales ? 'جاري الإعداد...' : 'إعداد قاعدة بيانات المشتريات والمبيعات'}
+  1994→            </Button>
+  1995→
+  1996→            {purchasesSalesSetupResult && (
+  1997→              <div className="mt-3 space-y-2">
+  1998→                <p className={cn('text-xs', purchasesSalesSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
+  1999→                  {purchasesSalesSetupResult.message}
+  2000→                </p>
+
+[showing lines 1-2000 of 2707; use offset=2001 with limit to continue reading]

@@ -1,0 +1,746 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useState, useMemo, useEffect, Fragment } from 'react';
+     4→     4→import { useAppStore } from '@/store/useAppStore';
+     5→     5→import { useSupabaseData } from '@/hooks/useSupabaseData';
+     6→     6→import { getSalesByAccount } from '@/lib/supabaseDb';
+     7→     7→import type { Sale } from '@/lib/supabaseDb';
+     8→     8→import { cn } from '@/lib/utils';
+     9→     9→import {
+    10→    10→  Dialog,
+    11→    11→  DialogContent,
+    12→    12→  DialogHeader,
+    13→    13→  DialogTitle,
+    14→    14→} from '@/components/ui/dialog';
+    15→    15→import {
+    16→    16→  Select,
+    17→    17→  SelectContent,
+    18→    18→  SelectItem,
+    19→    19→  SelectTrigger,
+    20→    20→  SelectValue,
+    21→    21→} from '@/components/ui/select';
+    22→    22→import { Button } from '@/components/ui/button';
+    23→    23→import { Input } from '@/components/ui/input';
+    24→    24→import { Label } from '@/components/ui/label';
+    25→    25→import {
+    26→    26→  BookOpen, Printer, FileText, X, TrendingUp
+    27→    27→} from 'lucide-react';
+    28→    28→import { format } from 'date-fns';
+    29→    29→import { formatNumber } from '@/lib/format';
+    30→    30→import type { Transaction, Debt, DebtPayment, Currency } from '@/lib/supabaseDb';
+    31→    31→
+    32→    32→export function AccountStatementModal() {
+    33→    33→  const { 
+    34→    34→    isAccountStatementOpen, 
+    35→    35→    closeAccountStatement, 
+    36→    36→    accounts, 
+    37→    37→    currencies, 
+    38→    38→    selectedAccountForStatement 
+    39→    39→  } = useAppStore();
+    40→    40→  
+    41→    41→  const { transactions, debts, debtPayments } = useSupabaseData();
+    42→    42→  
+    43→    43→  // Determine initial selected account using useMemo
+    44→    44→  const defaultAccountId = useMemo(() => {
+    45→    45→    if (selectedAccountForStatement) {
+    46→    46→      return selectedAccountForStatement.id;
+    47→    47→    }
+    48→    48→    return accounts.length > 0 ? accounts[0].id : '';
+    49→    49→  }, [selectedAccountForStatement, accounts]);
+    50→    50→  
+    51→    51→  const [selectedAccountId, setSelectedAccountId] = useState<string>(defaultAccountId);
+    52→    52→
+    53→    53→  // 🔸 Sales linked to the selected account (all in USD per spec)
+    54→    54→  const [accountSales, setAccountSales] = useState<Sale[]>([]);
+    55→    55→  const [isLoadingSales, setIsLoadingSales] = useState(false);
+    56→    56→
+    57→    57→  // Fetch sales whenever the selected account changes
+    58→    58→  useEffect(() => {
+    59→    59→    if (!selectedAccountId) {
+    60→    60→      return;
+    61→    61→    }
+    62→    62→    let cancelled = false;
+    63→    63→    getSalesByAccount(selectedAccountId)
+    64→    64→      .then((sales) => {
+    65→    65→        if (cancelled) return;
+    66→    66→        setAccountSales(sales);
+    67→    67→      })
+    68→    68→      .catch((err) => {
+    69→    69→        console.error('Error fetching sales for account:', err);
+    70→    70→        if (!cancelled) setAccountSales([]);
+    71→    71→      })
+    72→    72→      .finally(() => {
+    73→    73→        if (!cancelled) setIsLoadingSales(false);
+    74→    74→      });
+    75→    75→    return () => { cancelled = true; };
+    76→    76→  }, [selectedAccountId]);
+    77→    77→  
+    78→    78→  // Date filter state
+    79→    79→  const [dateFrom, setDateFrom] = useState('');
+    80→    80→  const [dateTo, setDateTo] = useState('');
+    81→    81→  const hasDateFilter = dateFrom || dateTo;
+    82→    82→  
+    83→    83→  // Clear date filter
+    84→    84→  const clearDateFilter = () => {
+    85→    85→    setDateFrom('');
+    86→    86→    setDateTo('');
+    87→    87→  };
+    88→    88→  
+    89→    89→  // Filter data for selected account
+    90→    90→  const accountTransactions = useMemo(() => {
+    91→    91→    if (!selectedAccountId) return [];
+    92→    92→    let filtered = transactions.filter(t => t.accountId === selectedAccountId && t.isComplete !== false);
+    93→    93→    
+    94→    94→    // Apply date filter
+    95→    95→    if (hasDateFilter) {
+    96→    96→      filtered = filtered.filter(t => {
+    97→    97→        const txDate = new Date(t.date).toISOString().split('T')[0];
+    98→    98→        const matchesDateFrom = !dateFrom || txDate >= dateFrom;
+    99→    99→        const matchesDateTo = !dateTo || txDate <= dateTo;
+   100→   100→        return matchesDateFrom && matchesDateTo;
+   101→   101→      });
+   102→   102→    }
+   103→   103→    
+   104→   104→    return filtered;
+   105→   105→  }, [transactions, selectedAccountId, dateFrom, dateTo, hasDateFilter]);
+   106→   106→  
+   107→   107→  const accountDebts = useMemo(() => {
+   108→   108→    if (!selectedAccountId) return [];
+   109→   109→    return debts.filter(d => d.accountId === selectedAccountId);
+   110→   110→  }, [debts, selectedAccountId]);
+   111→   111→  
+   112→   112→  // Group transactions by currency
+   113→   113→  const transactionsByCurrency = useMemo(() => {
+   114→   114→    const grouped: Record<string, Transaction[]> = {};
+   115→   115→    
+   116→   116→    for (const tx of accountTransactions) {
+   117→   117→      const currencyId = tx.currencyId;
+   118→   118→      if (!grouped[currencyId]) {
+   119→   119→        grouped[currencyId] = [];
+   120→   120→      }
+   121→   121→      grouped[currencyId].push(tx);
+   122→   122→    }
+   123→   123→    
+   124→   124→    // Sort each group by date
+   125→   125→    for (const currencyId in grouped) {
+   126→   126→      grouped[currencyId].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+   127→   127→    }
+   128→   128→    
+   129→   129→    return grouped;
+   130→   130→  }, [accountTransactions]);
+   131→   131→  
+   132→   132→  // 🔸 Date-filtered sales for this account (all sales are USD per spec)
+   133→   133→  const filteredAccountSales = useMemo(() => {
+   134→   134→    if (!hasDateFilter) return accountSales;
+   135→   135→    return accountSales.filter(s => {
+   136→   136→      const sDate = new Date(s.date).toISOString().split('T')[0];
+   137→   137→      const matchesDateFrom = !dateFrom || sDate >= dateFrom;
+   138→   138→      const matchesDateTo = !dateTo || sDate <= dateTo;
+   139→   139→      return matchesDateFrom && matchesDateTo;
+   140→   140→    });
+   141→   141→  }, [accountSales, dateFrom, dateTo, hasDateFilter]);
+   142→   142→
+   143→   143→  // 🔸 Unified statement item type: a transaction OR a sale, with runningBalance
+   144→   144→  type StatementItem = {
+   145→   145→    id: string;
+   146→   146→    date: Date;
+   147→   147→    type: 'INCOME' | 'EXPENSE';
+   148→   148→    amount: number;
+   149→   149→    finalBalance: number;
+   150→   150→    description?: string | null;
+   151→   151→    runningBalance: number;
+   152→   152→    isSale: boolean;
+   153→   153→    paymentMethod?: 'cash' | 'credit';
+   154→   154→    materialName?: string;
+   155→   155→    quantity?: number;
+   156→   156→    unitName?: string;
+   157→   157→  };
+   158→   158→
+   159→   159→  // Calculate totals per currency — for USD, merge sales into the running balance
+   160→   160→  const currencyStats = useMemo(() => {
+   161→   161→    const stats: Record<string, {
+   162→   162→      currency: Currency | undefined;
+   163→   163→      totalIncome: number;
+   164→   164→      totalExpense: number;
+   165→   165→      netBalance: number;
+   166→   166→      items: StatementItem[];
+   167→   167→    }> = {};
+   168→   168→
+   169→   169→    // Find USD currency id (sales are always USD)
+   170→   170→    const usdCurrency = currencies.find(c => c.code === 'USD');
+   171→   171→
+   172→   172→    for (const currencyId in transactionsByCurrency) {
+   173→   173→      const currency = currencies.find(c => c.id === currencyId);
+   174→   174→      const txs = transactionsByCurrency[currencyId];
+   175→   175→
+   176→   176→      // Build items: convert transactions to StatementItem
+   177→   177→      let items: StatementItem[] = txs.map(tx => ({
+   178→   178→        id: tx.id,
+   179→   179→        date: new Date(tx.date),
+   180→   180→        type: tx.type,
+   181→   181→        amount: tx.amount,
+   182→   182→        finalBalance: tx.finalBalance,
+   183→   183→        description: tx.description,
+   184→   184→        runningBalance: 0,
+   185→   185→        isSale: false,
+   186→   186→      }));
+   187→   187→
+   188→   188→      // 🔸 If this is the USD currency, merge sales (treat each sale as INCOME)
+   189→   189→      if (usdCurrency && currencyId === usdCurrency.id && filteredAccountSales.length > 0) {
+   190→   190→        const saleItems: StatementItem[] = filteredAccountSales.map(s => ({
+   191→   191→          id: s.id,
+   192→   192→          date: new Date(s.date),
+   193→   193→          type: 'INCOME' as const, // Sale = customer owes us → لنا
+   194→   194→          amount: s.totalPrice,
+   195→   195→          finalBalance: s.totalPrice,
+   196→   196→          description: s.description || `بيع ${s.materialName}`,
+   197→   197→          runningBalance: 0,
+   198→   198→          isSale: true,
+   199→   199→          paymentMethod: s.paymentMethod,
+   200→   200→          materialName: s.materialName,
+   201→   201→          quantity: s.quantity,
+   202→   202→          unitName: s.unitName,
+   203→   203→        }));
+   204→   204→        items = items.concat(saleItems);
+   205→   205→      }
+   206→   206→
+   207→   207→      // Sort by date ascending (then by createdAt for stable order — use id as tiebreaker)
+   208→   208→      items.sort((a, b) => {
+   209→   209→        const diff = a.date.getTime() - b.date.getTime();
+   210→   210→        if (diff !== 0) return diff;
+   211→   211→        return a.id.localeCompare(b.id);
+   212→   212→      });
+   213→   213→
+   214→   214→      // Compute running balance
+   215→   215→      let totalIncome = 0;
+   216→   216→      let totalExpense = 0;
+   217→   217→      let runningBalance = 0;
+   218→   218→      items = items.map(it => {
+   219→   219→        if (it.type === 'INCOME') {
+   220→   220→          totalIncome += it.finalBalance;
+   221→   221→          runningBalance += it.finalBalance;
+   222→   222→        } else {
+   223→   223→          totalExpense += it.finalBalance;
+   224→   224→          runningBalance -= it.finalBalance;
+   225→   225→        }
+   226→   226→        return { ...it, runningBalance };
+   227→   227→      });
+   228→   228→
+   229→   229→      stats[currencyId] = {
+   230→   230→        currency,
+   231→   231→        totalIncome,
+   232→   232→        totalExpense,
+   233→   233→        netBalance: runningBalance,
+   234→   234→        items,
+   235→   235→      };
+   236→   236→    }
+   237→   237→
+   238→   238→    // 🔸 Edge case: account has sales but NO USD transactions — still show USD section
+   239→   239→    if (usdCurrency && !stats[usdCurrency.id] && filteredAccountSales.length > 0) {
+   240→   240→      let items: StatementItem[] = filteredAccountSales.map(s => ({
+   241→   241→        id: s.id,
+   242→   242→        date: new Date(s.date),
+   243→   243→        type: 'INCOME' as const,
+   244→   244→        amount: s.totalPrice,
+   245→   245→        finalBalance: s.totalPrice,
+   246→   246→        description: s.description || `بيع ${s.materialName}`,
+   247→   247→        runningBalance: 0,
+   248→   248→        isSale: true,
+   249→   249→        paymentMethod: s.paymentMethod,
+   250→   250→        materialName: s.materialName,
+   251→   251→        quantity: s.quantity,
+   252→   252→        unitName: s.unitName,
+   253→   253→      }));
+   254→   254→      items.sort((a, b) => a.date.getTime() - b.date.getTime());
+   255→   255→      let totalIncome = 0;
+   256→   256→      let runningBalance = 0;
+   257→   257→      items = items.map(it => {
+   258→   258→        totalIncome += it.finalBalance;
+   259→   259→        runningBalance += it.finalBalance;
+   260→   260→        return { ...it, runningBalance };
+   261→   261→      });
+   262→   262→      stats[usdCurrency.id] = {
+   263→   263→        currency: usdCurrency,
+   264→   264→        totalIncome,
+   265→   265→        totalExpense: 0,
+   266→   266→        netBalance: runningBalance,
+   267→   267→        items,
+   268→   268→      };
+   269→   269→    }
+   270→   270→
+   271→   271→    return stats;
+   272→   272→  }, [transactionsByCurrency, currencies, filteredAccountSales]);
+   273→   273→  
+   274→   274→  // Group debts by currency
+   275→   275→  const debtsByCurrency = useMemo(() => {
+   276→   276→    const grouped: Record<string, Debt[]> = {};
+   277→   277→    
+   278→   278→    for (const debt of accountDebts) {
+   279→   279→      const currencyId = debt.currencyId;
+   280→   280→      if (!grouped[currencyId]) {
+   281→   281→        grouped[currencyId] = [];
+   282→   282→      }
+   283→   283→      grouped[currencyId].push(debt);
+   284→   284→    }
+   285→   285→    
+   286→   286→    // Sort each group by date
+   287→   287→    for (const currencyId in grouped) {
+   288→   288→      grouped[currencyId].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+   289→   289→    }
+   290→   290→    
+   291→   291→    return grouped;
+   292→   292→  }, [accountDebts]);
+   293→   293→  
+   294→   294→  // Calculate debt totals per currency with payments
+   295→   295→  const debtStats = useMemo(() => {
+   296→   296→    const stats: Record<string, {
+   297→   297→      currency: Currency | undefined;
+   298→   298→      totalDebt: number;
+   299→   299→      paidDebt: number;
+   300→   300→      unpaidDebt: number;
+   301→   301→      debts: Debt[];
+   302→   302→      // إضافة بيانات الدفعات
+   303→   303→      paymentsByDebt: Record<string, DebtPayment[]>;
+   304→   304→      // حساب الرصيد المتبقي لكل دين
+   305→   305→      remainingByDebt: Record<string, number>;
+   306→   306→    }> = {};
+   307→   307→
+   308→   308→    for (const currencyId in debtsByCurrency) {
+   309→   309→      const currency = currencies.find(c => c.id === currencyId);
+   310→   310→      const currencyDebts = debtsByCurrency[currencyId];
+   311→   311→
+   312→   312→      // حساب الدفعات لكل دين
+   313→   313→      const paymentsByDebt: Record<string, DebtPayment[]> = {};
+   314→   314→      const remainingByDebt: Record<string, number> = {};
+   315→   315→
+   316→   316→      let totalDebt = 0;
+   317→   317→      let totalPaid = 0;
+   318→   318→
+   319→   319→      for (const debt of currencyDebts) {
+   320→   320→        // جلب الدفعات المرتبطة بهذا الدين
+   321→   321→        const debtPaymentsList = debtPayments.filter(p => p.debtId === debt.id);
+   322→   322→        paymentsByDebt[debt.id] = debtPaymentsList;
+   323→   323→
+   324→   324→        // حساب إجمالي المدفوع لهذا الدين
+   325→   325→        const paidAmount = debtPaymentsList.reduce((sum, p) => sum + p.amount, 0);
+   326→   326→        const remaining = Math.max(0, debt.finalBalance - paidAmount);
+   327→   327→
+   328→   328→        remainingByDebt[debt.id] = remaining;
+   329→   329→        totalDebt += debt.finalBalance;
+   330→   330→        totalPaid += paidAmount;
+   331→   331→      }
+   332→   332→
+   333→   333→      stats[currencyId] = {
+   334→   334→        currency,
+   335→   335→        totalDebt,
+   336→   336→        paidDebt: totalPaid,
+   337→   337→        unpaidDebt: totalDebt - totalPaid,
+   338→   338→        debts: currencyDebts,
+   339→   339→        paymentsByDebt,
+   340→   340→        remainingByDebt,
+   341→   341→      };
+   342→   342→    }
+   343→   343→
+   344→   344→    return stats;
+   345→   345→  }, [debtsByCurrency, currencies, debtPayments]);
+   346→   346→  
+   347→   347→  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+   348→   348→  
+   349→   349→  const handlePrint = () => {
+   350→   350→    const printWindow = window.open('', '_blank');
+   351→   351→    if (!printWindow) return;
+   352→   352→    
+   353→   353→    printWindow.document.write(`
+   354→   354→      <!DOCTYPE html>
+   355→   355→      <html dir="rtl" lang="ar">
+   356→   356→      <head>
+   357→   357→        <meta charset="UTF-8">
+   358→   358→        <title>دفتر الأستاذ - ${selectedAccount?.name || ''}</title>
+   359→   359→        <style>
+   360→   360→          * { margin: 0; padding: 0; box-sizing: border-box; }
+   361→   361→          body { 
+   362→   362→            font-family: 'Segoe UI', Tahoma, Arial, sans-serif; 
+   363→   363→            padding: 20px;
+   364→   364→            direction: rtl;
+   365→   365→            background: white;
+   366→   366→          }
+   367→   367→          .header {
+   368→   368→            text-align: center;
+   369→   369→            border-bottom: 2px solid #333;
+   370→   370→            padding-bottom: 8px;
+   371→   371→            margin-bottom: 10px;
+   372→   372→          }
+   373→   373→          .header h1 { font-size: 20px; margin-bottom: 2px; }
+   374→   374→          .header p { color: #666; font-size: 12px; }
+   375→   375→          
+   376→   376→          .currency-section {
+   377→   377→            margin-bottom: 15px;
+   378→   378→          }
+   379→   379→          .currency-title {
+   380→   380→            background: #f5f5f5;
+   381→   381→            padding: 10px 15px;
+   382→   382→            border-radius: 8px;
+   383→   383→            margin-bottom: 10px;
+   384→   384→            display: flex;
+   385→   385→            justify-content: space-between;
+   386→   386→            align-items: center;
+   387→   387→          }
+   388→   388→          .currency-title h3 { font-size: 16px; }
+   389→   389→          .currency-title .net { font-weight: bold; }
+   390→   390→          
+   391→   391→          .summary-grid {
+   392→   392→            display: grid;
+   393→   393→            grid-template-columns: repeat(3, 1fr);
+   394→   394→            gap: 10px;
+   395→   395→            margin-bottom: 15px;
+   396→   396→          }
+   397→   397→          .summary-card {
+   398→   398→            border: 1px solid #ddd;
+   399→   399→            border-radius: 8px;
+   400→   400→            padding: 10px;
+   401→   401→            text-align: center;
+   402→   402→          }
+   403→   403→          .summary-card .label { font-size: 12px; color: #666; }
+   404→   404→          .summary-card .value { font-size: 16px; font-weight: bold; margin-top: 5px; }
+   405→   405→          .income { color: #16a34a; }
+   406→   406→          .expense { color: #dc2626; }
+   407→   407→          .debt { color: #d97706; }
+   408→   408→          
+   409→   409→          table {
+   410→   410→            width: 100%;
+   411→   411→            border-collapse: collapse;
+   412→   412→          }
+   413→   413→          th, td {
+   414→   414→            border: 1px solid #ddd;
+   415→   415→            padding: 8px 10px;
+   416→   416→            text-align: right;
+   417→   417→          }
+   418→   418→          th {
+   419→   419→            background: #f5f5f5;
+   420→   420→            font-weight: bold;
+   421→   421→            font-size: 12px;
+   422→   422→          }
+   423→   423→          td { font-size: 12px; }
+   424→   424→          .income-row { background: #f0fdf4; }
+   425→   425→          .expense-row { background: #fef2f2; }
+   426→   426→          .debt-row { background: #fffbeb; }
+   427→   427→          .sale-row { background: #f0f9ff; }
+   428→   428→          .sale-credit-row { background: #fffbeb; }
+   429→   429→          .badge {
+   430→   430→            display: inline-block;
+   431→   431→            padding: 1px 6px;
+   432→   432→            border-radius: 4px;
+   433→   433→            font-size: 10px;
+   434→   434→            font-weight: 600;
+   435→   435→            margin-inline-start: 4px;
+   436→   436→          }
+   437→   437→          .badge-cash { background: #d1fae5; color: #065f46; }
+   438→   438→          .badge-credit { background: #fef3c7; color: #92400e; }
+   439→   439→          
+   440→   440→          .debt-section {
+   441→   441→            margin-top: 15px;
+   442→   442→          }
+   443→   443→          
+   444→   444→          .footer {
+   445→   445→            margin-top: 15px;
+   446→   446→            padding-top: 10px;
+   447→   447→            border-top: 1px solid #ddd;
+   448→   448→            text-align: center;
+   449→   449→            color: #666;
+   450→   450→            font-size: 12px;
+   451→   451→          }
+   452→   452→          
+   453→   453→          @media print {
+   454→   454→            body { padding: 10px; margin: 0; }
+   455→   455→            .currency-section { page-break-inside: auto; }
+   456→   456→            .debt-section { page-break-inside: auto; }
+   457→   457→            table { page-break-inside: auto; }
+   458→   458→            tr { page-break-inside: avoid; }
+   459→   459→            thead { display: table-header-group; }
+   460→   460→            tfoot { display: table-footer-group; }
+   461→   461→            .header { page-break-after: avoid; page-break-inside: avoid; }
+   462→   462→            .summary-grid { page-break-inside: avoid; page-break-after: avoid; }
+   463→   463→            .currency-title { page-break-after: avoid; }
+   464→   464→            .footer { page-break-before: avoid; }
+   465→   465→          }
+   466→   466→        </style>
+   467→   467→      </head>
+   468→   468→      <body>
+   469→   469→        <div class="header">
+   470→   470→          <h1>دفتر الأستاذ</h1>
+   471→   471→          <p>الحساب: ${selectedAccount?.name || ''}</p>
+   472→   472→          ${hasDateFilter ? `
+   473→   473→            <p style="background: #f0f9ff; padding: 8px 15px; border-radius: 8px; margin: 10px 0; display: inline-block;">
+   474→   474→              📅 الفترة: ${dateFrom ? 'من ' + dateFrom : ''} ${dateTo ? 'إلى ' + dateTo : ''}
+   475→   475→            </p>
+   476→   476→          ` : ''}
+   477→   477→          <p>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-SA')}</p>
+   478→   478→        </div>
+   479→   479→        
+   480→   480→        ${Object.entries(currencyStats).map(([currencyId, stat]) => `
+   481→   481→          <div class="currency-section">
+   482→   482→            <div class="currency-title">
+   483→   483→              <h3>${stat.currency?.name || ''} (${stat.currency?.symbol || ''})</h3>
+   484→   484→              <span class="net ${stat.netBalance >= 0 ? 'income' : 'expense'}">
+   485→   485→                الصافي: ${formatNumber(stat.netBalance)} ${stat.currency?.symbol || ''}
+   486→   486→              </span>
+   487→   487→            </div>
+   488→   488→            
+   489→   489→            <div class="summary-grid">
+   490→   490→              <div class="summary-card">
+   491→   491→                <div class="label">لنا</div>
+   492→   492→                <div class="value income">${formatNumber(stat.totalIncome)}</div>
+   493→   493→              </div>
+   494→   494→              <div class="summary-card">
+   495→   495→                <div class="label">علينا</div>
+   496→   496→                <div class="value expense">${formatNumber(stat.totalExpense)}</div>
+   497→   497→              </div>
+   498→   498→              <div class="summary-card">
+   499→   499→                <div class="label">الرصيد</div>
+   500→   500→                <div class="value ${stat.netBalance >= 0 ? 'income' : 'expense'}">${formatNumber(stat.netBalance)}</div>
+   501→   501→              </div>
+   502→   502→            </div>
+   503→   503→            
+   504→   504→            ${stat.items.length > 0 ? `
+   505→   505→              <table>
+   506→   506→                <thead>
+   507→   507→                  <tr>
+   508→   508→                    <th>التاريخ</th>
+   509→   509→                    <th>النوع</th>
+   510→   510→                    <th>المبلغ</th>
+   511→   511→                    <th>الرصيد التراكمي</th>
+   512→   512→                    <th>البيان</th>
+   513→   513→                  </tr>
+   514→   514→                </thead>
+   515→   515→                <tbody>
+   516→   516→                  ${stat.items.map(t => {
+   517→   517→                    const rowClass = t.isSale
+   518→   518→                      ? (t.paymentMethod === 'credit' ? 'sale-credit-row' : 'sale-row')
+   519→   519→                      : (t.type === 'INCOME' ? 'income-row' : 'expense-row');
+   520→   520→                    const typeLabel = t.isSale
+   521→   521→                      ? (t.paymentMethod === 'credit'
+   522→   522→                          ? '🛒 بيع <span class="badge badge-credit">آجل</span>'
+   523→   523→                          : '🛒 بيع <span class="badge badge-cash">كاش</span>')
+   524→   524→                      : (t.type === 'INCOME' ? 'لنا' : 'علينا');
+   525→   525→                    const descLabel = t.isSale && t.materialName
+   526→   526→                      ? `بيع ${t.materialName} (${formatNumber(t.quantity || 0)} ${t.unitName || ''})${t.paymentMethod === 'credit' ? ' — فاتورة غير مسددة' : ''}`
+   527→   527→                      : (t.description || '-');
+   528→   528→                    return `
+   529→   529→                    <tr class="${rowClass}">
+   530→   530→                      <td>${format(new Date(t.date), 'dd/MM/yyyy')}</td>
+   531→   531→                      <td>${typeLabel}</td>
+   532→   532→                      <td class="${t.type === 'INCOME' ? 'income' : 'expense'}">
+   533→   533→                        ${t.type === 'INCOME' ? '+' : '-'}${formatNumber(t.finalBalance)}
+   534→   534→                      </td>
+   535→   535→                      <td>${formatNumber(t.runningBalance)}</td>
+   536→   536→                      <td>${descLabel}</td>
+   537→   537→                    </tr>
+   538→   538→                  `;
+   539→   539→                  }).join('')}
+   540→   540→                </tbody>
+   541→   541→              </table>
+   542→   542→            ` : '<p style="text-align: center; color: #999;">لا توجد حركات</p>'}
+   543→   543→          </div>
+   544→   544→        `).join('')}
+   545→   545→        
+   546→   546→        ${Object.keys(debtStats).length > 0 ? `
+   547→   547→          <div class="debt-section">
+   548→   548→            <h2 style="margin-bottom: 15px; padding: 10px; background: #fffbeb; border-radius: 8px;">
+   549→   549→              الديون
+   550→   550→            </h2>
+   551→   551→            
+   552→   552→            ${Object.entries(debtStats).map(([currencyId, stat]) => {
+   553→   553→              const paymentsByDebt = stat.paymentsByDebt || {};
+   554→   554→              const remainingByDebt = stat.remainingByDebt || {};
+   555→   555→              
+   556→   556→              return `
+   557→   557→              <div class="currency-section">
+   558→   558→                <div class="currency-title" style="background: #fffbeb;">
+   559→   559→                  <h3>${stat.currency?.name || ''} (${stat.currency?.symbol || ''})</h3>
+   560→   560→                  <span class="debt">
+   561→   561→                    المتبقي: ${formatNumber(stat.unpaidDebt)} ${stat.currency?.symbol || ''}
+   562→   562→                  </span>
+   563→   563→                </div>
+   564→   564→                
+   565→   565→                <div class="summary-grid">
+   566→   566→                  <div class="summary-card">
+   567→   567→                    <div class="label">إجمالي الديون</div>
+   568→   568→                    <div class="value debt">${formatNumber(stat.totalDebt)}</div>
+   569→   569→                  </div>
+   570→   570→                  <div class="summary-card">
+   571→   571→                    <div class="label">مدفوع</div>
+   572→   572→                    <div class="value income">${formatNumber(stat.paidDebt)}</div>
+   573→   573→                  </div>
+   574→   574→                  <div class="summary-card">
+   575→   575→                    <div class="label">متبقي</div>
+   576→   576→                    <div class="value expense">${formatNumber(stat.unpaidDebt)}</div>
+   577→   577→                  </div>
+   578→   578→                </div>
+   579→   579→                
+   580→   580→                <table>
+   581→   581→                  <thead>
+   582→   582→                    <tr>
+   583→   583→                      <th>التاريخ</th>
+   584→   584→                      <th>المبلغ الأساسي</th>
+   585→   585→                      <th>العملة</th>
+   586→   586→                      <th>المبلغ</th>
+   587→   587→                      <th>متبقي</th>
+   588→   588→                      <th>البيان</th>
+   589→   589→                    </tr>
+   590→   590→                  </thead>
+   591→   591→                  <tbody>
+   592→   592→                    ${stat.debts.map(d => {
+   593→   593→                      const payments = paymentsByDebt[d.id] || [];
+   594→   594→                      const paid = payments.reduce((sum, p) => sum + p.amount, 0);
+   595→   595→                      const remaining = remainingByDebt[d.id] ?? d.finalBalance;
+   596→   596→                      const isReceivable = d.debtType === 'RECEIVABLE' || !d.debtType;
+   597→   597→                      const isFullyPaid = remaining <= 0;
+   598→   598→                      const debtCurrency = currencies.find(c => c.id === d.currencyId);
+   599→   599→                      
+   600→   600→                      return `
+   601→   601→                        <tr class="${isFullyPaid ? 'income-row' : 'debt-row'}">
+   602→   602→                          <td>${format(new Date(d.date), 'dd/MM/yyyy')}</td>
+   603→   603→                          <td>${formatNumber(d.amount)}</td>
+   604→   604→                          <td>${debtCurrency ? debtCurrency.code : ''}</td>
+   605→   605→                          <td class="debt">${formatNumber(d.finalBalance)}</td>
+   606→   606→                          <td class="${isFullyPaid ? 'income' : 'expense'}">${formatNumber(remaining)}</td>
+   607→   607→                          <td>${d.description || '-'}</td>
+   608→   608→                        </tr>
+   609→   609→                        ${payments.map(p => {
+   610→   610→                          const pCurrency = currencies.find(c => c.id === p.currencyId);
+   611→   611→                          return `
+   612→   612→                          <tr style="background: #f0fdfa; font-size: 11px;">
+   613→   613→                            <td style="padding-right: 30px;">└ ${format(new Date(p.date), 'dd/MM/yyyy')}</td>
+   614→   614→                            <td>${formatNumber(p.amount)}</td>
+   615→   615→                            <td>${pCurrency ? pCurrency.code : ''}</td>
+   616→   616→                            <td></td>
+   617→   617→                            <td></td>
+   618→   618→                            <td>${p.description || ''}</td>
+   619→   619→                          </tr>
+   620→   620→                        `;}).join('')}
+   621→   621→                      `;
+   622→   622→                    }).join('')}
+   623→   623→                  </tbody>
+   624→   624→                </table>
+   625→   625→              </div>
+   626→   626→            `;
+   627→   627→            }).join('')}
+   628→   628→          </div>
+   629→   629→        ` : ''}
+   630→   630→        
+   631→   631→        <div class="footer">
+   632→   632→          <p>نظام الصرافة والحوالات</p>
+   633→   633→        </div>
+   634→   634→      </body>
+   635→   635→      </html>
+   636→   636→    `);
+   637→   637→    
+   638→   638→    printWindow.document.close();
+   639→   639→    printWindow.print();
+   640→   640→  };
+   641→   641→  
+   642→   642→  const hasData = Object.keys(currencyStats).length > 0 || Object.keys(debtStats).length > 0;
+   643→   643→  
+   644→   644→  return (
+   645→   645→    <Dialog open={isAccountStatementOpen} onOpenChange={closeAccountStatement}>
+   646→   646→      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+   647→   647→        <DialogHeader>
+   648→   648→          <DialogTitle className="text-xl flex items-center gap-2">
+   649→   649→            <BookOpen className="w-5 h-5 text-primary" />
+   650→   650→            دفتر الأستاذ
+   651→   651→          </DialogTitle>
+   652→   652→        </DialogHeader>
+   653→   653→        
+   654→   654→        <div className="flex-1 flex flex-col">
+   655→   655→          {/* Filters Section */}
+   656→   656→          <div className="space-y-4">
+   657→   657→            {/* Account Selector */}
+   658→   658→            <div>
+   659→   659→              <label className="text-sm text-muted-foreground mb-2 block">الحساب</label>
+   660→   660→              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+   661→   661→                <SelectTrigger className="rounded-xl">
+   662→   662→                  <SelectValue placeholder="اختر الحساب" />
+   663→   663→                </SelectTrigger>
+   664→   664→                <SelectContent>
+   665→   665→                  {accounts.map((account) => (
+   666→   666→                    <SelectItem key={account.id} value={account.id}>
+   667→   667→                      {account.name}
+   668→   668→                    </SelectItem>
+   669→   669→                  ))}
+   670→   670→                </SelectContent>
+   671→   671→              </Select>
+   672→   672→            </div>
+   673→   673→            
+   674→   674→            {/* Date Filter Row */}
+   675→   675→            <div className="flex items-end gap-3">
+   676→   676→              <div className="flex-1">
+   677→   677→                <Label className="text-xs text-muted-foreground mb-1 block">من تاريخ</Label>
+   678→   678→                <Input
+   679→   679→                  type="date"
+   680→   680→                  value={dateFrom}
+   681→   681→                  onChange={(e) => setDateFrom(e.target.value)}
+   682→   682→                  className="text-sm rounded-xl"
+   683→   683→                />
+   684→   684→              </div>
+   685→   685→              <div className="flex-1">
+   686→   686→                <Label className="text-xs text-muted-foreground mb-1 block">إلى تاريخ</Label>
+   687→   687→                <Input
+   688→   688→                  type="date"
+   689→   689→                  value={dateTo}
+   690→   690→                  onChange={(e) => setDateTo(e.target.value)}
+   691→   691→                  className="text-sm rounded-xl"
+   692→   692→                />
+   693→   693→              </div>
+   694→   694→              {hasDateFilter && (
+   695→   695→                <Button
+   696→   696→                  variant="ghost"
+   697→   697→                  size="sm"
+   698→   698→                  onClick={clearDateFilter}
+   699→   699→                  className="h-10 text-xs text-muted-foreground shrink-0"
+   700→   700→                >
+   701→   701→                  <X className="w-3 h-3 ml-1" />
+   702→   702→                  مسح
+   703→   703→                </Button>
+   704→   704→              )}
+   705→   705→            </div>
+   706→   706→          </div>
+   707→   707→          
+   708→   708→          {/* Status Message */}
+   709→   709→          <div className="flex-1 flex items-center justify-center py-8">
+   710→   710→            {!hasData ? (
+   711→   711→              <div className="text-center text-muted-foreground">
+   712→   712→                <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-30" />
+   713→   713→                <p className="text-lg">لا توجد بيانات لهذا الحساب</p>
+   714→   714→                <p className="text-sm mt-2">لم يتم تسجيل أي حركات أو ديون بعد</p>
+   715→   715→              </div>
+   716→   716→            ) : (
+   717→   717→              <div className="text-center text-muted-foreground">
+   718→   718→                <FileText className="w-16 h-16 mx-auto mb-4 opacity-30" />
+   719→   719→                <p className="text-lg">جاهز للطباعة</p>
+   720→   720→                <p className="text-sm mt-2">اضغط على زر "طباعة تقرير" أدناه</p>
+   721→   721→                {hasDateFilter && (
+   722→   722→                  <p className="text-xs mt-2 text-primary">
+   723→   723→                    📅 الفترة: {dateFrom ? 'من ' + dateFrom : ''} {dateTo ? 'إلى ' + dateTo : ''}
+   724→   724→                  </p>
+   725→   725→                )}
+   726→   726→              </div>
+   727→   727→            )}
+   728→   728→          </div>
+   729→   729→          
+   730→   730→          {/* Print Button - Full Width at Bottom */}
+   731→   731→          {hasData && (
+   732→   732→            <Button
+   733→   733→              onClick={handlePrint}
+   734→   734→              className="w-full rounded-xl py-6 text-base font-medium"
+   735→   735→              size="lg"
+   736→   736→            >
+   737→   737→              <Printer className="w-5 h-5 ml-2" />
+   738→   738→              طباعة تقرير
+   739→   739→            </Button>
+   740→   740→          )}
+   741→   741→        </div>
+   742→   742→      </DialogContent>
+   743→   743→    </Dialog>
+   744→   744→  );
+   745→   745→}
+   746→   746→

@@ -840,3 +840,44 @@ Stage Summary:
 - Computation: stock in selected unit = inventory.currentInBase / selectedMaterialUnit.baseFactor. No new queries — purely derived from existing inventory data + the material's baseFactor.
 - UI Freeze fully preserved: same emerald color palette, same border style, same padding, same font size, same Info icon. Loading and no-data states unchanged.
 - No accounting or inventory logic changed — purely an informational display enhancement.
+
+---
+Task ID: 14
+Agent: Main Agent
+Task: Modify account statement (دفتر الأستاذ) logic so cash sales appear as reference-only records (no balance impact) while credit sales are included in the final balance — UI Freeze preserved, no other accounting logic affected
+
+Work Log:
+- Explored the codebase to locate ALL places where sales affect account balances/receivables. Searched BalancesPage, ReportsPage, DebtsPage, cachedCalculations, CurrencyTransactionsModal, AccountMatchModal, SalesPage — confirmed that sales integrate into account balances ONLY in `src/components/exchange/AccountStatementModal.tsx` (the `currencyStats` useMemo, lines 160-286). No other file references sales for balance/receivable calculations.
+- Analyzed the existing `currencyStats` logic:
+  • It builds `StatementItem[]` from transactions (INCOME/EXPENSE) + merges USD sales as INCOME items.
+  • Each sale item carries `isSale: true` and `paymentMethod: 'cash' | 'credit'`.
+  • The running-balance loop treated ALL sales (cash + credit) as INCOME — adding `finalBalance` to `totalIncome` and `runningBalance`.
+  • `netBalance = runningBalance` at end. The print view reads `stat.totalIncome`, `stat.netBalance`, and per-item `runningBalance`.
+- Confirmed `rowToSale()` (supabaseDb.ts:4451) already defaults `paymentMethod` to `'cash'` for old rows missing the column — so legacy sales (created before the cash/credit feature, all effectively cash) are correctly excluded from the balance under the new logic.
+- Confirmed the display (print view) ALREADY distinguishes cash vs credit sales via: `sale-row` (light blue #f0f9ff) vs `sale-credit-row` (light amber #fffbeb) row backgrounds, `badge-cash` / `badge-credit` badges, and the "— فاتورة غير مسددة" (unpaid invoice) suffix for credit sales. No display changes needed — UI Freeze fully preserved.
+
+- Applied a surgical change to `currencyStats` in AccountStatementModal.tsx — TWO edits, both purely additive (a `const isCashSale` guard wrapping the existing accumulation):
+
+  1. Main running-balance loop (was lines 214-227): added `const isCashSale = it.isSale && it.paymentMethod === 'cash';` and wrapped the `if (it.type === 'INCOME') {...} else {...}` block in `if (!isCashSale)`. Cash sale items still get `{ ...it, runningBalance }` returned (runningBalance = previous value, unchanged) so they remain visible in the statement with all their invoice data, but their amount is NOT added to `totalIncome` or `runningBalance`.
+
+  2. Edge-case loop (was lines 255-261, account has sales but NO USD transactions): same `isCashSale` guard wrapping the `totalIncome += ...; runningBalance += ...` accumulation. Cash sales stay visible as rows but don't move the balance.
+
+- Did NOT touch: vault logic (recalculateVaultBalance in supabaseDb.ts), addSale/updateSale/deleteSale, the print view JSX, the on-screen modal layout, any colors/styles, any other component. Vault behavior unchanged: cash sale → increases USD vault; credit sale → no vault effect.
+
+Verification (end-to-end via Agent Browser + API):
+  • `bun run lint` → 0 errors, 0 warnings ✓
+  • Dev server running, GET / → HTTP 200 ✓
+  • Agent Browser: logged in as admin (admin/admin), opened Accounts → ديزل → دفتر الأستاذ. Modal opened cleanly, NO console errors, NO runtime errors ✓
+  • Captured the print HTML by overriding `window.open` with a mock that captures `document.write()` content.
+  • BEFORE (all 6 sales = cash): summary "لنا" = 0.00, net balance = -4,000.00 (only the expense). Per-row running balance for all 5 cash sales = 0.00 (unchanged). The 6th cash sale (dated 07-11, after the expense) = -4,000.00 (unchanged). All 6 cash sale rows VISIBLE with 🛒 بيع + كاش badge + amount + description ✓
+  • Updated 1 sale from cash→credit via API (PUT /api/sales mode=update, paymentMethod=credit). Switched account away and back to trigger the modal's useEffect refetch.
+  • AFTER (5 cash + 1 credit): summary "لنا" = 4,750.00 (only the credit sale), "علينا" = 4,000.00 (expense), net balance = 750.00 (= 4,750 − 4,000). Per-row: 5 cash sales → runningBalance 0.00 (unchanged); expense → -4,000.00; credit sale → 750.00 (balance increased). The credit sale row shows 🛒 بيع + آجل badge + "— فاتورة غير مسددة" suffix ✓
+  • Total rows = 7 (5 cash + 1 credit + 1 expense) — ALL sales remain visible, none hidden ✓
+  • Restored the test sale back to cash (original state) ✓
+
+Stage Summary:
+- Account statement (دفتر الأستاذ) now correctly treats cash sales as reference-only historical records (visible with full invoice data + "كاش" badge, but excluded from totalIncome / runningBalance / netBalance), because their value was already collected directly into the USD vault.
+- Credit sales are the ONLY sales that affect the final account balance, since كشف الحساب exists to show الذمم والمبالغ المستحقة (receivables / amounts due).
+- Changing a sale's payment method (cash↔credit), editing, or deleting automatically recalculates the statement (the `currencyStats` useMemo re-derives from `filteredAccountSales` whenever the modal refetches).
+- Vault logic, reports, debts, balances — all UNCHANGED. UI Freeze fully preserved (same colors, badges, row backgrounds, layout; no new components).
+- Single file changed: `src/components/exchange/AccountStatementModal.tsx` (2 surgical edits in the `currencyStats` useMemo).

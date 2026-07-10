@@ -212,16 +212,25 @@ export function AccountStatementModal() {
       });
 
       // Compute running balance
+      // 🔸 Cash sales are reference-only: they remain visible in the statement
+      //    as a historical record (with all invoice data + a "كاش" badge) but
+      //    do NOT affect totalIncome / runningBalance, because their value was
+      //    already collected directly into the USD vault at sale time.
+      //    Only credit sales (unpaid receivables) move the account balance,
+      //    since كشف الحساب exists to show الذمم والمبالغ المستحقة.
       let totalIncome = 0;
       let totalExpense = 0;
       let runningBalance = 0;
       items = items.map(it => {
-        if (it.type === 'INCOME') {
-          totalIncome += it.finalBalance;
-          runningBalance += it.finalBalance;
-        } else {
-          totalExpense += it.finalBalance;
-          runningBalance -= it.finalBalance;
+        const isCashSale = it.isSale && it.paymentMethod === 'cash';
+        if (!isCashSale) {
+          if (it.type === 'INCOME') {
+            totalIncome += it.finalBalance;
+            runningBalance += it.finalBalance;
+          } else {
+            totalExpense += it.finalBalance;
+            runningBalance -= it.finalBalance;
+          }
         }
         return { ...it, runningBalance };
       });
@@ -252,11 +261,16 @@ export function AccountStatementModal() {
         unitName: s.unitName,
       }));
       items.sort((a, b) => a.date.getTime() - b.date.getTime());
+      // 🔸 Cash sales are reference-only (see main loop comment above) —
+      //    visible in the statement but excluded from the balance.
       let totalIncome = 0;
       let runningBalance = 0;
       items = items.map(it => {
-        totalIncome += it.finalBalance;
-        runningBalance += it.finalBalance;
+        const isCashSale = it.isSale && it.paymentMethod === 'cash';
+        if (!isCashSale) {
+          totalIncome += it.finalBalance;
+          runningBalance += it.finalBalance;
+        }
         return { ...it, runningBalance };
       });
       stats[usdCurrency.id] = {

@@ -1,0 +1,562 @@
+=== Recent commits with file stats ===
+1c390bf 779f56ff-fca8-46fb-8244-9895e8d5a11d
+ .zscripts/dev.pid                                  |    2 +-
+ skills/aminer-open-academic/SKILL.md               |  312 ++
+ skills/aminer-open-academic/_meta.json             |    6 +
+ skills/aminer-open-academic/evals/evals.json       |   46 +
+ .../aminer-open-academic/references/api-catalog.md | 1032 +++++
+ .../aminer-open-academic/scripts/aminer_client.py  |  875 ++++
+ skills/pdf/briefs/process-advanced.md              |  284 ++
+ skills/ppt/.claude/settings.local.json             |   20 +
+ skills/ppt/LICENSE.txt                             |   13 +
+ skills/ppt/SKILL.md                                |  436 ++
+ skills/ppt/beamer.md                               | 1461 +++++++
+ skills/ppt/components.md                           | 1671 ++++++++
+ skills/ppt/data-viz-components.md                  |  529 +++
+ skills/ppt/design-system.md                        |  211 +
+ skills/ppt/html2pptx.md                            |  394 ++
+ skills/ppt/ooxml.md                                |  427 ++
+ .../schemas/ISO-IEC29500-4_2016/dml-chart.xsd      | 1499 +++++++
+ .../ISO-IEC29500-4_2016/dml-chartDrawing.xsd       |  146 +
+ .../schemas/ISO-IEC29500-4_2016/dml-diagram.xsd    | 1085 +++++
+ .../ISO-IEC29500-4_2016/dml-lockedCanvas.xsd       |   11 +
+ .../ooxml/schemas/ISO-IEC29500-4_2016/dml-main.xsd | 3081 ++++++++++++++
+ .../schemas/ISO-IEC29500-4_2016/dml-picture.xsd    |   23 +
+ .../ISO-IEC29500-4_2016/dml-spreadsheetDrawing.xsd |  185 +
+ .../dml-wordprocessingDrawing.xsd                  |  287 ++
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/pml.xsd  | 1676 ++++++++
+ .../shared-additionalCharacteristics.xsd           |   28 +
+ .../ISO-IEC29500-4_2016/shared-bibliography.xsd    |  144 +
+ .../shared-commonSimpleTypes.xsd                   |  174 +
+ .../shared-customXmlDataProperties.xsd             |   25 +
+ .../shared-customXmlSchemaProperties.xsd           |   18 +
+ .../shared-documentPropertiesCustom.xsd            |   59 +
+ .../shared-documentPropertiesExtended.xsd          |   56 +
+ .../shared-documentPropertiesVariantTypes.xsd      |  195 +
+ .../schemas/ISO-IEC29500-4_2016/shared-math.xsd    |  582 +++
+ .../shared-relationshipReference.xsd               |   25 +
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/sml.xsd  | 4439 ++++++++++++++++++++
+ .../ooxml/schemas/ISO-IEC29500-4_2016/vml-main.xsd |  570 +++
+ .../ISO-IEC29500-4_2016/vml-officeDrawing.xsd      |  509 +++
+ .../vml-presentationDrawing.xsd                    |   12 +
+ .../ISO-IEC29500-4_2016/vml-spreadsheetDrawing.xsd |  108 +
+ .../vml-wordprocessingDrawing.xsd                  |   96 +
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/wml.xsd  | 3646 ++++++++++++++++
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/xml.xsd  |  116 +
+ .../ecma/fouth-edition/opc-contentTypes.xsd        |   42 +
+ .../ecma/fouth-edition/opc-coreProperties.xsd      |   50 +
+ .../schemas/ecma/fouth-edition/opc-digSig.xsd      |   49 +
+ .../ecma/fouth-edition/opc-relationships.xsd       |   33 +
+ skills/ppt/ooxml/schemas/mce/mc.xsd                |   75 +
+ skills/ppt/ooxml/schemas/microsoft/wml-2010.xsd    |  560 +++
+ skills/ppt/ooxml/schemas/microsoft/wml-2012.xsd    |   67 +
+ skills/ppt/ooxml/schemas/microsoft/wml-2018.xsd    |   14 +
+ .../ppt/ooxml/schemas/microsoft/wml-cex-2018.xsd   |   20 +
+ .../ppt/ooxml/schemas/microsoft/wml-cid-2016.xsd   |   13 +
+ .../schemas/microsoft/wml-sdtdatahash-2020.xsd     |    4 +
+ .../ppt/ooxml/schemas/microsoft/wml-symex-2015.xsd |    8 +
+ skills/ppt/ooxml/scripts/pack.py                   |  159 +
+ skills/ppt/ooxml/scripts/unpack.py                 |   45 +
+ skills/ppt/ooxml/scripts/validate.py               |   70 +
+ skills/ppt/ooxml/scripts/validation/__init__.py    |   15 +
+ .../__pycache__/__init__.cpython-313.pyc           |  Bin 0 -> 487 bytes
+ .../validation/__pycache__/base.cpython-313.pyc    |  Bin 0 -> 38418 bytes
+ .../validation/__pycache__/docx.cpython-313.pyc    |  Bin 0 -> 11506 bytes
+ .../validation/__pycache__/pptx.cpython-313.pyc    |  Bin 0 -> 13472 bytes
+ .../__pycache__/redlining.cpython-313.pyc          |  Bin 0 -> 11294 bytes
+ skills/ppt/ooxml/scripts/validation/base.py        |  948 +++++
+ skills/ppt/ooxml/scripts/validation/docx.py        |  274 ++
+ skills/ppt/ooxml/scripts/validation/pptx.py        |  309 ++
+ skills/ppt/ooxml/scripts/validation/redlining.py   |  279 ++
+ skills/ppt/references/beamer.md                    |  721 ++++
+ skills/ppt/references/latex.md                     |  342 ++
+ skills/ppt/references/paper-navbar.tex             |   73 +
+ skills/ppt/references/progress-navbar.tex          |  151 +
+ .../scripts/__pycache__/inventory.cpython-313.pyc  |  Bin 0 -> 26855 bytes
+ skills/ppt/scripts/html2pptx.js                    | 1337 ++++++
+ skills/ppt/scripts/inventory.py                    |  512 +++
+ skills/ppt/scripts/pdf.py                          | 2046 +++++++++
+ skills/ppt/scripts/rearrange.py                    |  144 +
+ skills/ppt/scripts/replace.py                      |  231 +
+ skills/ppt/scripts/tectonic                        |  Bin 0 -> 10747904 bytes
+ skills/ppt/scripts/thumbnail.py                    |  352 ++
+ skills/ppt/setup.sh                                |  197 +
+ skills/ppt/themes.md                               |  581 +++
+ skills/pptx/LICENSE.txt                            |   30 +
+ skills/pptx/html2pptx.md                           |  625 +++
+ skills/pptx/ooxml.md                               |  427 ++
+ .../schemas/ISO-IEC29500-4_2016/dml-chart.xsd      | 1499 +++++++
+ .../ISO-IEC29500-4_2016/dml-chartDrawing.xsd       |  146 +
+ .../schemas/ISO-IEC29500-4_2016/dml-diagram.xsd    | 1085 +++++
+ .../ISO-IEC29500-4_2016/dml-lockedCanvas.xsd       |   11 +
+ .../ooxml/schemas/ISO-IEC29500-4_2016/dml-main.xsd | 3081 ++++++++++++++
+ .../schemas/ISO-IEC29500-4_2016/dml-picture.xsd    |   23 +
+ .../ISO-IEC29500-4_2016/dml-spreadsheetDrawing.xsd |  185 +
+ .../dml-wordprocessingDrawing.xsd                  |  287 ++
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/pml.xsd | 1676 ++++++++
+ .../shared-additionalCharacteristics.xsd           |   28 +
+ .../ISO-IEC29500-4_2016/shared-bibliography.xsd    |  144 +
+ .../shared-commonSimpleTypes.xsd                   |  174 +
+ .../shared-customXmlDataProperties.xsd             |   25 +
+ .../shared-customXmlSchemaProperties.xsd           |   18 +
+ .../shared-documentPropertiesCustom.xsd            |   59 +
+ .../shared-documentPropertiesExtended.xsd          |   56 +
+ .../shared-documentPropertiesVariantTypes.xsd      |  195 +
+ .../schemas/ISO-IEC29500-4_2016/shared-math.xsd    |  582 +++
+ .../shared-relationshipReference.xsd               |   25 +
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/sml.xsd | 4439 ++++++++++++++++++++
+ .../ooxml/schemas/ISO-IEC29500-4_2016/vml-main.xsd |  570 +++
+ .../ISO-IEC29500-4_2016/vml-officeDrawing.xsd      |  509 +++
+ .../vml-presentationDrawing.xsd                    |   12 +
+ .../ISO-IEC29500-4_2016/vml-spreadsheetDrawing.xsd |  108 +
+ .../vml-wordprocessingDrawing.xsd                  |   96 +
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/wml.xsd | 3646 ++++++++++++++++
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/xml.xsd |  116 +
+ .../ecma/fouth-edition/opc-contentTypes.xsd        |   42 +
+ .../ecma/fouth-edition/opc-coreProperties.xsd      |   50 +
+ .../schemas/ecma/fouth-edition/opc-digSig.xsd      |   49 +
+ .../ecma/fouth-edition/opc-relationships.xsd       |   33 +
+ skills/pptx/ooxml/schemas/mce/mc.xsd               |   75 +
+ skills/pptx/ooxml/schemas/microsoft/wml-2010.xsd   |  560 +++
+ skills/pptx/ooxml/schemas/microsoft/wml-2012.xsd   |   67 +
+ skills/pptx/ooxml/schemas/microsoft/wml-2018.xsd   |   14 +
+ .../pptx/ooxml/schemas/microsoft/wml-cex-2018.xsd  |   20 +
+ .../pptx/ooxml/schemas/microsoft/wml-cid-2016.xsd  |   13 +
+ .../schemas/microsoft/wml-sdtdatahash-2020.xsd     |    4 +
+ .../ooxml/schemas/microsoft/wml-symex-2015.xsd     |    8 +
+ .../scripts/__pycache__/inventory.cpython-313.pyc  |  Bin 0 -> 41626 bytes
+ skills/pptx/scripts/html2pptx.js                   | 1044 +++++
+ skills/pptx/scripts/inventory.py                   | 1020 +++++
+ skills/pptx/scripts/rearrange.py                   |  231 +
+ skills/pptx/scripts/replace.py                     |  385 ++
+ skills/pptx/scripts/thumbnail.py                   |  450 ++
+ skills/skill-vetter/SKILL.md                       |  137 +
+ skills/study-buddy/learning-links.md               |  148 +
+ src/components/exchange/AccountStatementModal.tsx  |   37 +-
+ src/components/exchange/SaleDialog.tsx             |   59 +
+ src/components/exchange/SalesPage.tsx              |  120 +-
+ src/components/exchange/SettingsPage.tsx           |   10 +-
+ src/lib/supabaseDb.ts                              |   91 +-
+ supabase/migration-purchases-sales.sql             |   10 +
+ tool-results/read_1783673882021_a5e160f77a07.txt   |    0
+ worklog.md                                         |   67 +
+ 140 files changed, 60844 insertions(+), 12 deletions(-)
+8cef189 44c66beb-bd8b-442b-b7d3-03072c747322
+ agent-ctx/5-b-frontend-subagent-b.md             |   0
+ next.config.ts                                   |   1 +
+ src/app/api/materials/route.ts                   |   0
+ src/app/api/purchases/route.ts                   |   0
+ src/app/api/sales/route.ts                       |   0
+ src/app/api/units/route.ts                       |   0
+ src/components/exchange/MaterialsManager.tsx     |   0
+ src/components/exchange/PurchaseDialog.tsx       |   0
+ src/components/exchange/PurchasesPage.tsx        |   0
+ src/components/exchange/SaleDialog.tsx           |   0
+ src/components/exchange/SalesPage.tsx            |   0
+ src/components/exchange/SettingsPage.tsx         | 348 ++++++++++++
+ src/components/exchange/UnitsManager.tsx         |   0
+ supabase/migration-purchases-sales.sql           |   0
+ tool-results/read_1783639514291_5b5e57f30cc7.txt |   0
+ tool-results/read_1783639532580_ca6fa6c13bea.txt |   0
+ tool-results/read_1783640056951_5b5e57f30cc7.txt |   0
+ tool-results/read_1783640057656_e67ed7c72d31.txt |   0
+ tool-results/read_1783640061828_6682d7cc1ddc.txt |   0
+ tool-results/read_1783640330906_73f8716d699c.txt |   0
+ tool-results/read_1783640618957_4b0b03352160.txt |   0
+ tool-results/read_1783673882021_a5e160f77a07.txt | 641 +++++++++++++++++++++++
+ worklog.md                                       |  39 ++
+ 23 files changed, 1029 insertions(+)
+d8ff195 cef2437e-e050-41a3-b8da-92fac94ee2c1
+ agent-ctx/5-b-frontend-subagent-b.md              |   44 +
+ prisma/schema.prisma                              |   89 +
+ src/app/api/materials/route.ts                    |  161 ++
+ src/app/api/purchases/route.ts                    |  126 ++
+ src/app/api/sales/route.ts                        |  139 ++
+ src/app/api/units/route.ts                        |   91 +
+ src/app/page.tsx                                  |    6 +
+ src/components/exchange/AccountStatementModal.tsx |  178 +-
+ src/components/exchange/MaterialsManager.tsx      | 1399 ++++++++++++++
+ src/components/exchange/PurchaseDialog.tsx        |  450 +++++
+ src/components/exchange/PurchasesPage.tsx         |  688 +++++++
+ src/components/exchange/SaleDialog.tsx            |  605 +++++++
+ src/components/exchange/SalesPage.tsx             |  792 ++++++++
+ src/components/exchange/SettingsPage.tsx          |   19 +
+ src/components/exchange/SideMenu.tsx              |   22 +
+ src/components/exchange/UnitsManager.tsx          |  471 +++++
+ src/lib/supabaseDb.ts                             |  930 ++++++++++
+ src/store/useAppStore.ts                          |    2 +-
+ supabase/migration-purchases-sales.sql            |  144 ++
+ tool-results/read_1783639514291_5b5e57f30cc7.txt  |  456 +++++
+ tool-results/read_1783639532580_ca6fa6c13bea.txt  | 2002 +++++++++++++++++++++
+ tool-results/read_1783640056951_5b5e57f30cc7.txt  |  456 +++++
+ tool-results/read_1783640057656_e67ed7c72d31.txt  | 1030 +++++++++++
+ tool-results/read_1783640061828_6682d7cc1ddc.txt  | 2002 +++++++++++++++++++++
+ tool-results/read_1783640330906_73f8716d699c.txt  |  498 +++++
+ tool-results/read_1783640618957_4b0b03352160.txt  |  544 ++++++
+ worklog.md                                        |  185 ++
+ 27 files changed, 13501 insertions(+), 28 deletions(-)
+12b1db8 4ac0d9c8-228b-4d29-9973-a5f9be69af31
+ .zscripts/dev.pid                                  |    2 +-
+ add-user-dialog.png                                |  Bin 0 -> 31324 bytes
+ settings-add-button.png                            |  Bin 0 -> 29449 bytes
+ settings-full-page.png                             |  Bin 0 -> 51881 bytes
+ settings-user-management-expanded.png              |  Bin 0 -> 39370 bytes
+ settings-user-management-expanded2.png             |  Bin 0 -> 39370 bytes
+ settings-user-management.png                       |  Bin 0 -> 29449 bytes
+ skills/aminer-open-academic/SKILL.md               |  312 --
+ skills/aminer-open-academic/_meta.json             |    6 -
+ skills/aminer-open-academic/evals/evals.json       |   46 -
+ .../aminer-open-academic/references/api-catalog.md | 1032 -----
+ .../aminer-open-academic/scripts/aminer_client.py  |  875 ----
+ skills/fullstack-dev/SKILL.md                      |    2 +-
+ skills/gaokao-collect-student-info/SKILL.md        |  123 +
+ .../examples/student_shandong.json                 |   26 +
+ .../examples/student_template.json                 |   23 +
+ skills/gaokao-collect-student-info/reference.md    |   88 +
+ skills/gaokao-fetch-volunteers/SKILL.md            |  144 +
+ .../examples/api_request_shandong.json             |   19 +
+ .../examples/api_request_template.json             |   19 +
+ .../gaokao-fetch-volunteers/preference_mapping.md  |   95 +
+ skills/gaokao-fetch-volunteers/reference.md        |  168 +
+ skills/gaokao-fetch-volunteers/requirements.txt    |    2 +
+ .../__pycache__/build_api_request.cpython-314.pyc  |  Bin 0 -> 8955 bytes
+ .../__pycache__/fetch_volunteers.cpython-314.pyc   |  Bin 0 -> 31979 bytes
+ .../__pycache__/province_config.cpython-314.pyc    |  Bin 0 -> 10739 bytes
+ .../scripts/build_api_request.py                   |  182 +
+ .../scripts/fetch_volunteers.py                    |  569 +++
+ .../scripts/province_config.py                     |  221 +
+ .../scripts/test_batch_api.py                      |  166 +
+ skills/gaokao-generate-report/SKILL.md             |   69 +
+ .../examples/analysis_merged_example.json          |   25 +
+ skills/gaokao-generate-report/requirements.txt     |    2 +
+ .../scripts/generate_html.py                       |  402 ++
+ .../scripts/merge_analysis.py                      |   58 +
+ .../templates/volunteer_report.html                | 1189 ++++++
+ skills/gaokao-recommend-majors/SKILL.md            |   66 +
+ skills/gaokao-recommend-majors/career_reference.md |  121 +
+ .../examples/major_recommendation_template.json    |   33 +
+ skills/gaokao-recommend-schools/SKILL.md           |   68 +
+ .../gaokao-recommend-schools/career_reference.md   |  121 +
+ .../examples/school_recommendation_template.json   |   13 +
+ skills/pdf/SKILL.md                                |  432 +-
+ skills/pdf/briefs/academic.md                      |   68 +-
+ skills/pdf/briefs/creative-fixed-canvas.md         |  848 ++++
+ skills/pdf/briefs/creative-flow.md                 |  255 ++
+ skills/pdf/briefs/creative.md                      |   68 +-
+ skills/pdf/briefs/poster.md                        |    8 +-
+ skills/pdf/briefs/process-advanced.md              |  284 --
+ skills/pdf/briefs/process.md                       |  356 +-
+ skills/pdf/briefs/report.md                        |  742 ++--
+ skills/pdf/briefs/resume.md                        |  227 +
+ skills/pdf/configs/fonts.md                        |   28 +-
+ skills/pdf/configs/visual_framework.md             |    2 +-
+ skills/pdf/env_setup/env_check.sh                  |   49 +
+ skills/pdf/env_setup/font_list.txt                 |   82 +
+ skills/pdf/env_setup/setup.md                      |  212 +
+ skills/pdf/env_setup/setup_mac_linux.sh            |  350 ++
+ skills/pdf/env_setup/setup_windows.ps1             |  326 ++
+ skills/pdf/scripts/cover_validate.js               |  290 +-
+ skills/pdf/scripts/design_engine.py                |   64 +-
+ skills/pdf/scripts/html2pdf-next.js                |  418 +-
+ skills/pdf/scripts/pdf.py                          |   94 +-
+ skills/pdf/scripts/pdf_qa.py                       |  281 +-
+ skills/pdf/scripts/poster_validate.py              |   91 +-
+ skills/pdf/scripts/setup.sh                        |   74 +-
+ skills/pdf/scripts/toc_validate.py                 |   20 +-
+ skills/pdf/typesetting/charts.md                   |    1 +
+ skills/pdf/typesetting/cover-backgrounds.md        |   20 +-
+ skills/pdf/typesetting/cover.md                    |  791 +---
+ skills/pdf/typesetting/fill-engine.md              |    2 +-
+ skills/pdf/typesetting/overflow.md                 |   10 +-
+ skills/pdf/typesetting/pagination.md               |    4 +-
+ skills/pdf/typesetting/palette.md                  |   35 +
+ skills/pdf/typesetting/typography.md               |   12 +-
+ skills/ppt/.claude/settings.local.json             |   20 -
+ skills/ppt/LICENSE.txt                             |   13 -
+ skills/ppt/SKILL.md                                |  436 --
+ skills/ppt/beamer.md                               | 1461 -------
+ skills/ppt/components.md                           | 1671 --------
+ skills/ppt/data-viz-components.md                  |  529 ---
+ skills/ppt/design-system.md                        |  211 -
+ skills/ppt/html2pptx.md                            |  394 --
+ skills/ppt/ooxml.md                                |  427 --
+ .../schemas/ISO-IEC29500-4_2016/dml-chart.xsd      | 1499 -------
+ .../ISO-IEC29500-4_2016/dml-chartDrawing.xsd       |  146 -
+ .../schemas/ISO-IEC29500-4_2016/dml-diagram.xsd    | 1085 -----
+ .../ISO-IEC29500-4_2016/dml-lockedCanvas.xsd       |   11 -
+ .../ooxml/schemas/ISO-IEC29500-4_2016/dml-main.xsd | 3081 --------------
+ .../schemas/ISO-IEC29500-4_2016/dml-picture.xsd    |   23 -
+ .../ISO-IEC29500-4_2016/dml-spreadsheetDrawing.xsd |  185 -
+ .../dml-wordprocessingDrawing.xsd                  |  287 --
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/pml.xsd  | 1676 --------
+ .../shared-additionalCharacteristics.xsd           |   28 -
+ .../ISO-IEC29500-4_2016/shared-bibliography.xsd    |  144 -
+ .../shared-commonSimpleTypes.xsd                   |  174 -
+ .../shared-customXmlDataProperties.xsd             |   25 -
+ .../shared-customXmlSchemaProperties.xsd           |   18 -
+ .../shared-documentPropertiesCustom.xsd            |   59 -
+ .../shared-documentPropertiesExtended.xsd          |   56 -
+ .../shared-documentPropertiesVariantTypes.xsd      |  195 -
+ .../schemas/ISO-IEC29500-4_2016/shared-math.xsd    |  582 ---
+ .../shared-relationshipReference.xsd               |   25 -
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/sml.xsd  | 4439 --------------------
+ .../ooxml/schemas/ISO-IEC29500-4_2016/vml-main.xsd |  570 ---
+ .../ISO-IEC29500-4_2016/vml-officeDrawing.xsd      |  509 ---
+ .../vml-presentationDrawing.xsd                    |   12 -
+ .../ISO-IEC29500-4_2016/vml-spreadsheetDrawing.xsd |  108 -
+ .../vml-wordprocessingDrawing.xsd                  |   96 -
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/wml.xsd  | 3646 ----------------
+ .../ppt/ooxml/schemas/ISO-IEC29500-4_2016/xml.xsd  |  116 -
+ .../ecma/fouth-edition/opc-contentTypes.xsd        |   42 -
+ .../ecma/fouth-edition/opc-coreProperties.xsd      |   50 -
+ .../schemas/ecma/fouth-edition/opc-digSig.xsd      |   49 -
+ .../ecma/fouth-edition/opc-relationships.xsd       |   33 -
+ skills/ppt/ooxml/schemas/mce/mc.xsd                |   75 -
+ skills/ppt/ooxml/schemas/microsoft/wml-2010.xsd    |  560 ---
+ skills/ppt/ooxml/schemas/microsoft/wml-2012.xsd    |   67 -
+ skills/ppt/ooxml/schemas/microsoft/wml-2018.xsd    |   14 -
+ .../ppt/ooxml/schemas/microsoft/wml-cex-2018.xsd   |   20 -
+ .../ppt/ooxml/schemas/microsoft/wml-cid-2016.xsd   |   13 -
+ .../schemas/microsoft/wml-sdtdatahash-2020.xsd     |    4 -
+ .../ppt/ooxml/schemas/microsoft/wml-symex-2015.xsd |    8 -
+ skills/ppt/ooxml/scripts/pack.py                   |  159 -
+ skills/ppt/ooxml/scripts/unpack.py                 |   45 -
+ skills/ppt/ooxml/scripts/validate.py               |   70 -
+ skills/ppt/ooxml/scripts/validation/__init__.py    |   15 -
+ .../__pycache__/__init__.cpython-313.pyc           |  Bin 487 -> 0 bytes
+ .../validation/__pycache__/base.cpython-313.pyc    |  Bin 38418 -> 0 bytes
+ .../validation/__pycache__/docx.cpython-313.pyc    |  Bin 11506 -> 0 bytes
+ .../validation/__pycache__/pptx.cpython-313.pyc    |  Bin 13472 -> 0 bytes
+ .../__pycache__/redlining.cpython-313.pyc          |  Bin 11294 -> 0 bytes
+ skills/ppt/ooxml/scripts/validation/base.py        |  948 -----
+ skills/ppt/ooxml/scripts/validation/docx.py        |  274 --
+ skills/ppt/ooxml/scripts/validation/pptx.py        |  309 --
+ skills/ppt/ooxml/scripts/validation/redlining.py   |  279 --
+ skills/ppt/references/beamer.md                    |  721 ----
+ skills/ppt/references/latex.md                     |  342 --
+ skills/ppt/references/paper-navbar.tex             |   73 -
+ skills/ppt/references/progress-navbar.tex          |  151 -
+ .../scripts/__pycache__/inventory.cpython-313.pyc  |  Bin 26855 -> 0 bytes
+ skills/ppt/scripts/html2pptx.js                    | 1337 ------
+ skills/ppt/scripts/inventory.py                    |  512 ---
+ skills/ppt/scripts/pdf.py                          | 2046 ---------
+ skills/ppt/scripts/rearrange.py                    |  144 -
+ skills/ppt/scripts/replace.py                      |  231 -
+ skills/ppt/scripts/tectonic                        |  Bin 10747904 -> 0 bytes
+ skills/ppt/scripts/thumbnail.py                    |  352 --
+ skills/ppt/setup.sh                                |  197 -
+ skills/ppt/themes.md                               |  581 ---
+ skills/pptx/LICENSE.txt                            |   30 -
+ skills/pptx/SKILL.md                               |    4 +-
+ skills/pptx/html2pptx.md                           |  625 ---
+ skills/pptx/html2pptx1.js                          |  572 ++-
+ skills/pptx/ooxml.md                               |  427 --
+ .../schemas/ISO-IEC29500-4_2016/dml-chart.xsd      | 1499 -------
+ .../ISO-IEC29500-4_2016/dml-chartDrawing.xsd       |  146 -
+ .../schemas/ISO-IEC29500-4_2016/dml-diagram.xsd    | 1085 -----
+ .../ISO-IEC29500-4_2016/dml-lockedCanvas.xsd       |   11 -
+ .../ooxml/schemas/ISO-IEC29500-4_2016/dml-main.xsd | 3081 --------------
+ .../schemas/ISO-IEC29500-4_2016/dml-picture.xsd    |   23 -
+ .../ISO-IEC29500-4_2016/dml-spreadsheetDrawing.xsd |  185 -
+ .../dml-wordprocessingDrawing.xsd                  |  287 --
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/pml.xsd | 1676 --------
+ .../shared-additionalCharacteristics.xsd           |   28 -
+ .../ISO-IEC29500-4_2016/shared-bibliography.xsd    |  144 -
+ .../shared-commonSimpleTypes.xsd                   |  174 -
+ .../shared-customXmlDataProperties.xsd             |   25 -
+ .../shared-customXmlSchemaProperties.xsd           |   18 -
+ .../shared-documentPropertiesCustom.xsd            |   59 -
+ .../shared-documentPropertiesExtended.xsd          |   56 -
+ .../shared-documentPropertiesVariantTypes.xsd      |  195 -
+ .../schemas/ISO-IEC29500-4_2016/shared-math.xsd    |  582 ---
+ .../shared-relationshipReference.xsd               |   25 -
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/sml.xsd | 4439 --------------------
+ .../ooxml/schemas/ISO-IEC29500-4_2016/vml-main.xsd |  570 ---
+ .../ISO-IEC29500-4_2016/vml-officeDrawing.xsd      |  509 ---
+ .../vml-presentationDrawing.xsd                    |   12 -
+ .../ISO-IEC29500-4_2016/vml-spreadsheetDrawing.xsd |  108 -
+ .../vml-wordprocessingDrawing.xsd                  |   96 -
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/wml.xsd | 3646 ----------------
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/xml.xsd |  116 -
+ .../ecma/fouth-edition/opc-contentTypes.xsd        |   42 -
+ .../ecma/fouth-edition/opc-coreProperties.xsd      |   50 -
+ .../schemas/ecma/fouth-edition/opc-digSig.xsd      |   49 -
+ .../ecma/fouth-edition/opc-relationships.xsd       |   33 -
+ skills/pptx/ooxml/schemas/mce/mc.xsd               |   75 -
+ skills/pptx/ooxml/schemas/microsoft/wml-2010.xsd   |  560 ---
+ skills/pptx/ooxml/schemas/microsoft/wml-2012.xsd   |   67 -
+ skills/pptx/ooxml/schemas/microsoft/wml-2018.xsd   |   14 -
+ .../pptx/ooxml/schemas/microsoft/wml-cex-2018.xsd  |   20 -
+ .../pptx/ooxml/schemas/microsoft/wml-cid-2016.xsd  |   13 -
+ .../schemas/microsoft/wml-sdtdatahash-2020.xsd     |    4 -
+ .../ooxml/schemas/microsoft/wml-symex-2015.xsd     |    8 -
+ .../scripts/__pycache__/inventory.cpython-313.pyc  |  Bin 41626 -> 0 bytes
+ skills/pptx/scripts/html2pptx.js                   | 1044 -----
+ skills/pptx/scripts/inventory.py                   | 1020 -----
+ skills/pptx/scripts/rearrange.py                   |  231 -
+ skills/pptx/scripts/replace.py                     |  385 --
+ skills/pptx/scripts/thumbnail.py                   |  450 --
+ skills/skill-vetter/SKILL.md                       |  137 -
+ skills/study-buddy/learning-links.md               |  148 -
+ src/app/api/execute-sql/route.ts                   |   10 +-
+ src/app/page.tsx                                   |    6 +-
+ src/components/exchange/LoginPage.tsx              |    4 +-
+ src/components/exchange/SettingsPage.tsx           |  335 +-
+ src/hooks/useAuth.ts                               |   55 +
+ src/lib/localDb.ts                                 |   51 +-
+ src/lib/supabaseDb.ts                              |   89 +-
+ tool-results/bash_1781474788089_2c84fdf5f961.txt   |  765 ++++
+ tool-results/read_1781473920930_791d7a4dbc57.txt   | 2002 +++++++++
+ tool-results/read_1781473929926_a774ea09a78a.txt   | 1054 +++++
+ tool-results/read_1781474013519_5bc85e2e955c.txt   | 2002 +++++++++
+ tool-results/read_1781474798220_042d3823a900.txt   | 2002 +++++++++
+ worklog.md                                         |   27 +
+ 215 files changed, 17517 insertions(+), 62197 deletions(-)
+a399f5a 7a5ae9f0-3d1e-4961-986d-3a8fbcd867ca
+ .zscripts/dev.pid                                  |    2 +-
+ login-test.png                                     |  Bin 0 -> 83961 bytes
+ settings-after-setup-click.png                     |  Bin 0 -> 41553 bytes
+ settings-backup-section.png                        |  Bin 0 -> 36492 bytes
+ skills/aminer-open-academic/SKILL.md               |  312 ++
+ skills/aminer-open-academic/_meta.json             |    6 +
+ skills/aminer-open-academic/evals/evals.json       |   46 +
+ .../aminer-open-academic/references/api-catalog.md | 1032 +++++
+ .../aminer-open-academic/scripts/aminer_client.py  |  875 ++++
+ skills/pptx/LICENSE.txt                            |   30 +
+ skills/pptx/html2pptx.md                           |  625 +++
+ skills/pptx/ooxml.md                               |  427 ++
+ .../schemas/ISO-IEC29500-4_2016/dml-chart.xsd      | 1499 +++++++
+ .../ISO-IEC29500-4_2016/dml-chartDrawing.xsd       |  146 +
+ .../schemas/ISO-IEC29500-4_2016/dml-diagram.xsd    | 1085 +++++
+ .../ISO-IEC29500-4_2016/dml-lockedCanvas.xsd       |   11 +
+ .../ooxml/schemas/ISO-IEC29500-4_2016/dml-main.xsd | 3081 ++++++++++++++
+ .../schemas/ISO-IEC29500-4_2016/dml-picture.xsd    |   23 +
+ .../ISO-IEC29500-4_2016/dml-spreadsheetDrawing.xsd |  185 +
+ .../dml-wordprocessingDrawing.xsd                  |  287 ++
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/pml.xsd | 1676 ++++++++
+ .../shared-additionalCharacteristics.xsd           |   28 +
+ .../ISO-IEC29500-4_2016/shared-bibliography.xsd    |  144 +
+ .../shared-commonSimpleTypes.xsd                   |  174 +
+ .../shared-customXmlDataProperties.xsd             |   25 +
+ .../shared-customXmlSchemaProperties.xsd           |   18 +
+ .../shared-documentPropertiesCustom.xsd            |   59 +
+ .../shared-documentPropertiesExtended.xsd          |   56 +
+ .../shared-documentPropertiesVariantTypes.xsd      |  195 +
+ .../schemas/ISO-IEC29500-4_2016/shared-math.xsd    |  582 +++
+ .../shared-relationshipReference.xsd               |   25 +
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/sml.xsd | 4439 ++++++++++++++++++++
+ .../ooxml/schemas/ISO-IEC29500-4_2016/vml-main.xsd |  570 +++
+ .../ISO-IEC29500-4_2016/vml-officeDrawing.xsd      |  509 +++
+ .../vml-presentationDrawing.xsd                    |   12 +
+ .../ISO-IEC29500-4_2016/vml-spreadsheetDrawing.xsd |  108 +
+ .../vml-wordprocessingDrawing.xsd                  |   96 +
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/wml.xsd | 3646 ++++++++++++++++
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/xml.xsd |  116 +
+ .../ecma/fouth-edition/opc-contentTypes.xsd        |   42 +
+ .../ecma/fouth-edition/opc-coreProperties.xsd      |   50 +
+ .../schemas/ecma/fouth-edition/opc-digSig.xsd      |   49 +
+ .../ecma/fouth-edition/opc-relationships.xsd       |   33 +
+ skills/pptx/ooxml/schemas/mce/mc.xsd               |   75 +
+ skills/pptx/ooxml/schemas/microsoft/wml-2010.xsd   |  560 +++
+ skills/pptx/ooxml/schemas/microsoft/wml-2012.xsd   |   67 +
+ skills/pptx/ooxml/schemas/microsoft/wml-2018.xsd   |   14 +
+ .../pptx/ooxml/schemas/microsoft/wml-cex-2018.xsd  |   20 +
+ .../pptx/ooxml/schemas/microsoft/wml-cid-2016.xsd  |   13 +
+ .../schemas/microsoft/wml-sdtdatahash-2020.xsd     |    4 +
+ .../ooxml/schemas/microsoft/wml-symex-2015.xsd     |    8 +
+ .../scripts/__pycache__/inventory.cpython-313.pyc  |  Bin 0 -> 41626 bytes
+ skills/pptx/scripts/html2pptx.js                   | 1044 +++++
+ skills/pptx/scripts/inventory.py                   | 1020 +++++
+ skills/pptx/scripts/rearrange.py                   |  231 +
+ skills/pptx/scripts/replace.py                     |  385 ++
+ skills/pptx/scripts/thumbnail.py                   |  450 ++
+ skills/skill-vetter/SKILL.md                       |  137 +
+ skills/study-buddy/learning-links.md               |  148 +
+ src/app/api/archive/setup/route.ts                 |    3 +-
+ src/app/api/backup/setup/route.ts                  |    3 +-
+ src/app/api/execute-sql/route.ts                   |  149 +
+ src/app/api/setup-supabase/route.ts                |    3 +-
+ src/components/exchange/SettingsPage.tsx           |  122 +-
+ tool-results/read_1781306896001_0c6e31cad673.txt   | 1957 +++++++++
+ tool-results/read_1781340481252_756671af4d91.txt   | 2002 +++++++++
+ worklog.md                                         |   56 +
+ 67 files changed, 30753 insertions(+), 42 deletions(-)
+dd85a01 10f180fc-8ba1-4dec-bae6-8b25415ff119
+ archive-desktop-test.png                           |  Bin 0 -> 120702 bytes
+ archive-mobile-final.png                           |  Bin 0 -> 27432 bytes
+ archive-mobile-test.png                            |  Bin 0 -> 27432 bytes
+ sidemenu-mobile-test.png                           |  Bin 0 -> 104287 bytes
+ skills/aminer-open-academic/SKILL.md               |  312 --
+ skills/aminer-open-academic/_meta.json             |    6 -
+ skills/aminer-open-academic/evals/evals.json       |   46 -
+ .../aminer-open-academic/references/api-catalog.md | 1032 -----
+ .../aminer-open-academic/scripts/aminer_client.py  |  875 ----
+ skills/pptx/LICENSE.txt                            |   30 -
+ skills/pptx/html2pptx.md                           |  625 ---
+ skills/pptx/ooxml.md                               |  427 --
+ .../schemas/ISO-IEC29500-4_2016/dml-chart.xsd      | 1499 -------
+ .../ISO-IEC29500-4_2016/dml-chartDrawing.xsd       |  146 -
+ .../schemas/ISO-IEC29500-4_2016/dml-diagram.xsd    | 1085 -----
+ .../ISO-IEC29500-4_2016/dml-lockedCanvas.xsd       |   11 -
+ .../ooxml/schemas/ISO-IEC29500-4_2016/dml-main.xsd | 3081 --------------
+ .../schemas/ISO-IEC29500-4_2016/dml-picture.xsd    |   23 -
+ .../ISO-IEC29500-4_2016/dml-spreadsheetDrawing.xsd |  185 -
+ .../dml-wordprocessingDrawing.xsd                  |  287 --
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/pml.xsd | 1676 --------
+ .../shared-additionalCharacteristics.xsd           |   28 -
+ .../ISO-IEC29500-4_2016/shared-bibliography.xsd    |  144 -
+ .../shared-commonSimpleTypes.xsd                   |  174 -
+ .../shared-customXmlDataProperties.xsd             |   25 -
+ .../shared-customXmlSchemaProperties.xsd           |   18 -
+ .../shared-documentPropertiesCustom.xsd            |   59 -
+ .../shared-documentPropertiesExtended.xsd          |   56 -
+ .../shared-documentPropertiesVariantTypes.xsd      |  195 -
+ .../schemas/ISO-IEC29500-4_2016/shared-math.xsd    |  582 ---
+ .../shared-relationshipReference.xsd               |   25 -
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/sml.xsd | 4439 --------------------
+ .../ooxml/schemas/ISO-IEC29500-4_2016/vml-main.xsd |  570 ---
+ .../ISO-IEC29500-4_2016/vml-officeDrawing.xsd      |  509 ---
+ .../vml-presentationDrawing.xsd                    |   12 -
+ .../ISO-IEC29500-4_2016/vml-spreadsheetDrawing.xsd |  108 -
+ .../vml-wordprocessingDrawing.xsd                  |   96 -
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/wml.xsd | 3646 ----------------
+ .../pptx/ooxml/schemas/ISO-IEC29500-4_2016/xml.xsd |  116 -
+ .../ecma/fouth-edition/opc-contentTypes.xsd        |   42 -
+ .../ecma/fouth-edition/opc-coreProperties.xsd      |   50 -
+ .../schemas/ecma/fouth-edition/opc-digSig.xsd      |   49 -
+ .../ecma/fouth-edition/opc-relationships.xsd       |   33 -
+ skills/pptx/ooxml/schemas/mce/mc.xsd               |   75 -
+ skills/pptx/ooxml/schemas/microsoft/wml-2010.xsd   |  560 ---
+ skills/pptx/ooxml/schemas/microsoft/wml-2012.xsd   |   67 -
+ skills/pptx/ooxml/schemas/microsoft/wml-2018.xsd   |   14 -
+ .../pptx/ooxml/schemas/microsoft/wml-cex-2018.xsd  |   20 -
+ .../pptx/ooxml/schemas/microsoft/wml-cid-2016.xsd  |   13 -
+ .../schemas/microsoft/wml-sdtdatahash-2020.xsd     |    4 -
+ .../ooxml/schemas/microsoft/wml-symex-2015.xsd     |    8 -
+ .../scripts/__pycache__/inventory.cpython-313.pyc  |  Bin 41626 -> 0 bytes
+ skills/pptx/scripts/html2pptx.js                   | 1044 -----
+ skills/pptx/scripts/inventory.py                   | 1020 -----
+ skills/pptx/scripts/rearrange.py                   |  231 -
+ skills/pptx/scripts/replace.py                     |  385 --
+ skills/pptx/scripts/thumbnail.py                   |  450 --
+ skills/skill-vetter/SKILL.md                       |  137 -
+ skills/study-buddy/learning-links.md               |  148 -
+ src/app/api/backup/setup/route.ts                  |    0
+ src/app/api/storage/route.ts                       |    0
+ src/components/exchange/ArchiveModal.tsx           |    2 +-
+ src/components/exchange/SideMenu.tsx               |    2 +-
+ src/components/exchange/StorageDashboard.tsx       |    0
+ worklog.md                                         |   23 +
+ 65 files changed, 25 insertions(+), 26500 deletions(-)
+f44c680 c0d3b216-6f8d-46db-ad72-6866f56e1b4f
+ worklog.md | 21 +++++++++++++++++++++
+ 1 file changed, 21 insertions(+)
+
+=== Commits ahead of origin ===
+1c390bf 779f56ff-fca8-46fb-8244-9895e8d5a11d
+8cef189 44c66beb-bd8b-442b-b7d3-03072c747322
+d8ff195 cef2437e-e050-41a3-b8da-92fac94ee2c1
+12b1db8 4ac0d9c8-228b-4d29-9973-a5f9be69af31
+a399f5a 7a5ae9f0-3d1e-4961-986d-3a8fbcd867ca
+dd85a01 10f180fc-8ba1-4dec-bae6-8b25415ff119
+f44c680 c0d3b216-6f8d-46db-ad72-6866f56e1b4f

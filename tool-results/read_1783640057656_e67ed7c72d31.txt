@@ -1,0 +1,1030 @@
+     1→'use client';
+     2→
+     3→import { useState, useEffect, useMemo } from 'react';
+     4→import { useAppStore } from '@/store/useAppStore';
+     5→import { useSupabaseData } from '@/hooks/useSupabaseData';
+     6→import { Button } from '@/components/ui/button';
+     7→import { Input } from '@/components/ui/input';
+     8→import { Label } from '@/components/ui/label';
+     9→import { Textarea } from '@/components/ui/textarea';
+    10→import {
+    11→  Select,
+    12→  SelectContent,
+    13→  SelectItem,
+    14→  SelectTrigger,
+    15→  SelectValue,
+    16→} from '@/components/ui/select';
+    17→import {
+    18→  Dialog,
+    19→  DialogContent,
+    20→  DialogHeader,
+    21→  DialogTitle,
+    22→} from '@/components/ui/dialog';
+    23→import { cn } from '@/lib/utils';
+    24→import { formatNumber, calculateFinalBalance } from '@/lib/format';
+    25→import { isSYPCurrency, formatSYPDualDisplay } from '@/lib/syp-conversion';
+    26→import type { TransactionFormData } from '@/types';
+    27→import { Checkbox } from '@/components/ui/checkbox';
+    28→import { format } from 'date-fns';
+    29→import { 
+    30→  ArrowUpRight, ArrowDownRight, Calculator, RefreshCcw, 
+    31→  Banknote, Clock, Wallet, ArrowRight, Coins, AlertCircle
+    32→} from 'lucide-react';
+    33→import { motion, AnimatePresence } from 'framer-motion';
+    34→
+    35→// Helper function to format number with thousand separator for input
+    36→function formatInputNumber(num: number | string): string {
+    37→  if (num === '' || num === null || num === undefined) return '';
+    38→  const str = String(num).replace(/,/g, '');
+    39→  if (isNaN(parseFloat(str))) return '';
+    40→  
+    41→  const parts = str.split('.');
+    42→  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    43→  return parts.join('.');
+    44→}
+    45→
+    46→// Helper function to parse formatted number
+    47→function parseFormattedNumber(str: string): number {
+    48→  if (!str) return 0;
+    49→  return parseFloat(str.replace(/,/g, '')) || 0;
+    50→}
+    51→
+    52→const defaultFormData: TransactionFormData = {
+    53→  accountId: '',
+    54→  currencyId: '',
+    55→  baseCurrencyId: null,
+    56→  type: 'INCOME',
+    57→  paymentType: 'CASH',
+    58→  amount: 0,
+    59→  conversionFactor: 1,
+    60→  conversionMethod: 'MULTIPLY',
+    61→  feesType: 'FIXED',
+    62→  feesDirection: 'INCOME',
+    63→  feesAmount: 0,
+    64→  description: '',
+    65→  date: format(new Date(), 'yyyy-MM-dd'),
+    66→};
+    67→
+    68→export function TransactionModal() {
+    69→  const {
+    70→    isTransactionModalOpen,
+    71→    closeTransactionModal,
+    72→    editingTransaction,
+    73→    accounts,
+    74→    currencies,
+    75→  } = useAppStore();
+    76→  
+    77→  const { addTransaction, updateTransaction, deleteTransaction } = useSupabaseData();
+    78→  
+    79→  const [formData, setFormData] = useState<TransactionFormData>(defaultFormData);
+    80→  const [isSubmitting, setIsSubmitting] = useState(false);
+    81→  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    82→  const [calculatedBalance, setCalculatedBalance] = useState(0);
+    83→  const [feesValue, setFeesValue] = useState(0);
+    84→  const [convertedAmount, setConvertedAmount] = useState(0);
+    85→  
+    86→  // Formatted display values
+    87→  const [amountDisplay, setAmountDisplay] = useState('');
+    88→  const [conversionFactorDisplay, setConversionFactorDisplay] = useState('1');
+    89→  const [feesAmountDisplay, setFeesAmountDisplay] = useState('');
+    90→  
+    91→  // 🔸 وضع الإدخال الذكي
+    92→  const [inputMode, setInputMode] = useState<'FACTOR_TO_FINAL' | 'FINAL_TO_FACTOR'>('FACTOR_TO_FINAL');
+    93→  const [finalAmountDisplay, setFinalAmountDisplay] = useState('');
+    94→  
+    95→  // 🔸 حالة الاكتمال - Check Box هو المصدر الوحيد (Single Source of Truth)
+    96→  const [isCompleteChecked, setIsCompleteChecked] = useState(true);
+    97→  
+    98→  // SYP version support - دائماً الإصدار القديم للمدخلات
+    99→  // (no conversion needed since OLD = stored value)
+   100→  
+   101→  // Reset form when modal opens/closes
+   102→  useEffect(() => {
+   103→    if (isTransactionModalOpen) {
+   104→      setErrorMessage(null); // Clear error message
+   105→      if (editingTransaction) {
+   106→        // Determine SYP involvement for editing transaction
+   107→        const editBaseCurrency = currencies.find(c => c.id === editingTransaction.baseCurrencyId);
+   108→        const editTargetCurrency = currencies.find(c => c.id === editingTransaction.currencyId);
+   109→        const editIsBaseSYP = isSYPCurrency(editingTransaction.baseCurrencyId, editBaseCurrency?.code);
+   110→        const editIsTargetSYP = isSYPCurrency(editingTransaction.currencyId, editTargetCurrency?.code);
+   111→        const editIsSYPInvolved = editIsBaseSYP || editIsTargetSYP;
+   112→        
+   113→        setFormData({
+   114→          accountId: editingTransaction.accountId,
+   115→          currencyId: editingTransaction.currencyId,
+   116→          baseCurrencyId: editingTransaction.baseCurrencyId || null,
+   117→          type: editingTransaction.type,
+   118→          paymentType: editingTransaction.paymentType || 'CASH',
+   119→          amount: editingTransaction.amount,
+   120→          conversionFactor: editingTransaction.conversionFactor,
+   121→          conversionMethod: editingTransaction.conversionMethod,
+   122→          feesType: editingTransaction.feesType,
+   123→          feesDirection: editingTransaction.feesDirection || 'INCOME',
+   124→          feesAmount: editingTransaction.feesAmount,
+   125→          description: editingTransaction.description || '',
+   126→          date: format(new Date(editingTransaction.date), 'yyyy-MM-dd'),
+   127→        });
+   128→        
+   129→        // Display amount in OLD version if base is SYP (all inputs use OLD)
+   130→        if (editIsBaseSYP) {
+   131→          setAmountDisplay(formatInputNumber(editingTransaction.amount));
+   132→        } else {
+   133→          setAmountDisplay(formatInputNumber(editingTransaction.amount));
+   134→        }
+   135→        
+   136→        // Display conversion factor in OLD version if SYP is involved (all inputs use OLD)
+   137→        if (editIsSYPInvolved) {
+   138→          setConversionFactorDisplay(formatInputNumber(editingTransaction.conversionFactor));
+   139→        } else {
+   140→          setConversionFactorDisplay(formatInputNumber(editingTransaction.conversionFactor));
+   141→        }
+   142→        
+   143→        setFeesAmountDisplay(formatInputNumber(editingTransaction.feesAmount));
+   144→        
+   145→        // 🔸 تحميل حالة الاكتمال من الحركة عند التعديل
+   146→        setIsCompleteChecked(editingTransaction.isComplete !== false);
+   147→        
+   148→        // 🔸 تهيئة المبلغ النهائي ووضع الإدخال عند تعديل حركة
+   149→        if (editingTransaction.isComplete === false) {
+   150→          // حركة غير مكتملة: نضع وضع الإدخال على يدوي
+   151→          setInputMode('FINAL_TO_FACTOR');
+   152→          // نعبّئ الرصيد النهائي إذا كان متوفراً
+   153→          if (editingTransaction.finalBalance && editingTransaction.finalBalance !== 0) {
+   154→            setFinalAmountDisplay(formatInputNumber(editingTransaction.finalBalance));
+   155→          } else {
+   156→            setFinalAmountDisplay('');
+   157→          }
+   158→        } else if (editingTransaction.finalBalance && editingTransaction.finalBalance !== 0) {
+   159→          setInputMode('FACTOR_TO_FINAL');
+   160→          setFinalAmountDisplay(formatInputNumber(editingTransaction.finalBalance));
+   161→        } else {
+   162→          setInputMode('FACTOR_TO_FINAL');
+   163→          setFinalAmountDisplay('');
+   164→        }
+   165→      } else {
+   166→        const defaultCurrency = currencies.find(c => c.isDefault);
+   167→        setFormData({
+   168→          ...defaultFormData,
+   169→          currencyId: defaultCurrency?.id || currencies[0]?.id || '',
+   170→          baseCurrencyId: defaultCurrency?.id || currencies[0]?.id || '',
+   171→          date: format(new Date(), 'yyyy-MM-dd'),
+   172→        });
+   173→        setAmountDisplay('');
+   174→        setConversionFactorDisplay('1');
+   175→        setFeesAmountDisplay('');
+   176→        setFinalAmountDisplay('');
+   177→        setIsCompleteChecked(true);
+   178→        setInputMode('FACTOR_TO_FINAL');
+   179→      }
+   180→    }
+   181→  }, [isTransactionModalOpen, editingTransaction, currencies]);
+   182→  
+   183→  // Get selected currencies
+   184→  const baseCurrency = currencies.find(c => c.id === formData.baseCurrencyId);
+   185→  const targetCurrency = currencies.find(c => c.id === formData.currencyId);
+   186→  const isSameCurrency = formData.baseCurrencyId === formData.currencyId;
+   187→  const isBaseSYP = isSYPCurrency(formData.baseCurrencyId, baseCurrency?.code);
+   188→  const isTargetSYP = isSYPCurrency(formData.currencyId, targetCurrency?.code);
+   189→  const isSYPInvolved = isBaseSYP || isTargetSYP;
+   190→  
+   191→  // 🔸 إصلاح: لنفس العملة، معامل التحويل = 1 تلقائياً
+   192→  // هذا يمنع مشكلة "حركة غير مكتملة" عندما تكون العملات متطابقة
+   193→  // ومعامل التحويل = 0 من الحركة الأصلية
+   194→  useEffect(() => {
+   195→    if (isSameCurrency && formData.conversionFactor !== 1) {
+   196→      setFormData(prev => ({ ...prev, conversionFactor: 1 }));
+   197→      setConversionFactorDisplay('1');
+   198→    }
+   199→  }, [isSameCurrency, formData.conversionFactor]);
+   200→  
+   201→  // Calculate converted amount
+   202→  useEffect(() => {
+   203→    // 🔸 إذا كان معامل التحويل = 0 (المستخدم أدخل 0 كرصيد نهائي)
+   204→    // الرصيد النهائي = 0 مباشرة
+   205→    if (!isSameCurrency && formData.conversionFactor === 0) {
+   206→      setConvertedAmount(0);
+   207→      setCalculatedBalance(0);
+   208→      setFeesValue(0);
+   209→      return;
+   210→    }
+   211→    
+   212→    let converted = formData.amount;
+   213→    if (!isSameCurrency && formData.conversionFactor > 0) {
+   214→      if (formData.conversionMethod === 'MULTIPLY') {
+   215→        converted = formData.amount * formData.conversionFactor;
+   216→      } else {
+   217→        converted = formData.amount / formData.conversionFactor;
+   218→      }
+   219→    }
+   220→    setConvertedAmount(converted);
+   221→    
+   222→    // Calculate final balance with fees
+   223→    const result = calculateFinalBalance(
+   224→      converted,
+   225→      1, // Already converted
+   226→      'MULTIPLY',
+   227→      formData.feesType,
+   228→      formData.feesAmount,
+   229→      formData.feesDirection,
+   230→      formData.type
+   231→    );
+   232→    
+   233→    setFeesValue(result.feesValue);
+   234→    setCalculatedBalance(result.finalBalance);
+   235→    
+   236→    // 🔸 مزامنة المبلغ النهائي مع حقل الإدخال
+   237→    // فقط في وضع المكتملة + معامل ← نهائي: نحدّث finalAmountDisplay تلقائياً
+   238→    // في وضع غير المكتملة: لا نكتب فوق إدخال المستخدم (Check Box هو المصدر الوحيد)
+   239→    if (isCompleteChecked && inputMode === 'FACTOR_TO_FINAL' && result.finalBalance > 0) {
+   240→      setFinalAmountDisplay(formatInputNumber(result.finalBalance));
+   241→    }
+   242→  }, [formData, isSameCurrency, inputMode, isCompleteChecked]);
+   243→  
+   244→  // Handle amount input with formatting
+   245→  const handleAmountChange = (value: string) => {
+   246→    const cleanValue = value.replace(/[^0-9.,]/g, '');
+   247→    setAmountDisplay(cleanValue);
+   248→    const numValue = parseFormattedNumber(cleanValue);
+   249→    // All SYP inputs use OLD version = stored value directly (no conversion needed)
+   250→    const storedValue = numValue;
+   251→    setFormData({ ...formData, amount: storedValue });
+   252→  };
+   253→  
+   254→  // Handle conversion factor input with formatting
+   255→  const handleConversionFactorChange = (value: string) => {
+   256→    const cleanValue = value.replace(/[^0-9.,]/g, '');
+   257→    setConversionFactorDisplay(cleanValue);
+   258→    const numValue = parseFormattedNumber(cleanValue) || 1;
+   259→    // If SYP is involved, user enters rate in OLD version = stored value (no conversion needed)
+   260→    const storedValue = numValue;
+   261→    setFormData({ ...formData, conversionFactor: storedValue });
+   262→  };
+   263→  
+   264→  // Handle fees amount input with formatting
+   265→  const handleFeesAmountChange = (value: string) => {
+   266→    const cleanValue = value.replace(/[^0-9.,]/g, '');
+   267→    setFeesAmountDisplay(cleanValue);
+   268→    const numValue = parseFormattedNumber(cleanValue);
+   269→    setFormData({ ...formData, feesAmount: numValue });
+   270→  };
+   271→  
+   272→  // 🔸 معالجة إدخال المبلغ النهائي (وضع نهائي ← معامل) - في الحالة المكتملة
+   273→  const handleFinalAmountChange = (value: string) => {
+   274→    const cleanValue = value.replace(/[^0-9.,]/g, '');
+   275→    setFinalAmountDisplay(cleanValue);
+   276→    const finalAmount = parseFormattedNumber(cleanValue);
+   277→    
+   278→    if (formData.amount > 0 && finalAmount > 0) {
+   279→      let factor: number;
+   280→      if (formData.conversionMethod === 'MULTIPLY') {
+   281→        factor = finalAmount / formData.amount;
+   282→      } else {
+   283→        factor = formData.amount / finalAmount;
+   284→      }
+   285→      setFormData(prev => ({ ...prev, conversionFactor: factor }));
+   286→      setConversionFactorDisplay(formatInputNumber(factor));
+   287→    } else if (cleanValue !== '' && finalAmount === 0 && formData.amount > 0) {
+   288→      setFormData(prev => ({ ...prev, conversionFactor: 0 }));
+   289→      setConversionFactorDisplay('0');
+   290→    }
+   291→  };
+   292→  
+   293→  // 🔸 معالجة إدخال الرصيد النهائي يدويًا - في الحالة غير المكتملة
+   294→  // لا يتم حساب معامل التحويل - القيمة المدخلة فقط
+   295→  const handleManualFinalBalanceChange = (value: string) => {
+   296→    const cleanValue = value.replace(/[^0-9.,]/g, '');
+   297→    setFinalAmountDisplay(cleanValue);
+   298→    // لا نحسب معامل التحويل - القيمة المدخلة يدويًا فقط
+   299→  };
+   300→  
+   301→  // SYP version is always OLD - no toggle needed
+   302→  // const handleAmountSYPVersionChange = (version: 'NEW' | 'OLD') => { ... }
+   303→  
+   304→  const handleSubmit = async () => {
+   305→    if (!formData.accountId || !formData.currencyId || !formData.date) {
+   306→      return;
+   307→    }
+   308→    
+   309→    // 🔸 Check Box هو المصدر الوحيد لحالة الاكتمال
+   310→    const submitIsComplete = isCompleteChecked;
+   311→    
+   312→    // 🔸 حساب الرصيد النهائي للإرسال
+   313→    let submitFinalBalance: number | undefined;
+   314→    if (!isCompleteChecked && finalAmountDisplay !== '') {
+   315→      // في الحالة غير المكتملة: نرسل القيمة المدخلة يدويًا
+   316→      submitFinalBalance = parseFormattedNumber(finalAmountDisplay);
+   317→    }
+   318→    
+   319→    setIsSubmitting(true);
+   320→    setErrorMessage(null);
+   321→    
+   322→    try {
+   323→      if (editingTransaction) {
+   324→        // Update existing transaction
+   325→        const result = await updateTransaction(editingTransaction.id, {
+   326→          accountId: formData.accountId,
+   327→          currencyId: formData.currencyId,
+   328→          baseCurrencyId: formData.baseCurrencyId,
+   329→          type: formData.type,
+   330→          paymentType: formData.paymentType,
+   331→          amount: formData.amount,
+   332→          conversionFactor: formData.conversionFactor,
+   333→          conversionMethod: formData.conversionMethod,
+   334→          feesType: formData.feesType,
+   335→          feesDirection: formData.feesDirection,
+   336→          ...(formData.feesCurrencyId ? { feesCurrencyId: formData.feesCurrencyId } : {}),
+   337→          feesAmount: formData.feesAmount,
+   338→          description: formData.description,
+   339→          date: formData.date,
+   340→          isComplete: submitIsComplete,
+   341→          ...(submitFinalBalance !== undefined ? { finalBalance: submitFinalBalance } : {}),
+   342→        });
+   343→        
+   344→        if (result.success) {
+   345→          closeTransactionModal();
+   346→        } else {
+   347→          setErrorMessage(result.error || 'فشل في تحديث الحركة');
+   348→        }
+   349→      } else {
+   350→        // Create new transaction
+   351→        const result = await addTransaction({
+   352→          accountId: formData.accountId,
+   353→          currencyId: formData.currencyId,
+   354→          baseCurrencyId: formData.baseCurrencyId,
+   355→          type: formData.type,
+   356→          paymentType: formData.paymentType,
+   357→          amount: formData.amount,
+   358→          conversionFactor: formData.conversionFactor,
+   359→          conversionMethod: formData.conversionMethod,
+   360→          feesType: formData.feesType,
+   361→          feesDirection: formData.feesDirection,
+   362→          ...(formData.feesCurrencyId ? { feesCurrencyId: formData.feesCurrencyId } : {}),
+   363→          feesAmount: formData.feesAmount,
+   364→          description: formData.description,
+   365→          date: formData.date,
+   366→          isComplete: submitIsComplete,
+   367→          ...(submitFinalBalance !== undefined ? { finalBalance: submitFinalBalance } : {}),
+   368→        });
+   369→        
+   370→        if (result.success) {
+   371→          closeTransactionModal();
+   372→        } else {
+   373→          setErrorMessage(result.error || 'فشل في إنشاء الحركة');
+   374→        }
+   375→      }
+   376→    } catch (error) {
+   377→      console.error('Error saving transaction:', error);
+   378→      setErrorMessage('حدث خطأ غير متوقع');
+   379→    } finally {
+   380→      setIsSubmitting(false);
+   381→    }
+   382→  };
+   383→  
+   384→  // Get conversion preview text
+   385→  const conversionPreview = useMemo(() => {
+   386→    if (isSameCurrency || formData.conversionFactor === 0) return null;
+   387→    
+   388→    const baseAmount = 1;
+   389→    let convertedAmount = baseAmount;
+   390→    
+   391→    if (formData.conversionMethod === 'MULTIPLY') {
+   392→      convertedAmount = baseAmount * formData.conversionFactor;
+   393→    } else {
+   394→      convertedAmount = baseAmount / formData.conversionFactor;
+   395→    }
+   396→    
+   397→    return {
+   398→      base: baseAmount,
+   399→      converted: convertedAmount,
+   400→    };
+   401→  }, [formData.conversionFactor, formData.conversionMethod, isSameCurrency]);
+   402→
+   403→  // Vault effect description
+   404→  const getVaultEffectDescription = () => {
+   405→    if (formData.paymentType === 'DEFERRED') {
+   406→      return { text: 'لا يؤثر على الصندوق (آجل)', color: 'text-amber-600' };
+   407→    }
+   408→    
+   409→    if (formData.type === 'EXPENSE') {
+   410→      // علينا - كاش = نستلم المبلغ (زيادة في الصندوق)
+   411→      return { text: `زيادة في صندوق ${targetCurrency?.symbol || ''}`, color: 'text-emerald-600' };
+   412→    } else {
+   413→      // لنا - كاش = ندفع المبلغ (خصم من الصندوق)
+   414→      return { text: `خصم من صندوق ${targetCurrency?.symbol || ''}`, color: 'text-red-600' };
+   415→    }
+   416→  };
+   417→  
+   418→  const vaultEffect = getVaultEffectDescription();
+   419→  
+   420→  // 🔸 المبلغ النهائي المعروض: يعتمد على حالة الاكتمال
+   421→  // مكتملة: نستخدم الرصيد المحسوب تلقائيًا
+   422→  // غير مكتملة: نستخدم القيمة المدخلة يدويًا
+   423→  const displayFinalBalance = isCompleteChecked
+   424→    ? calculatedBalance
+   425→    : parseFormattedNumber(finalAmountDisplay);
+   426→
+   427→  return (
+   428→    <Dialog open={isTransactionModalOpen} onOpenChange={closeTransactionModal}>
+   429→      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+   430→        <DialogHeader>
+   431→          <DialogTitle className="text-xl">
+   432→            {editingTransaction ? 'تعديل الحركة' : 'إضافة حركة جديدة'}
+   433→          </DialogTitle>
+   434→        </DialogHeader>
+   435→        
+   436→        <div className="space-y-4 mt-4">
+   437→          {/* Transaction Direction (لنا / علينا) */}
+   438→          <div className="space-y-2">
+   439→            <Label>اتجاه الحركة</Label>
+   440→            <div className="grid grid-cols-2 gap-3">
+   441→              <button
+   442→                type="button"
+   443→                onClick={() => setFormData({ ...formData, type: 'INCOME' })}
+   444→                className={cn(
+   445→                  'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+   446→                  formData.type === 'INCOME'
+   447→                    ? 'bg-emerald-50 border-emerald-500 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-600 dark:text-emerald-400'
+   448→                    : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
+   449→                )}
+   450→              >
+   451→                <ArrowUpRight className="w-6 h-6" />
+   452→                <span className="text-base">لنا</span>
+   453→                <span className="text-[10px] opacity-70">مبلغ علينا استلامه</span>
+   454→              </button>
+   455→              <button
+   456→                type="button"
+   457→                onClick={() => setFormData({ ...formData, type: 'EXPENSE' })}
+   458→                className={cn(
+   459→                  'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+   460→                  formData.type === 'EXPENSE'
+   461→                    ? 'bg-red-50 border-red-500 text-red-700 dark:bg-red-950/30 dark:border-red-600 dark:text-red-400'
+   462→                    : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
+   463→                )}
+   464→              >
+   465→                <ArrowDownRight className="w-6 h-6" />
+   466→                <span className="text-base">علينا</span>
+   467→                <span className="text-[10px] opacity-70">مبلغ علينا دفعه</span>
+   468→              </button>
+   469→            </div>
+   470→          </div>
+   471→          
+   472→          {/* Payment Type (كاش / آجل) */}
+   473→          <div className="space-y-2">
+   474→            <Label>نوع الدفع</Label>
+   475→            <div className="grid grid-cols-2 gap-3">
+   476→              <button
+   477→                type="button"
+   478→                onClick={() => setFormData({ ...formData, paymentType: 'CASH' })}
+   479→                className={cn(
+   480→                  'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+   481→                  formData.paymentType === 'CASH'
+   482→                    ? 'bg-blue-50 border-blue-500 text-blue-700 dark:bg-blue-950/30 dark:border-blue-600 dark:text-blue-400'
+   483→                    : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
+   484→                )}
+   485→              >
+   486→                <Banknote className="w-6 h-6" />
+   487→                <span className="text-base">كاش</span>
+   488→                <span className="text-[10px] opacity-70">يؤثر على الصندوق</span>
+   489→              </button>
+   490→              <button
+   491→                type="button"
+   492→                onClick={() => setFormData({ ...formData, paymentType: 'DEFERRED' })}
+   493→                className={cn(
+   494→                  'py-4 rounded-xl text-sm font-medium transition-all flex flex-col items-center justify-center gap-2 border-2',
+   495→                  formData.paymentType === 'DEFERRED'
+   496→                    ? 'bg-amber-50 border-amber-500 text-amber-700 dark:bg-amber-950/30 dark:border-amber-600 dark:text-amber-400'
+   497→                    : 'bg-muted/50 border-transparent text-muted-foreground hover:bg-muted'
+   498→                )}
+   499→              >
+   500→                <Clock className="w-6 h-6" />
+   501→                <span className="text-base">آجل</span>
+   502→                <span className="text-[10px] opacity-70">لا يؤثر على الصندوق</span>
+   503→              </button>
+   504→            </div>
+   505→            
+   506→            {/* Vault Effect Indicator */}
+   507→            <AnimatePresence mode="wait">
+   508→              <motion.div
+   509→                key={`${formData.type}-${formData.paymentType}`}
+   510→                initial={{ opacity: 0, y: -10 }}
+   511→                animate={{ opacity: 1, y: 0 }}
+   512→                exit={{ opacity: 0, y: 10 }}
+   513→                className={cn(
+   514→                  'flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-sm',
+   515→                  formData.paymentType === 'DEFERRED' 
+   516→                    ? 'bg-amber-50 dark:bg-amber-950/20' 
+   517→                    : formData.type === 'EXPENSE' 
+   518→                      ? 'bg-emerald-50 dark:bg-emerald-950/20'
+   519→                      : 'bg-red-50 dark:bg-red-950/20'
+   520→                )}
+   521→              >
+   522→                <Wallet className="w-4 h-4" />
+   523→                <span className={vaultEffect.color}>{vaultEffect.text}</span>
+   524→              </motion.div>
+   525→            </AnimatePresence>
+   526→          </div>
+   527→          
+   528→          {/* Account Selection + Completion Status */}
+   529→          <div className="space-y-2">
+   530→            <div className="flex items-center justify-between">
+   531→              <Label>الحساب</Label>
+   532→              {/* 🔸 Check Box لحالة الحركة - المصدر الوحيد للحالة */}
+   533→              <div className="flex items-center gap-2">
+   534→                <Checkbox
+   535→                  checked={isCompleteChecked}
+   536→                  onCheckedChange={(checked) => setIsCompleteChecked(checked === true)}
+   537→                  id="isComplete"
+   538→                  className={cn(
+   539→                    isCompleteChecked
+   540→                      ? 'border-emerald-500 data-[state=checked]:bg-emerald-500'
+   541→                      : 'border-amber-500 data-[state=checked]:bg-amber-500'
+   542→                  )}
+   543→                />
+   544→                <label
+   545→                  htmlFor="isComplete"
+   546→                  className={cn(
+   547→                    'text-sm font-medium cursor-pointer select-none',
+   548→                    isCompleteChecked ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
+   549→                  )}
+   550→                >
+   551→                  {isCompleteChecked ? 'مكتملة' : 'غير مكتملة'}
+   552→                </label>
+   553→              </div>
+   554→            </div>
+   555→            <Select
+   556→              value={formData.accountId}
+   557→              onValueChange={(value) => setFormData({ ...formData, accountId: value })}
+   558→            >
+   559→              <SelectTrigger className="h-12">
+   560→                <SelectValue placeholder="اختر الحساب" />
+   561→              </SelectTrigger>
+   562→              <SelectContent>
+   563→                {accounts.map((account) => (
+   564→                  <SelectItem key={account.id} value={account.id}>
+   565→                    {account.name}
+   566→                  </SelectItem>
+   567→                ))}
+   568→              </SelectContent>
+   569→            </Select>
+   570→          </div>
+   571→          
+   572→          {/* Amount Section - Dual Currency */}
+   573→          <div className="rounded-xl border border-border p-4 space-y-4">
+   574→            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+   575→              <Coins className="w-4 h-4" />
+   576→              <span>المبلغ والتحويل</span>
+   577→            </div>
+   578→            
+   579→            {/* Base Amount Row */}
+   580→            <div className="grid grid-cols-3 gap-3 items-end">
+   581→              <div className="col-span-2 space-y-2">
+   582→                <Label>المبلغ الأساسي</Label>
+   583→                <Input
+   584→                  type="text"
+   585→                  inputMode="decimal"
+   586→                  value={amountDisplay}
+   587→                  onChange={(e) => handleAmountChange(e.target.value)}
+   588→                  placeholder="0"
+   589→                  className="text-left font-mono text-lg h-12"
+   590→                  dir="ltr"
+   591→                />
+   592→                {isBaseSYP && (
+   593→                  <div className="flex gap-1">
+   594→                    <span className="px-2 py-1 rounded-md text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+   595→                      ل.س قديم
+   596→                    </span>
+   597→                  </div>
+   598→                )}
+   599→              </div>
+   600→              <div className="space-y-2">
+   601→                <Label>عملة المبلغ</Label>
+   602→                <Select
+   603→                  value={formData.baseCurrencyId || ''}
+   604→                  onValueChange={(value) => setFormData({ ...formData, baseCurrencyId: value })}
+   605→                >
+   606→                  <SelectTrigger className="h-12">
+   607→                    <SelectValue placeholder="العملة" />
+   608→                  </SelectTrigger>
+   609→                  <SelectContent>
+   610→                    {currencies.map((currency) => (
+   611→                      <SelectItem key={currency.id} value={currency.id}>
+   612→                        {currency.symbol} {currency.code}
+   613→                      </SelectItem>
+   614→                    ))}
+   615→                  </SelectContent>
+   616→                </Select>
+   617→              </div>
+   618→            </div>
+   619→            
+   620→            {/* Conversion Section (show only if different currencies) */}
+   621→            {!isSameCurrency && (
+   622→              <motion.div
+   623→                initial={{ opacity: 0, height: 0 }}
+   624→                animate={{ opacity: 1, height: 'auto' }}
+   625→                exit={{ opacity: 0, height: 0 }}
+   626→                className="space-y-3"
+   627→              >
+   628→                {/* 🔸 Input Mode Toggle - فقط في الحالة المكتملة */}
+   629→                {isCompleteChecked && (
+   630→                  <div className="flex items-center gap-2">
+   631→                    <span className="text-xs text-muted-foreground">طريقة الإدخال:</span>
+   632→                    <button
+   633→                      type="button"
+   634→                      onClick={() => setInputMode('FACTOR_TO_FINAL')}
+   635→                      className={cn(
+   636→                        'px-2 py-1 rounded-lg text-xs font-medium transition-all',
+   637→                        inputMode === 'FACTOR_TO_FINAL'
+   638→                          ? 'bg-primary text-primary-foreground'
+   639→                          : 'bg-muted text-muted-foreground'
+   640→                      )}
+   641→                    >
+   642→                      معامل → نهائي
+   643→                    </button>
+   644→                    <button
+   645→                      type="button"
+   646→                      onClick={() => setInputMode('FINAL_TO_FACTOR')}
+   647→                      className={cn(
+   648→                        'px-2 py-1 rounded-lg text-xs font-medium transition-all',
+   649→                        inputMode === 'FINAL_TO_FACTOR'
+   650→                          ? 'bg-primary text-primary-foreground'
+   651→                          : 'bg-muted text-muted-foreground'
+   652→                      )}
+   653→                    >
+   654→                      نهائي → معامل
+   655→                    </button>
+   656→                  </div>
+   657→                )}
+   658→                
+   659→                {/* 🔸 Conversion Factor - فقط في الحالة المكتملة */}
+   660→                {isCompleteChecked && (
+   661→                  <div className="flex items-center gap-2">
+   662→                    <div className="flex-1 space-y-2">
+   663→                      <Label>معامل التحويل</Label>
+   664→                      <Input
+   665→                        type="text"
+   666→                        inputMode="decimal"
+   667→                        value={conversionFactorDisplay}
+   668→                        onChange={(e) => handleConversionFactorChange(e.target.value)}
+   669→                        className="text-left font-mono h-10"
+   670→                        dir="ltr"
+   671→                        readOnly={inputMode === 'FINAL_TO_FACTOR'}
+   672→                      />
+   673→                    </div>
+   674→                    <div className="flex gap-1 mt-6">
+   675→                      <button
+   676→                        type="button"
+   677→                        onClick={() => setFormData({ ...formData, conversionMethod: 'MULTIPLY' })}
+   678→                        className={cn(
+   679→                          'px-3 py-2 rounded-lg text-sm font-medium transition-all',
+   680→                          formData.conversionMethod === 'MULTIPLY'
+   681→                            ? 'bg-primary text-primary-foreground'
+   682→                            : 'bg-muted text-muted-foreground'
+   683→                        )}
+   684→                      >
+   685→                        ×
+   686→                      </button>
+   687→                      <button
+   688→                        type="button"
+   689→                        onClick={() => setFormData({ ...formData, conversionMethod: 'DIVIDE' })}
+   690→                        className={cn(
+   691→                          'px-3 py-2 rounded-lg text-sm font-medium transition-all',
+   692→                          formData.conversionMethod === 'DIVIDE'
+   693→                            ? 'bg-primary text-primary-foreground'
+   694→                            : 'bg-muted text-muted-foreground'
+   695→                        )}
+   696→                      >
+   697→                        ÷
+   698→                      </button>
+   699→                    </div>
+   700→                  </div>
+   701→                )}
+   702→                
+   703→                {/* 🔸 Final Amount Input - في الحالة المكتملة (نهائي ← معامل) */}
+   704→                {isCompleteChecked && inputMode === 'FINAL_TO_FACTOR' && (
+   705→                  <div className="space-y-2">
+   706→                    <Label>المبلغ النهائي ({targetCurrency?.symbol})</Label>
+   707→                    <Input
+   708→                      type="text"
+   709→                      inputMode="decimal"
+   710→                      value={finalAmountDisplay}
+   711→                      onChange={(e) => handleFinalAmountChange(e.target.value)}
+   712→                      placeholder="أدخل المبلغ النهائي"
+   713→                      className="text-left font-mono h-10"
+   714→                      dir="ltr"
+   715→                    />
+   716→                  </div>
+   717→                )}
+   718→                
+   719→                {/* 🔸 الرصيد النهائي اليدوي - فقط في الحالة غير المكتملة */}
+   720→                {!isCompleteChecked && (
+   721→                  <div className="space-y-2">
+   722→                    <Label>الرصيد النهائي ({targetCurrency?.symbol})</Label>
+   723→                    <Input
+   724→                      type="text"
+   725→                      inputMode="decimal"
+   726→                      value={finalAmountDisplay}
+   727→                      onChange={(e) => handleManualFinalBalanceChange(e.target.value)}
+   728→                      placeholder="أدخل الرصيد النهائي يدويًا"
+   729→                      className="text-left font-mono h-10"
+   730→                      dir="ltr"
+   731→                    />
+   732→                    <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+   733→                      <AlertCircle className="w-3 h-3" />
+   734→                      إدخال يدوي بدون حساب تلقائي
+   735→                    </p>
+   736→                  </div>
+   737→                )}
+   738→                
+   739→                {/* SYP Rate Note - فقط في الحالة المكتملة */}
+   740→                {isCompleteChecked && isSYPInvolved && (
+   741→                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+   742→                    <Coins className="w-3 h-3" />
+   743→                    معامل التحويل بالإصدار القديم
+   744→                  </p>
+   745→                )}
+   746→                
+   747→                {/* Conversion Preview - فقط في الحالة المكتملة */}
+   748→                {isCompleteChecked && conversionPreview && formData.conversionFactor !== 1 && (
+   749→                  <div className="flex items-center gap-2 p-2 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-800/30">
+   750→                    <RefreshCcw className="w-3 h-3 text-blue-500" />
+   751→                    <span className="text-xs text-blue-700 dark:text-blue-300">
+   752→                      1 {baseCurrency?.code} = {formatNumber(isTargetSYP ? conversionPreview.converted : conversionPreview.converted, 4)} {targetCurrency?.symbol}
+   753→                    </span>
+   754→                  </div>
+   755→                )}
+   756→                
+   757→                {/* Converted Amount Preview - فقط في الحالة المكتملة */}
+   758→                {isCompleteChecked && (
+   759→                  <div className="flex items-center justify-center gap-2 py-2">
+   760→                    <span className="text-sm text-muted-foreground">
+   761→                      {formatNumber(formData.amount)} {baseCurrency?.symbol}
+   762→                    </span>
+   763→                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
+   764→                    <span className="text-sm font-medium">
+   765→                      {formatNumber(convertedAmount)} {targetCurrency?.symbol}
+   766→                    </span>
+   767→                  </div>
+   768→                )}
+   769→              </motion.div>
+   770→            )}
+   771→            
+   772→            {/* 🔸 الرصيد النهائي اليدوي لنفس العملة - فقط في الحالة غير المكتملة */}
+   773→            {isSameCurrency && !isCompleteChecked && (
+   774→              <div className="space-y-2">
+   775→                <Label>الرصيد النهائي ({targetCurrency?.symbol})</Label>
+   776→                <Input
+   777→                  type="text"
+   778→                  inputMode="decimal"
+   779→                  value={finalAmountDisplay}
+   780→                  onChange={(e) => handleManualFinalBalanceChange(e.target.value)}
+   781→                  placeholder="أدخل الرصيد النهائي يدويًا"
+   782→                  className="text-left font-mono h-10"
+   783→                  dir="ltr"
+   784→                />
+   785→                <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
+   786→                  <AlertCircle className="w-3 h-3" />
+   787→                  إدخال يدوي بدون حساب تلقائي
+   788→                </p>
+   789→              </div>
+   790→            )}
+   791→            
+   792→            {/* Target Currency */}
+   793→            <div className="space-y-2">
+   794→              <Label>العملة النهائية (للتسجيل)</Label>
+   795→              <Select
+   796→                value={formData.currencyId}
+   797→                onValueChange={(value) => setFormData({ ...formData, currencyId: value })}
+   798→              >
+   799→                <SelectTrigger className="h-12">
+   800→                  <SelectValue placeholder="اختر العملة" />
+   801→                </SelectTrigger>
+   802→                <SelectContent>
+   803→                  {currencies.map((currency) => (
+   804→                    <SelectItem key={currency.id} value={currency.id}>
+   805→                      {currency.name} ({currency.symbol})
+   806→                    </SelectItem>
+   807→                  ))}
+   808→                </SelectContent>
+   809→              </Select>
+   810→            </div>
+   811→          </div>
+   812→          
+   813→          {/* Fees Section */}
+   814→          <div className="rounded-xl border border-border p-4 space-y-3">
+   815→            <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+   816→              <Calculator className="w-4 h-4" />
+   817→              <span>الأجور (اختياري)</span>
+   818→            </div>
+   819→            
+   820→            {/* Fees Amount & Type */}
+   821→            <div className="grid grid-cols-2 gap-3">
+   822→              <div className="space-y-2">
+   823→                <Label>قيمة الأجور</Label>
+   824→                <Input
+   825→                  type="text"
+   826→                  inputMode="decimal"
+   827→                  value={feesAmountDisplay}
+   828→                  onChange={(e) => handleFeesAmountChange(e.target.value)}
+   829→                  placeholder="0"
+   830→                  className="text-left font-mono h-10"
+   831→                  dir="ltr"
+   832→                />
+   833→              </div>
+   834→              
+   835→              <div className="space-y-2">
+   836→                <Label>نوع الأجور</Label>
+   837→                <Select
+   838→                  value={formData.feesType}
+   839→                  onValueChange={(value: 'FIXED' | 'PERCENTAGE' | 'PER_THOUSAND') => 
+   840→                    setFormData({ ...formData, feesType: value })
+   841→                  }
+   842→                >
+   843→                  <SelectTrigger className="h-10">
+   844→                    <SelectValue />
+   845→                  </SelectTrigger>
+   846→                  <SelectContent>
+   847→                    <SelectItem value="FIXED">مبلغ ثابت</SelectItem>
+   848→                    <SelectItem value="PERCENTAGE">نسبة %</SelectItem>
+   849→                    <SelectItem value="PER_THOUSAND">من ألف</SelectItem>
+   850→                  </SelectContent>
+   851→                </Select>
+   852→              </div>
+   853→            </div>
+   854→            
+   855→            {/* Fees Direction */}
+   856→            <div className="space-y-2">
+   857→              <Label>اتجاه الأجور</Label>
+   858→              <div className="grid grid-cols-2 gap-2">
+   859→                <button
+   860→                  type="button"
+   861→                  onClick={() => setFormData({ ...formData, feesDirection: 'INCOME' })}
+   862→                  className={cn(
+   863→                    'py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-1',
+   864→                    formData.feesDirection === 'INCOME'
+   865→                      ? 'bg-emerald-500 text-white'
+   866→                      : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+   867→                  )}
+   868→                >
+   869→                  <ArrowUpRight className="w-4 h-4" />
+   870→                  لنا
+   871→                </button>
+   872→                <button
+   873→                  type="button"
+   874→                  onClick={() => setFormData({ ...formData, feesDirection: 'EXPENSE' })}
+   875→                  className={cn(
+   876→                    'py-2 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-1',
+   877→                    formData.feesDirection === 'EXPENSE'
+   878→                      ? 'bg-red-500 text-white'
+   879→                      : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+   880→                  )}
+   881→                >
+   882→                  <ArrowDownRight className="w-4 h-4" />
+   883→                  علينا
+   884→                </button>
+   885→              </div>
+   886→            </div>
+   887→            
+   888→            {/* Fees Preview */}
+   889→            {formData.feesAmount > 0 && (
+   890→              <div className={cn(
+   891→                'rounded-lg p-2 text-sm flex items-center justify-between',
+   892→                formData.feesDirection === 'INCOME'
+   893→                  ? 'bg-emerald-50 dark:bg-emerald-950/20'
+   894→                  : 'bg-red-50 dark:bg-red-950/20'
+   895→              )}>
+   896→                <span className="text-muted-foreground">قيمة الأجور:</span>
+   897→                <span className={cn(
+   898→                  'font-medium',
+   899→                  formData.feesDirection === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
+   900→                )}>
+   901→                  {formData.feesDirection === 'INCOME' ? '+' : '-'}{formatNumber(feesValue)} {targetCurrency?.symbol}
+   902→                </span>
+   903→              </div>
+   904→            )}
+   905→          </div>
+   906→          
+   907→          {/* Date */}
+   908→          <div className="space-y-2">
+   909→            <Label>التاريخ</Label>
+   910→            <Input
+   911→              type="date"
+   912→              value={formData.date}
+   913→              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+   914→              className="h-12"
+   915→            />
+   916→          </div>
+   917→          
+   918→          {/* Description */}
+   919→          <div className="space-y-2">
+   920→            <Label>البيان (اختياري)</Label>
+   921→            <Textarea
+   922→              value={formData.description}
+   923→              onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+   924→              placeholder="ملاحظات إضافية..."
+   925→              rows={2}
+   926→            />
+   927→          </div>
+   928→          
+   929→          {/* Final Balance Display */}
+   930→          <div className={cn(
+   931→            'rounded-xl p-5 border-2',
+   932→            !isCompleteChecked
+   933→              ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800'
+   934→              : formData.type === 'INCOME' 
+   935→                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800' 
+   936→                : 'bg-red-50 dark:bg-red-950/20 border-red-200 dark:border-red-800'
+   937→          )}>
+   938→            <div className="flex items-center justify-between mb-2">
+   939→              <p className="text-sm text-muted-foreground">الرصيد النهائي</p>
+   940→              <div className="flex items-center gap-1">
+   941→                {!isCompleteChecked ? (
+   942→                  <AlertCircle className="w-4 h-4 text-amber-500" />
+   943→                ) : formData.paymentType === 'DEFERRED' ? (
+   944→                  <Clock className="w-4 h-4 text-amber-500" />
+   945→                ) : (
+   946→                  <Banknote className={cn(
+   947→                    'w-4 h-4',
+   948→                    formData.type === 'EXPENSE' ? 'text-emerald-500' : 'text-red-500'
+   949→                  )} />
+   950→                )}
+   951→                <span className="text-xs text-muted-foreground">
+   952→                  {!isCompleteChecked ? 'غير مكتملة' : formData.paymentType === 'DEFERRED' ? 'آجل' : 'كاش'}
+   953→                </span>
+   954→              </div>
+   955→            </div>
+   956→            <p className={cn(
+   957→              'text-3xl font-bold font-mono',
+   958→              !isCompleteChecked 
+   959→                ? 'text-amber-600'
+   960→                : formData.type === 'INCOME' ? 'text-emerald-600' : 'text-red-600'
+   961→            )} dir="ltr">
+   962→              {formatNumber(displayFinalBalance)} {targetCurrency?.symbol}
+   963→            </p>
+   964→            {isTargetSYP && (
+   965→              <p className="text-[10px] text-muted-foreground mt-1">{formatSYPDualDisplay(displayFinalBalance)}</p>
+   966→            )}
+   967→            {!isSameCurrency && formData.amount > 0 && isCompleteChecked && (
+   968→              <p className="text-xs text-muted-foreground mt-2">
+   969→                = {formatNumber(formData.amount)} {baseCurrency?.symbol}
+   970→              </p>
+   971→            )}
+   972→            {isBaseSYP && !isSameCurrency && formData.amount > 0 && isCompleteChecked && (
+   973→              <p className="text-[10px] text-muted-foreground mt-0.5">{formatSYPDualDisplay(formData.amount)}</p>
+   974→            )}
+   975→          </div>
+   976→          
+   977→          {/* Error Message */}
+   978→          <AnimatePresence>
+   979→            {errorMessage && (
+   980→              <motion.div
+   981→                initial={{ opacity: 0, height: 0 }}
+   982→                animate={{ opacity: 1, height: 'auto' }}
+   983→                exit={{ opacity: 0, height: 0 }}
+   984→                className="rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 p-4"
+   985→              >
+   986→                <div className="flex items-start gap-3">
+   987→                  <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+   988→                  <div>
+   989→                    <p className="text-sm font-medium text-red-700 dark:text-red-400">
+   990→                      لا يمكن إتمام العملية
+   991→                    </p>
+   992→                    <p className="text-sm text-red-600 dark:text-red-300 mt-1">
+   993→                      {errorMessage}
+   994→                    </p>
+   995→                  </div>
+   996→                </div>
+   997→              </motion.div>
+   998→            )}
+   999→          </AnimatePresence>
+  1000→          
+  1001→          {/* Submit Button */}
+  1002→          {/* 🔸 تنبيه الحالة غير المكتملة */}
+  1003→          {!isCompleteChecked && (
+  1004→            <div className="rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 p-3 flex items-center gap-2">
+  1005→              <AlertCircle className="w-4 h-4 text-amber-500 flex-shrink-0" />
+  1006→              <span className="text-sm text-amber-700 dark:text-amber-300">
+  1007→                سيتم حفظ الحركة كـ "غير مكتملة"
+  1008→              </span>
+  1009→            </div>
+  1010→          )}
+  1011→          <Button
+  1012→            onClick={handleSubmit}
+  1013→            disabled={isSubmitting || !formData.accountId}
+  1014→            className={cn(
+  1015→              "w-full h-14 text-base font-medium",
+  1016→              !isCompleteChecked
+  1017→                ? 'bg-amber-500 hover:bg-amber-600'
+  1018→                : formData.type === 'INCOME' 
+  1019→                  ? 'bg-emerald-500 hover:bg-emerald-600' 
+  1020→                  : 'bg-red-500 hover:bg-red-600'
+  1021→            )}
+  1022→          >
+  1023→            {isSubmitting ? 'جاري الحفظ...' : !isCompleteChecked ? 'حفظ كغير مكتملة' : 'حفظ'}
+  1024→          </Button>
+  1025→        </div>
+  1026→      </DialogContent>
+  1027→    </Dialog>
+  1028→  );
+  1029→}
+  1030→

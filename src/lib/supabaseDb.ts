@@ -5024,10 +5024,18 @@ export async function updatePurchase(id: string, data: {
   const { error } = await supabase.from('purchases').update(updateObj).eq('id', id);
   if (error) throw new Error(error.message);
 
-  // Recalculate USD vault (in case totalPriceUsd changed)
-  const usdCurrencyId = await getUsdCurrencyId();
-  if (usdCurrencyId) {
-    await recalculateVaultBalance(usdCurrencyId);
+  // 🔸 ERP-style: only recalculate the USD vault if the total price changed.
+  //    Per spec: "يتم تحديث صندوق الدولار بفارق قيمة الفاتورة فقط" — the
+  //    vault is derived (opening_balance + sum of all USD-affecting ops), so
+  //    `recalculateVaultBalance` already produces the correct delta-applied
+  //    result. We just skip the recompute when nothing relevant changed to
+  //    avoid unnecessary queries (perf: "استخدام أقل عدد ممكن من الاستعلامات").
+  const totalPriceChanged = totalPriceUsd !== old.totalPriceUsd;
+  if (totalPriceChanged) {
+    const usdCurrencyId = await getUsdCurrencyId();
+    if (usdCurrencyId) {
+      await recalculateVaultBalance(usdCurrencyId);
+    }
   }
 
   const { data: updatedRow } = await supabase.from('purchases').select('*').eq('id', id).single();
@@ -5234,6 +5242,42 @@ export async function updateSale(id: string, data: {
     quantityInBase = effectiveQuantity * baseFactorSnapshot;
     materialName = muInfo.materialName;
     unitName = muInfo.unitName;
+  }
+
+  // 🔸 ERP-style inventory validation (defense in depth — the client-side
+  //    SaleDialog also enforces this, but the server must be authoritative).
+  //    When editing a sale, the old sale's quantity is conceptually "returned"
+  //    to inventory before checking the new quantity:
+  //      - Same material: availableForEdit = currentInBase + oldQuantityInBase
+  //        (the old sale's qty is added back before re-applying the new qty)
+  //      - Material changed: availableForEdit = currentInBase
+  //        (the old sale was on a DIFFERENT material, so it doesn't add back
+  //         to THIS material's inventory)
+  //    The DB UPDATE itself is atomic (single SQL statement), and inventory
+  //    is DERIVED from sum(purchases) - sum(sales), so updating the sale row
+  //    IS the inventory update — no separate "remove old / apply new" steps
+  //    are needed. This validation guarantees the post-update inventory will
+  //    never go negative.
+  const materialChanged = effectiveMaterialId !== old.materialId;
+  const inv = await getMaterialInventory(effectiveMaterialId);
+  if (inv) {
+    const availableForEditInBase = materialChanged
+      ? inv.currentInBase
+      : inv.currentInBase + (old.quantityInBase || 0);
+    if (quantityInBase > availableForEditInBase + 0.0001) {
+      const defaultFactor =
+        inv.material.materialUnits?.find(
+          (mu) => mu.unitId === inv.material.defaultUnitId,
+        )?.baseFactor || 1;
+      const availableInDefaultUnit = availableForEditInBase / defaultFactor;
+      const note = materialChanged
+        ? ''
+        : ' (يشمل الكمية الأصلية للفاتورة)';
+      throw new Error(
+        `الكمية المطلوبة تتجاوز المخزون المتاح للتعديل. ` +
+          `المتاح: ${availableInDefaultUnit.toFixed(2)} ${inv.defaultUnitName}${note}`,
+      );
+    }
   }
 
   let accountName = old.accountName;

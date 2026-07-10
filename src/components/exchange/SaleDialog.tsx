@@ -237,11 +237,57 @@ export function SaleDialog({
     return quantityNum * factor;
   }, [quantityNum, selectedMaterialUnit]);
 
+  // 🔸 ERP-style editing — original sale's quantity in BASE units.
+  //    When editing, the old sale's quantity is conceptually "returned" to
+  //    inventory before checking the new quantity. This is the snapshot from
+  //    the stored sale record (with a safe fallback to qty * baseFactor).
+  const originalQuantityInBase = useMemo(() => {
+    if (!isEditMode || !editingSale) return 0;
+    const stored = editingSale.quantityInBase;
+    if (typeof stored === 'number' && !isNaN(stored) && stored > 0) return stored;
+    const qty = editingSale.quantity || 0;
+    const factor = editingSale.baseFactorSnapshot || 1;
+    return qty * factor;
+  }, [isEditMode, editingSale]);
+
+  // 🔸 When the user changes the material during editing, the old sale's
+  //    quantity was deducted from a DIFFERENT material's inventory. So for
+  //    the NEW material, the old sale's quantity does NOT get added back.
+  const materialChangedDuringEdit = useMemo(() => {
+    if (!isEditMode || !editingSale) return false;
+    return editingSale.materialId !== form.materialId;
+  }, [isEditMode, editingSale, form.materialId]);
+
+  // 🔸 ERP-style "available for edit" stock (in BASE units):
+  //    - Add mode: availableStockForEdit = currentInBase (no old sale to remove)
+  //    - Edit mode (same material): availableStockForEdit = currentInBase + originalQuantityInBase
+  //      (the old sale's quantity is conceptually returned before re-applying)
+  //    - Edit mode (material changed): availableStockForEdit = currentInBase
+  //      (the old sale was on a different material, so it doesn't add back here)
+  const availableStockForEdit = useMemo(() => {
+    if (!inventory) return 0;
+    if (isEditMode && !materialChangedDuringEdit) {
+      return inventory.currentInBase + originalQuantityInBase;
+    }
+    return inventory.currentInBase;
+  }, [inventory, isEditMode, materialChangedDuringEdit, originalQuantityInBase]);
+
   const exceedsInventory = useMemo(() => {
     if (!inventory || !form.materialId || quantityNum <= 0) return false;
     // Allow small floating-point tolerance
-    return quantityInBase > inventory.currentInBase + 0.0001;
-  }, [inventory, form.materialId, quantityNum, quantityInBase]);
+    return quantityInBase > availableStockForEdit + 0.0001;
+  }, [inventory, form.materialId, quantityNum, quantityInBase, availableStockForEdit]);
+
+  // 🔸 Available-for-edit stock expressed in the DEFAULT unit (for display).
+  //    Mirrors `inventory.currentInDefaultUnit` but uses the ERP-adjusted base.
+  const availableStockForEditInDefaultUnit = useMemo(() => {
+    if (!inventory) return 0;
+    const defaultFactor =
+      inventory.material.materialUnits?.find(
+        (mu) => mu.unitId === inventory.material.defaultUnitId,
+      )?.baseFactor || 1;
+    return availableStockForEdit / defaultFactor;
+  }, [inventory, availableStockForEdit]);
 
   // 🔸 Stock in the material's conversion unit (e.g. برميل) — purely
   //    informational. Uses the shared computeConversionUnitStock() helper so
@@ -251,10 +297,13 @@ export function SaleDialog({
   //    default unit). Returns null when no conversion unit exists → the
   //    second field shows "غير معرف" (per spec: "إذا لم تكن المادة تحتوي
   //    على وحدة تحويل ... يظهر بقيمة غير معرف").
+  //    🔸 In EDIT mode, the helper is fed `availableStockForEdit` (not the
+  //    raw currentInBase) so the conversion-unit display also reflects the
+  //    ERP-adjusted "available for edit" stock (original qty added back).
   const stockInSelectedUnit = useMemo<{ value: string | null; unitName: string }>(() => {
     if (!inventory) return { value: null, unitName: '' };
     const result = computeConversionUnitStock(
-      inventory.currentInBase,
+      availableStockForEdit,
       inventory.material.materialUnits,
       inventory.material.defaultUnitId,
     );
@@ -262,7 +311,7 @@ export function SaleDialog({
       value: result?.value ?? null,
       unitName: result?.unitName ?? '',
     };
-  }, [inventory]);
+  }, [inventory, availableStockForEdit]);
 
   const handleFieldChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -280,7 +329,9 @@ export function SaleDialog({
       return 'يرجى إدخال سعر إفرادي صحيح';
     }
     if (exceedsInventory) {
-      return 'الكمية تتجاوز المخزون المتوفر';
+      return isEditMode
+        ? 'الكمية تتجاوز المخزون المتاح للتعديل (يشمل الكمية الأصلية للفاتورة)'
+        : 'الكمية تتجاوز المخزون المتوفر';
     }
     return null;
   };
@@ -447,6 +498,13 @@ export function SaleDialog({
               </div>
 
               {/* Inventory info box — default unit + conversion unit side by side */}
+              {/* 🔸 ERP-style: in EDIT mode, the displayed stock is the
+                  "available for edit" stock = currentInBase + originalQuantityInBase
+                  (the old sale's qty is conceptually returned before re-applying).
+                  In ADD mode, it's just the current stock. The label changes
+                  from "المتوفر" to "المتوفر للتعديل" to make this clear.
+                  UI Freeze preserved: same emerald palette, same border, same
+                  padding, same Info icon, same grid-cols-2 layout. */}
               {form.materialId && (
                 isLoadingInventory ? (
                   <div className="flex items-center gap-2 rounded-xl border border-muted-foreground/20 bg-muted/30 text-muted-foreground px-3 py-2 text-xs">
@@ -455,15 +513,16 @@ export function SaleDialog({
                   </div>
                 ) : inventory ? (
                   <div className="grid grid-cols-2 gap-2">
-                    {/* 🔸 Existing field: stock in default unit (content unchanged) */}
+                    {/* 🔸 Stock in default unit (ERP-adjusted when editing) */}
                     <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
                       <Info className="w-3.5 h-3.5 flex-shrink-0" />
                       <span className="min-w-0 truncate">
-                        المتوفر: {formatNumber(inventory.currentInDefaultUnit)}{' '}
+                        {isEditMode ? 'المتوفر للتعديل' : 'المتوفر'}:{' '}
+                        {formatNumber(availableStockForEditInDefaultUnit)}{' '}
                         <span className="font-medium">{inventory.defaultUnitName}</span>
                       </span>
                     </div>
-                    {/* 🔸 New field: stock in the selected conversion unit */}
+                    {/* 🔸 Stock in the selected conversion unit (ERP-adjusted when editing) */}
                     <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
                       <Info className="w-3.5 h-3.5 flex-shrink-0" />
                       {stockInSelectedUnit.value !== null ? (
@@ -513,7 +572,9 @@ export function SaleDialog({
                   {exceedsInventory && (
                     <p className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
                       <AlertTriangle className="w-3 h-3" />
-                      الكمية تتجاوز المخزون المتوفر
+                      {isEditMode
+                        ? 'الكمية تتجاوز المخزون المتاح للتعديل (يشمل الكمية الأصلية للفاتورة)'
+                        : 'الكمية تتجاوز المخزون المتوفر'}
                     </p>
                   )}
                 </div>

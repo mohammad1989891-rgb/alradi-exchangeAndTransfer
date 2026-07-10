@@ -1,0 +1,697 @@
+     1→     1→'use client';
+     2→     2→
+     3→     3→import { useState, useEffect, useMemo, useCallback } from 'react';
+     4→     4→import { Button } from '@/components/ui/button';
+     5→     5→import { Input } from '@/components/ui/input';
+     6→     6→import { Label } from '@/components/ui/label';
+     7→     7→import {
+     8→     8→  Select,
+     9→     9→  SelectContent,
+    10→    10→  SelectItem,
+    11→    11→  SelectTrigger,
+    12→    12→  SelectValue,
+    13→    13→} from '@/components/ui/select';
+    14→    14→import {
+    15→    15→  Dialog,
+    16→    16→  DialogContent,
+    17→    17→  DialogHeader,
+    18→    18→  DialogTitle,
+    19→    19→  DialogFooter,
+    20→    20→  DialogDescription,
+    21→    21→} from '@/components/ui/dialog';
+    22→    22→import { useToast } from '@/hooks/use-toast';
+    23→    23→import { useAppStore } from '@/store/useAppStore';
+    24→    24→import { cn } from '@/lib/utils';
+    25→    25→import { formatNumber, computeConversionUnitStock } from '@/lib/format';
+    26→    26→import {
+    27→    27→  Loader2,
+    28→    28→  TrendingUp,
+    29→    29→  Calendar,
+    30→    30→  Package,
+    31→    31→  DollarSign,
+    32→    32→  Tag,
+    33→    33→  Boxes,
+    34→    34→  User,
+    35→    35→  AlertTriangle,
+    36→    36→  Info,
+    37→    37→  Wallet,
+    38→    38→  Clock,
+    39→    39→} from 'lucide-react';
+    40→    40→import {
+    41→    41→  getMaterials,
+    42→    42→  getMaterialInventory,
+    43→    43→  addSale,
+    44→    44→  updateSale,
+    45→    45→  type Material,
+    46→    46→  type Sale,
+    47→    47→  type MaterialInventory,
+    48→    48→  type SalePaymentMethod,
+    49→    49→} from '@/lib/supabaseDb';
+    50→    50→
+    51→    51→export interface SaleDialogProps {
+    52→    52→  open: boolean;
+    53→    53→  onOpenChange: (open: boolean) => void;
+    54→    54→  editingSale?: Sale | null;
+    55→    55→  onSuccess?: () => void;
+    56→    56→}
+    57→    57→
+    58→    58→interface FormState {
+    59→    59→  date: string;
+    60→    60→  accountId: string;
+    61→    61→  materialId: string;
+    62→    62→  quantity: string;
+    63→    63→  unitId: string;
+    64→    64→  unitPrice: string;
+    65→    65→  paymentMethod: SalePaymentMethod;
+    66→    66→  description: string;
+    67→    67→}
+    68→    68→
+    69→    69→function getTodayISO(): string {
+    70→    70→  const d = new Date();
+    71→    71→  const year = d.getFullYear();
+    72→    72→  const month = String(d.getMonth() + 1).padStart(2, '0');
+    73→    73→  const day = String(d.getDate()).padStart(2, '0');
+    74→    74→  return `${year}-${month}-${day}`;
+    75→    75→}
+    76→    76→
+    77→    77→function toISODateInput(date: Date | string): string {
+    78→    78→  try {
+    79→    79→    const d = new Date(date);
+    80→    80→    if (isNaN(d.getTime())) return getTodayISO();
+    81→    81→    const year = d.getFullYear();
+    82→    82→    const month = String(d.getMonth() + 1).padStart(2, '0');
+    83→    83→    const day = String(d.getDate()).padStart(2, '0');
+    84→    84→    return `${year}-${month}-${day}`;
+    85→    85→  } catch {
+    86→    86→    return getTodayISO();
+    87→    87→  }
+    88→    88→}
+    89→    89→
+    90→    90→function getDefaultFormState(): FormState {
+    91→    91→  return {
+    92→    92→    date: getTodayISO(),
+    93→    93→    accountId: '',
+    94→    94→    materialId: '',
+    95→    95→    quantity: '',
+    96→    96→    unitId: '',
+    97→    97→    unitPrice: '',
+    98→    98→    // 🔸 Default to 'cash' per spec (cash sales add USD to the vault immediately;
+    99→    99→    // credit sales are deferred invoices that don't touch the cash box)
+   100→   100→    paymentMethod: 'cash',
+   101→   101→    description: '',
+   102→   102→  };
+   103→   103→}
+   104→   104→
+   105→   105→export function SaleDialog({
+   106→   106→  open,
+   107→   107→  onOpenChange,
+   108→   108→  editingSale,
+   109→   109→  onSuccess,
+   110→   110→}: SaleDialogProps) {
+   111→   111→  const { toast } = useToast();
+   112→   112→  const { accounts } = useAppStore();
+   113→   113→
+   114→   114→  const [materials, setMaterials] = useState<Material[]>([]);
+   115→   115→  const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
+   116→   116→  const [inventory, setInventory] = useState<MaterialInventory | null>(null);
+   117→   117→  const [isLoadingInventory, setIsLoadingInventory] = useState(false);
+   118→   118→  const [isSaving, setIsSaving] = useState(false);
+   119→   119→  const [form, setForm] = useState<FormState>(getDefaultFormState());
+   120→   120→
+   121→   121→  const isEditMode = !!editingSale;
+   122→   122→
+   123→   123→  // Load materials list when dialog opens
+   124→   124→  const loadMaterials = useCallback(async () => {
+   125→   125→    setIsLoadingMaterials(true);
+   126→   126→    try {
+   127→   127→      const data = await getMaterials();
+   128→   128→      setMaterials(data);
+   129→   129→    } catch (error) {
+   130→   130→      console.error('Error loading materials:', error);
+   131→   131→      toast({
+   132→   132→        title: 'خطأ',
+   133→   133→        description: 'حدث خطأ أثناء تحميل قائمة المواد',
+   134→   134→        variant: 'destructive',
+   135→   135→      });
+   136→   136→      setMaterials([]);
+   137→   137→    } finally {
+   138→   138→      setIsLoadingMaterials(false);
+   139→   139→    }
+   140→   140→  }, [toast]);
+   141→   141→
+   142→   142→  // Load inventory for a given material
+   143→   143→  const loadInventory = useCallback(async (materialId: string) => {
+   144→   144→    if (!materialId) {
+   145→   145→      setInventory(null);
+   146→   146→      return;
+   147→   147→    }
+   148→   148→    setIsLoadingInventory(true);
+   149→   149→    try {
+   150→   150→      const inv = await getMaterialInventory(materialId);
+   151→   151→      setInventory(inv);
+   152→   152→    } catch (error) {
+   153→   153→      console.error('Error loading inventory:', error);
+   154→   154→      setInventory(null);
+   155→   155→    } finally {
+   156→   156→      setIsLoadingInventory(false);
+   157→   157→    }
+   158→   158→  }, []);
+   159→   159→
+   160→   160→  // Initialize form when dialog opens
+   161→   161→  useEffect(() => {
+   162→   162→    if (!open) return;
+   163→   163→    loadMaterials();
+   164→   164→    if (editingSale) {
+   165→   165→      setForm({
+   166→   166→        date: toISODateInput(editingSale.date),
+   167→   167→        accountId: editingSale.accountId,
+   168→   168→        materialId: editingSale.materialId,
+   169→   169→        quantity: String(editingSale.quantity ?? ''),
+   170→   170→        unitId: editingSale.unitId,
+   171→   171→        unitPrice: String(editingSale.unitPrice ?? ''),
+   172→   172→        paymentMethod: editingSale.paymentMethod === 'credit' ? 'credit' : 'cash',
+   173→   173→        description: editingSale.description ?? '',
+   174→   174→      });
+   175→   175→      // Preload inventory for the editing sale's material
+   176→   176→      loadInventory(editingSale.materialId);
+   177→   177→    } else {
+   178→   178→      setForm(getDefaultFormState());
+   179→   179→      setInventory(null);
+   180→   180→    }
+   181→   181→  }, [open, editingSale, loadMaterials, loadInventory]);
+   182→   182→
+   183→   183→  // Find the currently selected material
+   184→   184→  const selectedMaterial = useMemo<Material | null>(() => {
+   185→   185→    if (!form.materialId) return null;
+   186→   186→    return materials.find((m) => m.id === form.materialId) || null;
+   187→   187→  }, [form.materialId, materials]);
+   188→   188→
+   189→   189→  // Find the currently selected material-unit (for baseFactor lookup)
+   190→   190→  const selectedMaterialUnit = useMemo(() => {
+   191→   191→    if (!selectedMaterial || !form.unitId) return null;
+   192→   192→    return (
+   193→   193→      selectedMaterial.materialUnits?.find((mu) => mu.unitId === form.unitId) ||
+   194→   194→      null
+   195→   195→    );
+   196→   196→  }, [selectedMaterial, form.unitId]);
+   197→   197→
+   198→   198→  // When material changes, reset unitId to the material's default unit and re-fetch inventory
+   199→   199→  const handleMaterialChange = (materialId: string) => {
+   200→   200→    const mat = materials.find((m) => m.id === materialId) || null;
+   201→   201→    let defaultUnitId = '';
+   202→   202→    if (mat) {
+   203→   203→      if (mat.defaultUnitId) {
+   204→   204→        defaultUnitId = mat.defaultUnitId;
+   205→   205→      } else {
+   206→   206→        const baseUnit = mat.materialUnits?.find((mu) => mu.baseFactor === 1);
+   207→   207→        defaultUnitId = baseUnit?.unitId || mat.materialUnits?.[0]?.unitId || '';
+   208→   208→      }
+   209→   209→    }
+   210→   210→    setForm((prev) => ({
+   211→   211→      ...prev,
+   212→   212→      materialId,
+   213→   213→      unitId: defaultUnitId,
+   214→   214→    }));
+   215→   215→    loadInventory(materialId);
+   216→   216→  };
+   217→   217→
+   218→   218→  // Live numeric parsing
+   219→   219→  const quantityNum = useMemo(() => {
+   220→   220→    const n = parseFloat(form.quantity);
+   221→   221→    return isNaN(n) ? 0 : n;
+   222→   222→  }, [form.quantity]);
+   223→   223→
+   224→   224→  const unitPriceNum = useMemo(() => {
+   225→   225→    const n = parseFloat(form.unitPrice);
+   226→   226→    return isNaN(n) ? 0 : n;
+   227→   227→  }, [form.unitPrice]);
+   228→   228→
+   229→   229→  // Live total price calculation
+   230→   230→  const totalPrice = useMemo(() => {
+   231→   231→    return quantityNum * unitPriceNum;
+   232→   232→  }, [quantityNum, unitPriceNum]);
+   233→   233→
+   234→   234→  // Inventory check: convert entered quantity to base using selected unit's baseFactor
+   235→   235→  const quantityInBase = useMemo(() => {
+   236→   236→    const factor = selectedMaterialUnit?.baseFactor ?? 0;
+   237→   237→    return quantityNum * factor;
+   238→   238→  }, [quantityNum, selectedMaterialUnit]);
+   239→   239→
+   240→   240→  const exceedsInventory = useMemo(() => {
+   241→   241→    if (!inventory || !form.materialId || quantityNum <= 0) return false;
+   242→   242→    // Allow small floating-point tolerance
+   243→   243→    return quantityInBase > inventory.currentInBase + 0.0001;
+   244→   244→  }, [inventory, form.materialId, quantityNum, quantityInBase]);
+   245→   245→
+   246→   246→  // 🔸 Stock in the material's conversion unit (e.g. برميل) — purely
+   247→   247→  //    informational. Uses the shared computeConversionUnitStock() helper so
+   248→   248→  //    the SAME logic + formatting is used across SaleDialog, PurchaseDialog,
+   249→   249→  //    and the inventory summary cards on PurchasesPage & SalesPage.
+   250→   250→  //    Picks the material's first unit whose baseFactor > 1 (i.e. NOT the
+   251→   251→  //    default unit). Returns null when no conversion unit exists → the
+   252→   252→  //    second field shows "غير معرف" (per spec: "إذا لم تكن المادة تحتوي
+   253→   253→  //    على وحدة تحويل ... يظهر بقيمة غير معرف").
+   254→   254→  const stockInSelectedUnit = useMemo<{ value: string | null; unitName: string }>(() => {
+   255→   255→    if (!inventory) return { value: null, unitName: '' };
+   256→   256→    const result = computeConversionUnitStock(
+   257→   257→      inventory.currentInBase,
+   258→   258→      inventory.material.materialUnits,
+   259→   259→      inventory.material.defaultUnitId,
+   260→   260→    );
+   261→   261→    return {
+   262→   262→      value: result?.value ?? null,
+   263→   263→      unitName: result?.unitName ?? '',
+   264→   264→    };
+   265→   265→  }, [inventory]);
+   266→   266→
+   267→   267→  const handleFieldChange = (field: keyof FormState, value: string) => {
+   268→   268→    setForm((prev) => ({ ...prev, [field]: value }));
+   269→   269→  };
+   270→   270→
+   271→   271→  const validate = (): string | null => {
+   272→   272→    if (!form.date) return 'يرجى اختيار التاريخ';
+   273→   273→    if (!form.accountId) return 'يرجى اختيار الحساب';
+   274→   274→    if (!form.materialId) return 'يرجى اختيار المادة';
+   275→   275→    if (!form.unitId) return 'يرجى اختيار الواحدة';
+   276→   276→    if (!form.quantity || isNaN(quantityNum) || quantityNum <= 0) {
+   277→   277→      return 'يرجى إدخال الكمية (أكبر من صفر)';
+   278→   278→    }
+   279→   279→    if (form.unitPrice === '' || isNaN(unitPriceNum) || unitPriceNum < 0) {
+   280→   280→      return 'يرجى إدخال سعر إفرادي صحيح';
+   281→   281→    }
+   282→   282→    if (exceedsInventory) {
+   283→   283→      return 'الكمية تتجاوز المخزون المتوفر';
+   284→   284→    }
+   285→   285→    return null;
+   286→   286→  };
+   287→   287→
+   288→   288→  const handleSave = async () => {
+   289→   289→    const validationError = validate();
+   290→   290→    if (validationError) {
+   291→   291→      toast({
+   292→   292→        title: 'بيانات ناقصة',
+   293→   293→        description: validationError,
+   294→   294→        variant: 'destructive',
+   295→   295→      });
+   296→   296→      return;
+   297→   297→    }
+   298→   298→
+   299→   299→    setIsSaving(true);
+   300→   300→    try {
+   301→   301→      const payload = {
+   302→   302→        date: form.date,
+   303→   303→        accountId: form.accountId,
+   304→   304→        materialId: form.materialId,
+   305→   305→        quantity: quantityNum,
+   306→   306→        unitId: form.unitId,
+   307→   307→        unitPrice: unitPriceNum,
+   308→   308→        paymentMethod: form.paymentMethod,
+   309→   309→        description: form.description.trim() || undefined,
+   310→   310→      };
+   311→   311→
+   312→   312→      if (isEditMode && editingSale) {
+   313→   313→        await updateSale(editingSale.id, payload);
+   314→   314→        toast({
+   315→   315→          title: 'تم التحديث',
+   316→   316→          description: 'تم تحديث عملية البيع بنجاح',
+   317→   317→        });
+   318→   318→      } else {
+   319→   319→        await addSale(payload);
+   320→   320→        toast({
+   321→   321→          title: 'تم الحفظ',
+   322→   322→          description: 'تم إضافة عملية البيع بنجاح',
+   323→   323→        });
+   324→   324→      }
+   325→   325→
+   326→   326→      // Dispatch refresh events so other components can update
+   327→   327→      window.dispatchEvent(new Event('sales-updated'));
+   328→   328→      window.dispatchEvent(new Event('app-data-refreshed'));
+   329→   329→
+   330→   330→      onSuccess?.();
+   331→   331→      onOpenChange(false);
+   332→   332→    } catch (error) {
+   333→   333→      console.error('Error saving sale:', error);
+   334→   334→      toast({
+   335→   335→        title: 'خطأ',
+   336→   336→        description:
+   337→   337→          error instanceof Error
+   338→   338→            ? error.message
+   339→   339→            : 'حدث خطأ أثناء حفظ عملية البيع',
+   340→   340→        variant: 'destructive',
+   341→   341→      });
+   342→   342→    } finally {
+   343→   343→      setIsSaving(false);
+   344→   344→    }
+   345→   345→  };
+   346→   346→
+   347→   347→  // Only show active accounts in the dropdown (defensive; spec doesn't require filtering)
+   348→   348→  const activeAccounts = useMemo(() => accounts, [accounts]);
+   349→   349→
+   350→   350→  return (
+   351→   351→    <Dialog open={open} onOpenChange={onOpenChange}>
+   352→   352→      <DialogContent scrollable className="max-w-md">
+   353→   353→        {/* 🔸 Pinned header — stays visible while body scrolls */}
+   354→   354→        <DialogHeader className="flex-shrink-0 border-b px-6 py-4 text-right">
+   355→   355→          <DialogTitle className="flex items-center gap-2">
+   356→   356→            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
+   357→   357→              <TrendingUp className="w-4 h-4 text-white" />
+   358→   358→            </div>
+   359→   359→            {isEditMode ? 'تعديل عملية بيع' : 'إضافة عملية بيع'}
+   360→   360→          </DialogTitle>
+   361→   361→          <DialogDescription className="sr-only">
+   362→   362→            {isEditMode
+   363→   363→              ? 'نموذج تعديل عملية بيع'
+   364→   364→              : 'نموذج إضافة عملية بيع جديدة'}
+   365→   365→          </DialogDescription>
+   366→   366→        </DialogHeader>
+   367→   367→
+   368→   368→        {/* 🔸 Scrollable body — vertical scroll when content overflows */}
+   369→   369→        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 [scrollbar-width:thin]">
+   370→   370→          {isLoadingMaterials ? (
+   371→   371→            <div className="flex items-center justify-center py-12">
+   372→   372→              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+   373→   373→            </div>
+   374→   374→          ) : (
+   375→   375→            <div className="space-y-4">
+   376→   376→              {/* التاريخ */}
+   377→   377→              <div className="space-y-1.5">
+   378→   378→                <Label htmlFor="sale-date" className="flex items-center gap-1.5 text-sm">
+   379→   379→                  <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+   380→   380→                  التاريخ <span className="text-red-500">*</span>
+   381→   381→                </Label>
+   382→   382→                <Input
+   383→   383→                  id="sale-date"
+   384→   384→                  type="date"
+   385→   385→                  value={form.date}
+   386→   386→                  onChange={(e) => handleFieldChange('date', e.target.value)}
+   387→   387→                  className="rounded-xl"
+   388→   388→                />
+   389→   389→              </div>
+   390→   390→
+   391→   391→              {/* اسم الحساب */}
+   392→   392→              <div className="space-y-1.5">
+   393→   393→                <Label className="flex items-center gap-1.5 text-sm">
+   394→   394→                  <User className="w-3.5 h-3.5 text-muted-foreground" />
+   395→   395→                  اسم الحساب <span className="text-red-500">*</span>
+   396→   396→                </Label>
+   397→   397→                <Select
+   398→   398→                  value={form.accountId}
+   399→   399→                  onValueChange={(v) => handleFieldChange('accountId', v)}
+   400→   400→                >
+   401→   401→                  <SelectTrigger className="rounded-xl">
+   402→   402→                    <SelectValue placeholder="اختر الحساب" />
+   403→   403→                  </SelectTrigger>
+   404→   404→                  <SelectContent>
+   405→   405→                    {activeAccounts.length === 0 ? (
+   406→   406→                      <div className="px-3 py-2 text-sm text-muted-foreground">
+   407→   407→                        لا توجد حسابات مسجلة
+   408→   408→                      </div>
+   409→   409→                    ) : (
+   410→   410→                      activeAccounts.map((a) => (
+   411→   411→                        <SelectItem key={a.id} value={a.id}>
+   412→   412→                          {a.name}
+   413→   413→                        </SelectItem>
+   414→   414→                      ))
+   415→   415→                    )}
+   416→   416→                  </SelectContent>
+   417→   417→                </Select>
+   418→   418→              </div>
+   419→   419→
+   420→   420→              {/* اسم المادة */}
+   421→   421→              <div className="space-y-1.5">
+   422→   422→                <Label className="flex items-center gap-1.5 text-sm">
+   423→   423→                  <Package className="w-3.5 h-3.5 text-muted-foreground" />
+   424→   424→                  اسم المادة <span className="text-red-500">*</span>
+   425→   425→                </Label>
+   426→   426→                <Select
+   427→   427→                  value={form.materialId}
+   428→   428→                  onValueChange={handleMaterialChange}
+   429→   429→                >
+   430→   430→                  <SelectTrigger className="rounded-xl">
+   431→   431→                    <SelectValue placeholder="اختر المادة" />
+   432→   432→                  </SelectTrigger>
+   433→   433→                  <SelectContent>
+   434→   434→                    {materials.length === 0 ? (
+   435→   435→                      <div className="px-3 py-2 text-sm text-muted-foreground">
+   436→   436→                        لا توجد مواد مسجلة
+   437→   437→                      </div>
+   438→   438→                    ) : (
+   439→   439→                      materials.map((m) => (
+   440→   440→                        <SelectItem key={m.id} value={m.id}>
+   441→   441→                          {m.name}
+   442→   442→                        </SelectItem>
+   443→   443→                      ))
+   444→   444→                    )}
+   445→   445→                  </SelectContent>
+   446→   446→                </Select>
+   447→   447→              </div>
+   448→   448→
+   449→   449→              {/* Inventory info box — default unit + conversion unit side by side */}
+   450→   450→              {form.materialId && (
+   451→   451→                isLoadingInventory ? (
+   452→   452→                  <div className="flex items-center gap-2 rounded-xl border border-muted-foreground/20 bg-muted/30 text-muted-foreground px-3 py-2 text-xs">
+   453→   453→                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+   454→   454→                    <span>جاري تحميل المخزون...</span>
+   455→   455→                  </div>
+   456→   456→                ) : inventory ? (
+   457→   457→                  <div className="grid grid-cols-2 gap-2">
+   458→   458→                    {/* 🔸 Existing field: stock in default unit (content unchanged) */}
+   459→   459→                    <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+   460→   460→                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+   461→   461→                      <span className="min-w-0 truncate">
+   462→   462→                        المتوفر: {formatNumber(inventory.currentInDefaultUnit)}{' '}
+   463→   463→                        <span className="font-medium">{inventory.defaultUnitName}</span>
+   464→   464→                      </span>
+   465→   465→                    </div>
+   466→   466→                    {/* 🔸 New field: stock in the selected conversion unit */}
+   467→   467→                    <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+   468→   468→                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+   469→   469→                      {stockInSelectedUnit.value !== null ? (
+   470→   470→                        <span className="min-w-0 truncate">
+   471→   471→                          بوحدة التحويل: {stockInSelectedUnit.value}{' '}
+   472→   472→                          <span className="font-medium">{stockInSelectedUnit.unitName}</span>
+   473→   473→                        </span>
+   474→   474→                      ) : (
+   475→   475→                        <span className="min-w-0 truncate text-muted-foreground">
+   476→   476→                          بوحدة التحويل: غير معرف
+   477→   477→                        </span>
+   478→   478→                      )}
+   479→   479→                    </div>
+   480→   480→                  </div>
+   481→   481→                ) : (
+   482→   482→                  <div className="flex items-center gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-3 py-2 text-xs">
+   483→   483→                    <Info className="w-3.5 h-3.5" />
+   484→   484→                    <span>لا توجد بيانات مخزون</span>
+   485→   485→                  </div>
+   486→   486→                )
+   487→   487→              )}
+   488→   488→
+   489→   489→              {/* الكمية + الواحدة */}
+   490→   490→              <div className="grid grid-cols-2 gap-3">
+   491→   491→                <div className="space-y-1.5">
+   492→   492→                  <Label
+   493→   493→                    htmlFor="sale-quantity"
+   494→   494→                    className="flex items-center gap-1.5 text-sm"
+   495→   495→                  >
+   496→   496→                    <Boxes className="w-3.5 h-3.5 text-muted-foreground" />
+   497→   497→                    الكمية <span className="text-red-500">*</span>
+   498→   498→                  </Label>
+   499→   499→                  <Input
+   500→   500→                    id="sale-quantity"
+   501→   501→                    type="number"
+   502→   502→                    min="0"
+   503→   503→                    step="any"
+   504→   504→                    value={form.quantity}
+   505→   505→                    onChange={(e) => handleFieldChange('quantity', e.target.value)}
+   506→   506→                    placeholder="0"
+   507→   507→                    className={cn(
+   508→   508→                      'rounded-xl',
+   509→   509→                      exceedsInventory &&
+   510→   510→                        'border-red-500 focus-visible:ring-red-500/40'
+   511→   511→                    )}
+   512→   512→                  />
+   513→   513→                  {exceedsInventory && (
+   514→   514→                    <p className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
+   515→   515→                      <AlertTriangle className="w-3 h-3" />
+   516→   516→                      الكمية تتجاوز المخزون المتوفر
+   517→   517→                    </p>
+   518→   518→                  )}
+   519→   519→                </div>
+   520→   520→                <div className="space-y-1.5">
+   521→   521→                  <Label className="flex items-center gap-1.5 text-sm">
+   522→   522→                    <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+   523→   523→                    الواحدة <span className="text-red-500">*</span>
+   524→   524→                  </Label>
+   525→   525→                  <Select
+   526→   526→                    value={form.unitId}
+   527→   527→                    onValueChange={(v) => handleFieldChange('unitId', v)}
+   528→   528→                    disabled={!selectedMaterial}
+   529→   529→                  >
+   530→   530→                    <SelectTrigger className="rounded-xl">
+   531→   531→                      <SelectValue placeholder="اختر الواحدة" />
+   532→   532→                    </SelectTrigger>
+   533→   533→                    <SelectContent>
+   534→   534→                      {selectedMaterial?.materialUnits &&
+   535→   535→                      selectedMaterial.materialUnits.length > 0 ? (
+   536→   536→                        selectedMaterial.materialUnits.map((mu) => (
+   537→   537→                          <SelectItem key={mu.id} value={mu.unitId}>
+   538→   538→                            {mu.unit?.name || 'وحدة'}
+   539→   539→                          </SelectItem>
+   540→   540→                        ))
+   541→   541→                      ) : (
+   542→   542→                        <div className="px-3 py-2 text-sm text-muted-foreground">
+   543→   543→                          لا توجد وحدات لهذه المادة
+   544→   544→                        </div>
+   545→   545→                      )}
+   546→   546→                    </SelectContent>
+   547→   547→                  </Select>
+   548→   548→                </div>
+   549→   549→              </div>
+   550→   550→
+   551→   551→              {/* السعر الإفرادي */}
+   552→   552→              <div className="space-y-1.5">
+   553→   553→                <Label
+   554→   554→                  htmlFor="sale-price"
+   555→   555→                  className="flex items-center gap-1.5 text-sm"
+   556→   556→                >
+   557→   557→                  <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
+   558→   558→                  السعر الإفرادي <span className="text-red-500">*</span>
+   559→   559→                </Label>
+   560→   560→                <div className="relative">
+   561→   561→                  <Input
+   562→   562→                    id="sale-price"
+   563→   563→                    type="number"
+   564→   564→                    min="0"
+   565→   565→                    step="any"
+   566→   566→                    value={form.unitPrice}
+   567→   567→                    onChange={(e) => handleFieldChange('unitPrice', e.target.value)}
+   568→   568→                    placeholder="0.00"
+   569→   569→                    className="rounded-xl pl-8"
+   570→   570→                  />
+   571→   571→                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">
+   572→   572→                    $
+   573→   573→                  </span>
+   574→   574→                </div>
+   575→   575→              </div>
+   576→   576→
+   577→   577→              {/* طريقة السداد — Payment Method (segmented buttons) */}
+   578→   578→              <div className="space-y-1.5">
+   579→   579→                <Label className="flex items-center gap-1.5 text-sm">
+   580→   580→                  <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
+   581→   581→                  طريقة السداد <span className="text-red-500">*</span>
+   582→   582→                </Label>
+   583→   583→                <div className="grid grid-cols-2 gap-2">
+   584→   584→                  <button
+   585→   585→                    type="button"
+   586→   586→                    onClick={() => handleFieldChange('paymentMethod', 'cash')}
+   587→   587→                    className={cn(
+   588→   588→                      'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+   589→   589→                      form.paymentMethod === 'cash'
+   590→   590→                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700'
+   591→   591→                        : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+   592→   592→                    )}
+   593→   593→                  >
+   594→   594→                    <Wallet className="w-4 h-4" />
+   595→   595→                    كاش
+   596→   596→                  </button>
+   597→   597→                  <button
+   598→   598→                    type="button"
+   599→   599→                    onClick={() => handleFieldChange('paymentMethod', 'credit')}
+   600→   600→                    className={cn(
+   601→   601→                      'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+   602→   602→                      form.paymentMethod === 'credit'
+   603→   603→                        ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700'
+   604→   604→                        : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+   605→   605→                    )}
+   606→   606→                  >
+   607→   607→                    <Clock className="w-4 h-4" />
+   608→   608→                    آجل
+   609→   609→                  </button>
+   610→   610→                </div>
+   611→   611→                {/* Helper note explaining the cash-box impact */}
+   612→   612→                <p
+   613→   613→                  className={cn(
+   614→   614→                    'flex items-start gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed',
+   615→   615→                    form.paymentMethod === 'cash'
+   616→   616→                      ? 'bg-emerald-50/70 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+   617→   617→                      : 'bg-amber-50/70 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
+   618→   618→                  )}
+   619→   619→                >
+   620→   620→                  <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+   621→   621→                  {form.paymentMethod === 'cash'
+   622→   622→                    ? 'البيع النقدي: تُضاف قيمة الفاتورة بالدولار إلى صندوق الدولار مباشرةً عند الحفظ.'
+   623→   623→                    : 'البيع الآجل: لا يؤثر على الصندوق. تُسجَّل كفاتورة بيع غير مسددة مرتبطة بالحساب وتظهر في كشف الحساب حتى يتم تحصيلها لاحقاً.'}
+   624→   624→                </p>
+   625→   625→              </div>
+   626→   626→
+   627→   627→              {/* البيان */}
+   628→   628→              <div className="space-y-1.5">
+   629→   629→                <Label htmlFor="sale-description" className="text-sm">
+   630→   630→                  البيان
+   631→   631→                </Label>
+   632→   632→                <Input
+   633→   633→                  id="sale-description"
+   634→   634→                  type="text"
+   635→   635→                  value={form.description}
+   636→   636→                  onChange={(e) => handleFieldChange('description', e.target.value)}
+   637→   637→                  placeholder="بيان اختياري..."
+   638→   638→                  className="rounded-xl"
+   639→   639→                />
+   640→   640→              </div>
+   641→   641→
+   642→   642→              {/* السعر الإجمالي — Read-only computed box */}
+   643→   643→              <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20 p-4">
+   644→   644→                <p className="text-xs text-muted-foreground mb-1">
+   645→   645→                  السعر الإجمالي للفاتورة بالدولار
+   646→   646→                </p>
+   647→   647→                <div className="flex items-baseline justify-between gap-2">
+   648→   648→                  <p className="text-[11px] text-muted-foreground">
+   649→   649→                    {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
+   650→   650→                  </p>
+   651→   651→                  <p
+   652→   652→                    className={cn(
+   653→   653→                      'text-xl font-bold text-emerald-600 dark:text-emerald-400',
+   654→   654→                      totalPrice === 0 && 'text-muted-foreground/70'
+   655→   655→                    )}
+   656→   656→                  >
+   657→   657→                    {formatNumber(totalPrice)} $
+   658→   658→                  </p>
+   659→   659→                </div>
+   660→   660→              </div>
+   661→   661→            </div>
+   662→   662→          )}
+   663→   663→        </div>
+   664→   664→
+   665→   665→        {/* 🔸 Pinned footer — Save/Cancel always visible */}
+   666→   666→        <DialogFooter className="flex-shrink-0 gap-2 border-t bg-background px-6 py-4">
+   667→   667→          <Button
+   668→   668→            variant="outline"
+   669→   669→            onClick={() => onOpenChange(false)}
+   670→   670→            disabled={isSaving}
+   671→   671→            className="rounded-xl"
+   672→   672→          >
+   673→   673→            إلغاء
+   674→   674→          </Button>
+   675→   675→          <Button
+   676→   676→            onClick={handleSave}
+   677→   677→            disabled={isSaving || isLoadingMaterials || exceedsInventory}
+   678→   678→            className="gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white"
+   679→   679→          >
+   680→   680→            {isSaving ? (
+   681→   681→              <>
+   682→   682→                <Loader2 className="w-4 h-4 animate-spin" />
+   683→   683→                جاري الحفظ...
+   684→   684→              </>
+   685→   685→            ) : (
+   686→   686→              <>
+   687→   687→                <TrendingUp className="w-4 h-4" />
+   688→   688→                {isEditMode ? 'حفظ التعديلات' : 'حفظ'}
+   689→   689→              </>
+   690→   690→            )}
+   691→   691→          </Button>
+   692→   692→        </DialogFooter>
+   693→   693→      </DialogContent>
+   694→   694→    </Dialog>
+   695→   695→  );
+   696→   696→}
+   697→   697→

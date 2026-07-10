@@ -1028,3 +1028,97 @@ Stage Summary:
 - No-conversion-unit case: the second line is hidden (summary cards) or shows "لا توجد"/"غير معرف" (dialogs) per spec.
 - UI Freeze fully preserved: same emerald color palette, same border styles, same padding, same font sizes, same Info icon, same grid-cols-2 layout. No existing styling/layout/logic changed — only ADDITIVE second-line + new informational box in PurchaseDialog.
 - Files changed: src/lib/format.ts (new helper), src/components/exchange/PurchasesPage.tsx (summary card), src/components/exchange/SalesPage.tsx (summary card), src/components/exchange/PurchaseDialog.tsx (new inventory display), src/components/exchange/SaleDialog.tsx (refactored to shared helper).
+
+---
+Task ID: 17
+Agent: Main Agent
+Task: Fix purchase/sale invoice EDITING logic to use ERP-style "remove old effect → validate → apply new" pattern, so editing an invoice no longer falsely blocks on the current stock (which already includes the old invoice's deduction). Single DB UPDATE (atomic), no delete+recreate, no new financial movements, vault updated by delta only. UI Freeze preserved.
+
+Work Log:
+- Read the worklog (Tasks #13–#16) to understand the existing architecture: inventory is DERIVED (currentInBase = sum(purchases.quantity_in_base) − sum(sales.quantity_in_base)), vault balance is DERIVED via recalculateVaultBalance(), sales have payment_method (cash/credit), purchases always deduct USD from vault.
+- Read SaleDialog.tsx, PurchaseDialog.tsx, and the relevant sections of supabaseDb.ts (addSale, updateSale, deleteSale, addPurchase, updatePurchase, deletePurchase, getMaterialInventory, recalculateVaultBalance) to understand the current edit flow.
+- ROOT CAUSE of the user's bug: SaleDialog's `exceedsInventory` memo compared the new quantity (in base) against `inventory.currentInBase` ONLY. When editing a sale, currentInBase already includes the OLD sale's deduction, so editing a 20L sale on a 50L stock (currentInBase=30L) to 40L would fail with "40 > 30" even though the correct available-for-edit stock is 50L (30 + 20). Same class of bug on the server: updateSale had NO inventory validation at all.
+- Implemented ERP-style "available for edit" logic across 3 files:
+
+  1. SaleDialog.tsx (client-side validation + display):
+     • Added `originalQuantityInBase` memo — reads `editingSale.quantityInBase` (stored snapshot) with a safe fallback to `editingSale.quantity × editingSale.baseFactorSnapshot`.
+     • Added `materialChangedDuringEdit` memo — tracks whether the user changed the material during editing (the old sale's quantity was on a DIFFERENT material, so it doesn't add back to THIS material's inventory).
+     • Added `availableStockForEdit` memo — the ERP core:
+         - Add mode: currentInBase (no old sale to remove)
+         - Edit mode (same material): currentInBase + originalQuantityInBase (old sale's qty conceptually returned)
+         - Edit mode (material changed): currentInBase (old sale was on a different material)
+     • Updated `exceedsInventory` to compare against `availableStockForEdit` instead of raw `currentInBase`.
+     • Added `availableStockForEditInDefaultUnit` memo (for display) = availableStockForEdit / defaultFactor.
+     • Updated `stockInSelectedUnit` (conversion-unit display) to feed `availableStockForEdit` into `computeConversionUnitStock()` so BOTH the default-unit box AND the conversion-unit box reflect the ERP-adjusted stock when editing.
+     • Updated the inventory info box label: "المتوفر" → "المتوفر للتعديل" in edit mode (value changes from currentInDefaultUnit to availableStockForEditInDefaultUnit). UI Freeze preserved — same emerald palette, same border, same padding, same Info icon, same grid-cols-2 layout. Only the label text + numeric value change.
+     • Updated the warning message: "الكمية تتجاوز المخزون المتوفر" → "الكمية تتجاوز المخزون المتاح للتعديل (يشمل الكمية الأصلية للفاتورة)" in edit mode. Applied in BOTH the inline `<p>` warning under the quantity input AND the `validate()` return string (which feeds the toast).
+
+  2. supabaseDb.ts → updateSale (server-side validation, defense in depth):
+     • After computing `quantityInBase` (with the new baseFactor if material/unit changed) and BEFORE the UPDATE, added an ERP-style validation block:
+         - `materialChanged = effectiveMaterialId !== old.materialId`
+         - `inv = await getMaterialInventory(effectiveMaterialId)`
+         - `availableForEditInBase = materialChanged ? inv.currentInBase : inv.currentInBase + (old.quantityInBase || 0)`
+         - If `quantityInBase > availableForEditInBase + 0.0001` → throw a clear Arabic error: "الكمية المطلوبة تتجاوز المخزون المتاح للتعديل. المتاح: {X} {unit} (يشمل الكمية الأصلية للفاتورة)"
+     • This guarantees the post-update inventory can NEVER go negative, even if the client-side check is bypassed (e.g., direct API call).
+     • The existing UPDATE flow is UNCHANGED: single atomic SQL UPDATE on the sale row (no DELETE+INSERT, no new records). `id`, `created_at` preserved; only `updated_at` changes. Inventory is DERIVED, so updating the sale row IS the inventory update — no separate "remove old / apply new" SQL steps needed.
+     • The existing vault-recalc optimization (`amountChanged || paymentMethodChanged`) is preserved — vault only recomputes when totalPrice or paymentMethod actually changed.
+
+  3. supabaseDb.ts → updatePurchase (performance optimization):
+     • Added `totalPriceChanged = totalPriceUsd !== old.totalPriceUsd` guard around the vault recalc. Previously updatePurchase ALWAYS called recalculateVaultBalance, even when only the description or date changed. Now it only recomputes when the USD total actually changed (matches the spec: "يتم تحديث صندوق الدولار بفارق قيمة الفاتورة فقط").
+     • No inventory validation added for purchases — purchases ADD to inventory, so there's no upper bound to validate against. The spec's "المخزون الحقيقي = المخزون الحالي - الكمية الأصلية" is just the internal math for computing the new inventory; it doesn't imply a validation check.
+     • The UPDATE flow is UNCHANGED: single atomic SQL UPDATE, no delete+recreate.
+
+- What was NOT changed (per spec):
+  • ❌ No new DB transaction mechanism — Supabase REST doesn't support multi-statement transactions, but the single UPDATE is atomic by itself, and inventory is DERIVED (so the UPDATE IS the inventory update). Functionally equivalent to a transaction for this use case.
+  • ❌ No delete+recreate — existing UPDATE preserved.
+  • ❌ No new financial movements created — vault is DERIVED via recalculateVaultBalance (reads the updated sale/purchase rows), no insert into a "movements" table.
+  • ❌ No change to addSale/addPurchase/deleteSale/deletePurchase.
+  • ❌ No change to recalculateVaultBalance.
+  • ❌ No change to AccountStatementModal, ReportsPage, BalancesPage, DebtsPage.
+  • ❌ No UI Freeze violation — same colors, borders, padding, fonts, layout. Only label text + numeric values changed in edit mode.
+
+Verification (end-to-end via Agent Browser + live data):
+
+  • bun run lint → 0 errors, 0 warnings ✓
+  • Dev server running, HTTP 200, no compile errors ✓
+  • Logged in as admin (admin/admin), navigated SideMenu → المبيعات.
+
+  SCENARIO A — Edit sale, valid quantity (24 → 25 برميل):
+  • Opened the 24-برميل sale (4,560$) for editing.
+  • Edit dialog showed "المتوفر للتعديل: 7,040.00 لتر" + "بوحدة التحويل: 32.00 برميل" ✓
+    (Math: currentInBase=1,760L + originalQtyInBase=5,280L = 7,040L = 32 برميل. Correct.)
+  • Changed quantity 24 → 25. No warning. Total updated to 4,750$. Save button ENABLED. ✓
+  • Clicked save → dialog closed, returned to Sales page. Sale now shows "25.00 برميل | 4,750.00$". ✓
+  • Inventory summary card updated from 8 برميل → 7 برميل (delta = −1 برميل = −220L = exactly the 25−24 difference). ✓
+  • No console errors, no page errors. ✓
+
+  SCENARIO B — Edit sale, invalid quantity (exceeds available):
+  • Reopened the (now 25-برميل) sale for editing.
+  • Edit dialog showed "المتوفر للتعديل: 7,040.00 لتر" + "32.00 برميل" ✓ (1,540L current + 5,500L original = 7,040L — same available-for-edit, since the original qty was 25 برميل now).
+  • Changed quantity 25 → 33 (33×220 = 7,260L > 7,040L available).
+  • Inline warning appeared: "الكمية تتجاوز المخزون المتاح للتعديل (يشمل الكمية الأصلية للفاتورة)" ✓
+  • Save button DISABLED. ✓
+  • Quantity input border turned red. ✓
+
+  SCENARIO C — Revert to original (25 → 24 برميل):
+  • Changed quantity back to 24. No warning. Save enabled. ✓
+  • Saved → sale reverted to "24.00 برميل | 4,560.00$". ✓
+  • Inventory reverted to 8 برميل (1,760L) — original state fully restored. ✓
+
+  SCENARIO D — Purchase edit dialog (no ERP validation, informational only):
+  • Navigated SideMenu → المشتريات. Opened a 30-برميل purchase (5,250$) for editing.
+  • Edit dialog showed "المتوفر: 1,760.00 لتر" + "بوحدة التحويل: 8.00 برميل" ✓
+    (NOTE: label is "المتوفر" NOT "المتوفر للتعديل" — correct, because purchases ADD to inventory and don't need the ERP adjustment. The displayed stock is the CURRENT stock, not adjusted.)
+  • Quantity field showed 30, save button enabled. Cancelled without saving to preserve data. ✓
+
+  All scenarios verified with NO console errors, NO runtime errors. Dev server HTTP 200 throughout.
+
+Stage Summary:
+- Sale invoice editing now uses ERP-style "available for edit" logic: availableForEdit = currentInBase + originalQuantityInBase (same material) or currentInBase (material changed). The user can edit a sale's quantity up to (current stock + the sale's own original quantity) without false "exceeds inventory" errors.
+- The inventory info box in SaleDialog now shows "المتوفر للتعديل" (with the ERP-adjusted value) in edit mode, and "المتوفر" (current stock) in add mode. Both the default-unit and conversion-unit displays use the ERP-adjusted stock when editing.
+- Server-side updateSale enforces the same ERP validation as a defense-in-depth safeguard, throwing a clear Arabic error if the new quantity would push inventory negative.
+- Purchase editing: no inventory validation (purchases ADD), but the vault recalc is now skipped when totalPriceUsd is unchanged (perf optimization per spec: "تحديث صندوق الدولار بفارق قيمة الفاتورة فقط").
+- Atomicity: the UPDATE is a single SQL statement (atomic by itself); inventory is DERIVED from sum(purchases) − sum(sales), so updating the sale/purchase row IS the inventory update. No delete+recreate, no new records, no new financial movements. `id` and `created_at` preserved; only `updated_at` changes.
+- Live update: SaleDialog already dispatches `sales-updated` + `app-data-refreshed` after save, so SalesPage, PurchasesPage, BalancesPage, AccountStatementModal, and all other listeners refresh automatically.
+- UI Freeze fully preserved: same emerald palette, same borders, same padding, same Info icon, same grid-cols-2 layout. Only label text ("المتوفر" → "المتوفر للتعديل") and numeric values changed in edit mode.
+- Files changed: src/components/exchange/SaleDialog.tsx (5 new memos + label/value/warning updates), src/lib/supabaseDb.ts (ERP validation in updateSale + totalPriceChanged optimization in updatePurchase). No other files touched.

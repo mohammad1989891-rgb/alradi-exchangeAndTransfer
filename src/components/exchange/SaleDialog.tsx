@@ -328,8 +328,9 @@ export function SaleDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent scrollable className="max-w-md">
+        {/* 🔸 Pinned header — stays visible while body scrolls */}
+        <DialogHeader className="flex-shrink-0 border-b px-6 py-4 text-right">
           <DialogTitle className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center">
               <TrendingUp className="w-4 h-4 text-white" />
@@ -343,295 +344,299 @@ export function SaleDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {isLoadingMaterials ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* التاريخ */}
-            <div className="space-y-1.5">
-              <Label htmlFor="sale-date" className="flex items-center gap-1.5 text-sm">
-                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
-                التاريخ <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                id="sale-date"
-                type="date"
-                value={form.date}
-                onChange={(e) => handleFieldChange('date', e.target.value)}
-                className="rounded-xl"
-              />
+        {/* 🔸 Scrollable body — vertical scroll when content overflows */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 [scrollbar-width:thin]">
+          {isLoadingMaterials ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-
-            {/* اسم الحساب */}
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-sm">
-                <User className="w-3.5 h-3.5 text-muted-foreground" />
-                اسم الحساب <span className="text-red-500">*</span>
-              </Label>
-              <Select
-                value={form.accountId}
-                onValueChange={(v) => handleFieldChange('accountId', v)}
-              >
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="اختر الحساب" />
-                </SelectTrigger>
-                <SelectContent>
-                  {activeAccounts.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">
-                      لا توجد حسابات مسجلة
-                    </div>
-                  ) : (
-                    activeAccounts.map((a) => (
-                      <SelectItem key={a.id} value={a.id}>
-                        {a.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* اسم المادة */}
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-sm">
-                <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                اسم المادة <span className="text-red-500">*</span>
-              </Label>
-              <Select
-                value={form.materialId}
-                onValueChange={handleMaterialChange}
-              >
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="اختر المادة" />
-                </SelectTrigger>
-                <SelectContent>
-                  {materials.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">
-                      لا توجد مواد مسجلة
-                    </div>
-                  ) : (
-                    materials.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Inventory info box */}
-            {form.materialId && (
-              <div
-                className={cn(
-                  'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs',
-                  isLoadingInventory
-                    ? 'border-muted-foreground/20 bg-muted/30 text-muted-foreground'
-                    : 'border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300'
-                )}
-              >
-                {isLoadingInventory ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>جاري تحميل المخزون...</span>
-                  </>
-                ) : inventory ? (
-                  <>
-                    <Info className="w-3.5 h-3.5" />
-                    <span>
-                      المتوفر: {formatNumber(inventory.currentInDefaultUnit)}{' '}
-                      <span className="font-medium">
-                        {inventory.defaultUnitName}
-                      </span>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Info className="w-3.5 h-3.5" />
-                    <span>لا توجد بيانات مخزون</span>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* الكمية + الواحدة */}
-            <div className="grid grid-cols-2 gap-3">
+          ) : (
+            <div className="space-y-4">
+              {/* التاريخ */}
               <div className="space-y-1.5">
-                <Label
-                  htmlFor="sale-quantity"
-                  className="flex items-center gap-1.5 text-sm"
-                >
-                  <Boxes className="w-3.5 h-3.5 text-muted-foreground" />
-                  الكمية <span className="text-red-500">*</span>
+                <Label htmlFor="sale-date" className="flex items-center gap-1.5 text-sm">
+                  <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                  التاريخ <span className="text-red-500">*</span>
                 </Label>
                 <Input
-                  id="sale-quantity"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.quantity}
-                  onChange={(e) => handleFieldChange('quantity', e.target.value)}
-                  placeholder="0"
-                  className={cn(
-                    'rounded-xl',
-                    exceedsInventory &&
-                      'border-red-500 focus-visible:ring-red-500/40'
-                  )}
+                  id="sale-date"
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => handleFieldChange('date', e.target.value)}
+                  className="rounded-xl"
                 />
-                {exceedsInventory && (
-                  <p className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
-                    <AlertTriangle className="w-3 h-3" />
-                    الكمية تتجاوز المخزون المتوفر
-                  </p>
-                )}
               </div>
+
+              {/* اسم الحساب */}
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5 text-sm">
-                  <Tag className="w-3.5 h-3.5 text-muted-foreground" />
-                  الواحدة <span className="text-red-500">*</span>
+                  <User className="w-3.5 h-3.5 text-muted-foreground" />
+                  اسم الحساب <span className="text-red-500">*</span>
                 </Label>
                 <Select
-                  value={form.unitId}
-                  onValueChange={(v) => handleFieldChange('unitId', v)}
-                  disabled={!selectedMaterial}
+                  value={form.accountId}
+                  onValueChange={(v) => handleFieldChange('accountId', v)}
                 >
                   <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="اختر الواحدة" />
+                    <SelectValue placeholder="اختر الحساب" />
                   </SelectTrigger>
                   <SelectContent>
-                    {selectedMaterial?.materialUnits &&
-                    selectedMaterial.materialUnits.length > 0 ? (
-                      selectedMaterial.materialUnits.map((mu) => (
-                        <SelectItem key={mu.id} value={mu.unitId}>
-                          {mu.unit?.name || 'وحدة'}
+                    {activeAccounts.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        لا توجد حسابات مسجلة
+                      </div>
+                    ) : (
+                      activeAccounts.map((a) => (
+                        <SelectItem key={a.id} value={a.id}>
+                          {a.name}
                         </SelectItem>
                       ))
-                    ) : (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">
-                        لا توجد وحدات لهذه المادة
-                      </div>
                     )}
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* السعر الإفرادي */}
-            <div className="space-y-1.5">
-              <Label
-                htmlFor="sale-price"
-                className="flex items-center gap-1.5 text-sm"
-              >
-                <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
-                السعر الإفرادي <span className="text-red-500">*</span>
-              </Label>
-              <div className="relative">
-                <Input
-                  id="sale-price"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.unitPrice}
-                  onChange={(e) => handleFieldChange('unitPrice', e.target.value)}
-                  placeholder="0.00"
-                  className="rounded-xl pl-8"
-                />
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">
-                  $
-                </span>
+              {/* اسم المادة */}
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5 text-sm">
+                  <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                  اسم المادة <span className="text-red-500">*</span>
+                </Label>
+                <Select
+                  value={form.materialId}
+                  onValueChange={handleMaterialChange}
+                >
+                  <SelectTrigger className="rounded-xl">
+                    <SelectValue placeholder="اختر المادة" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {materials.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        لا توجد مواد مسجلة
+                      </div>
+                    ) : (
+                      materials.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
-            </div>
 
-            {/* طريقة السداد — Payment Method (segmented buttons) */}
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-sm">
-                <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
-                طريقة السداد <span className="text-red-500">*</span>
-              </Label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleFieldChange('paymentMethod', 'cash')}
+              {/* Inventory info box */}
+              {form.materialId && (
+                <div
                   className={cn(
-                    'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
-                    form.paymentMethod === 'cash'
-                      ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700'
-                      : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                    'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs',
+                    isLoadingInventory
+                      ? 'border-muted-foreground/20 bg-muted/30 text-muted-foreground'
+                      : 'border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300'
                   )}
                 >
-                  <Wallet className="w-4 h-4" />
-                  كاش
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleFieldChange('paymentMethod', 'credit')}
-                  className={cn(
-                    'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
-                    form.paymentMethod === 'credit'
-                      ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700'
-                      : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                  {isLoadingInventory ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>جاري تحميل المخزون...</span>
+                    </>
+                  ) : inventory ? (
+                    <>
+                      <Info className="w-3.5 h-3.5" />
+                      <span>
+                        المتوفر: {formatNumber(inventory.currentInDefaultUnit)}{' '}
+                        <span className="font-medium">
+                          {inventory.defaultUnitName}
+                        </span>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Info className="w-3.5 h-3.5" />
+                      <span>لا توجد بيانات مخزون</span>
+                    </>
                   )}
-                >
-                  <Clock className="w-4 h-4" />
-                  آجل
-                </button>
+                </div>
+              )}
+
+              {/* الكمية + الواحدة */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="sale-quantity"
+                    className="flex items-center gap-1.5 text-sm"
+                  >
+                    <Boxes className="w-3.5 h-3.5 text-muted-foreground" />
+                    الكمية <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="sale-quantity"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={form.quantity}
+                    onChange={(e) => handleFieldChange('quantity', e.target.value)}
+                    placeholder="0"
+                    className={cn(
+                      'rounded-xl',
+                      exceedsInventory &&
+                        'border-red-500 focus-visible:ring-red-500/40'
+                    )}
+                  />
+                  {exceedsInventory && (
+                    <p className="flex items-center gap-1 text-xs text-red-600 dark:text-red-400 font-medium">
+                      <AlertTriangle className="w-3 h-3" />
+                      الكمية تتجاوز المخزون المتوفر
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-sm">
+                    <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+                    الواحدة <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={form.unitId}
+                    onValueChange={(v) => handleFieldChange('unitId', v)}
+                    disabled={!selectedMaterial}
+                  >
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="اختر الواحدة" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedMaterial?.materialUnits &&
+                      selectedMaterial.materialUnits.length > 0 ? (
+                        selectedMaterial.materialUnits.map((mu) => (
+                          <SelectItem key={mu.id} value={mu.unitId}>
+                            {mu.unit?.name || 'وحدة'}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          لا توجد وحدات لهذه المادة
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              {/* Helper note explaining the cash-box impact */}
-              <p
-                className={cn(
-                  'flex items-start gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed',
-                  form.paymentMethod === 'cash'
-                    ? 'bg-emerald-50/70 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
-                    : 'bg-amber-50/70 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
-                )}
-              >
-                <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                {form.paymentMethod === 'cash'
-                  ? 'البيع النقدي: تُضاف قيمة الفاتورة بالدولار إلى صندوق الدولار مباشرةً عند الحفظ.'
-                  : 'البيع الآجل: لا يؤثر على الصندوق. تُسجَّل كفاتورة بيع غير مسددة مرتبطة بالحساب وتظهر في كشف الحساب حتى يتم تحصيلها لاحقاً.'}
-              </p>
-            </div>
 
-            {/* البيان */}
-            <div className="space-y-1.5">
-              <Label htmlFor="sale-description" className="text-sm">
-                البيان
-              </Label>
-              <Input
-                id="sale-description"
-                type="text"
-                value={form.description}
-                onChange={(e) => handleFieldChange('description', e.target.value)}
-                placeholder="بيان اختياري..."
-                className="rounded-xl"
-              />
-            </div>
+              {/* السعر الإفرادي */}
+              <div className="space-y-1.5">
+                <Label
+                  htmlFor="sale-price"
+                  className="flex items-center gap-1.5 text-sm"
+                >
+                  <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
+                  السعر الإفرادي <span className="text-red-500">*</span>
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="sale-price"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={form.unitPrice}
+                    onChange={(e) => handleFieldChange('unitPrice', e.target.value)}
+                    placeholder="0.00"
+                    className="rounded-xl pl-8"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">
+                    $
+                  </span>
+                </div>
+              </div>
 
-            {/* السعر الإجمالي — Read-only computed box */}
-            <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20 p-4">
-              <p className="text-xs text-muted-foreground mb-1">
-                السعر الإجمالي للفاتورة بالدولار
-              </p>
-              <div className="flex items-baseline justify-between gap-2">
-                <p className="text-[11px] text-muted-foreground">
-                  {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
-                </p>
+              {/* طريقة السداد — Payment Method (segmented buttons) */}
+              <div className="space-y-1.5">
+                <Label className="flex items-center gap-1.5 text-sm">
+                  <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
+                  طريقة السداد <span className="text-red-500">*</span>
+                </Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleFieldChange('paymentMethod', 'cash')}
+                    className={cn(
+                      'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+                      form.paymentMethod === 'cash'
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700'
+                        : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                    )}
+                  >
+                    <Wallet className="w-4 h-4" />
+                    كاش
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleFieldChange('paymentMethod', 'credit')}
+                    className={cn(
+                      'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+                      form.paymentMethod === 'credit'
+                        ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700'
+                        : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                    )}
+                  >
+                    <Clock className="w-4 h-4" />
+                    آجل
+                  </button>
+                </div>
+                {/* Helper note explaining the cash-box impact */}
                 <p
                   className={cn(
-                    'text-xl font-bold text-emerald-600 dark:text-emerald-400',
-                    totalPrice === 0 && 'text-muted-foreground/70'
+                    'flex items-start gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed',
+                    form.paymentMethod === 'cash'
+                      ? 'bg-emerald-50/70 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                      : 'bg-amber-50/70 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
                   )}
                 >
-                  {formatNumber(totalPrice)} $
+                  <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                  {form.paymentMethod === 'cash'
+                    ? 'البيع النقدي: تُضاف قيمة الفاتورة بالدولار إلى صندوق الدولار مباشرةً عند الحفظ.'
+                    : 'البيع الآجل: لا يؤثر على الصندوق. تُسجَّل كفاتورة بيع غير مسددة مرتبطة بالحساب وتظهر في كشف الحساب حتى يتم تحصيلها لاحقاً.'}
                 </p>
               </div>
-            </div>
-          </div>
-        )}
 
-        <DialogFooter className="gap-2">
+              {/* البيان */}
+              <div className="space-y-1.5">
+                <Label htmlFor="sale-description" className="text-sm">
+                  البيان
+                </Label>
+                <Input
+                  id="sale-description"
+                  type="text"
+                  value={form.description}
+                  onChange={(e) => handleFieldChange('description', e.target.value)}
+                  placeholder="بيان اختياري..."
+                  className="rounded-xl"
+                />
+              </div>
+
+              {/* السعر الإجمالي — Read-only computed box */}
+              <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20 p-4">
+                <p className="text-xs text-muted-foreground mb-1">
+                  السعر الإجمالي للفاتورة بالدولار
+                </p>
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
+                  </p>
+                  <p
+                    className={cn(
+                      'text-xl font-bold text-emerald-600 dark:text-emerald-400',
+                      totalPrice === 0 && 'text-muted-foreground/70'
+                    )}
+                  >
+                    {formatNumber(totalPrice)} $
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 🔸 Pinned footer — Save/Cancel always visible */}
+        <DialogFooter className="flex-shrink-0 gap-2 border-t bg-background px-6 py-4">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}

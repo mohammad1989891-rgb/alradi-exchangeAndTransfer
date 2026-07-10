@@ -248,8 +248,9 @@ export function PurchaseDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent scrollable className="max-w-md">
+        {/* 🔸 Pinned header — stays visible while body scrolls */}
+        <DialogHeader className="flex-shrink-0 border-b px-6 py-4 text-right">
           <DialogTitle className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center">
               <ShoppingCart className="w-4 h-4 text-white" />
@@ -261,163 +262,167 @@ export function PurchaseDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {isLoadingMaterials ? (
-          <div className="flex items-center justify-center py-12">
-            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {/* التاريخ */}
-            <div className="space-y-1.5">
-              <Label htmlFor="purchase-date" className="flex items-center gap-1.5 text-sm">
-                <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
-                التاريخ
-              </Label>
-              <Input
-                id="purchase-date"
-                type="date"
-                value={form.date}
-                onChange={(e) => handleFieldChange('date', e.target.value)}
-                className="rounded-xl"
-              />
+        {/* 🔸 Scrollable body — vertical scroll when content overflows */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4 [scrollbar-width:thin]">
+          {isLoadingMaterials ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
             </div>
-
-            {/* اسم المادة */}
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5 text-sm">
-                <Package className="w-3.5 h-3.5 text-muted-foreground" />
-                اسم المادة <span className="text-red-500">*</span>
-              </Label>
-              <Select
-                value={form.materialId}
-                onValueChange={handleMaterialChange}
-              >
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="اختر المادة" />
-                </SelectTrigger>
-                <SelectContent>
-                  {materials.length === 0 ? (
-                    <div className="px-3 py-2 text-sm text-muted-foreground">
-                      لا توجد مواد مسجلة
-                    </div>
-                  ) : (
-                    materials.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* الكمية + الواحدة */}
-            <div className="grid grid-cols-2 gap-3">
+          ) : (
+            <div className="space-y-4">
+              {/* التاريخ */}
               <div className="space-y-1.5">
-                <Label htmlFor="purchase-quantity" className="flex items-center gap-1.5 text-sm">
-                  <Boxes className="w-3.5 h-3.5 text-muted-foreground" />
-                  الكمية <span className="text-red-500">*</span>
+                <Label htmlFor="purchase-date" className="flex items-center gap-1.5 text-sm">
+                  <Calendar className="w-3.5 h-3.5 text-muted-foreground" />
+                  التاريخ
                 </Label>
                 <Input
-                  id="purchase-quantity"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.quantity}
-                  onChange={(e) => handleFieldChange('quantity', e.target.value)}
-                  placeholder="0"
+                  id="purchase-date"
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => handleFieldChange('date', e.target.value)}
                   className="rounded-xl"
                 />
               </div>
+
+              {/* اسم المادة */}
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5 text-sm">
-                  <Tag className="w-3.5 h-3.5 text-muted-foreground" />
-                  الواحدة <span className="text-red-500">*</span>
+                  <Package className="w-3.5 h-3.5 text-muted-foreground" />
+                  اسم المادة <span className="text-red-500">*</span>
                 </Label>
                 <Select
-                  value={form.unitId}
-                  onValueChange={(v) => handleFieldChange('unitId', v)}
-                  disabled={!selectedMaterial}
+                  value={form.materialId}
+                  onValueChange={handleMaterialChange}
                 >
                   <SelectTrigger className="rounded-xl">
-                    <SelectValue placeholder="اختر الواحدة" />
+                    <SelectValue placeholder="اختر المادة" />
                   </SelectTrigger>
                   <SelectContent>
-                    {selectedMaterial?.materialUnits && selectedMaterial.materialUnits.length > 0 ? (
-                      selectedMaterial.materialUnits.map((mu) => (
-                        <SelectItem key={mu.id} value={mu.unitId}>
-                          {mu.unit?.name || 'وحدة'}
+                    {materials.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        لا توجد مواد مسجلة
+                      </div>
+                    ) : (
+                      materials.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>
+                          {m.name}
                         </SelectItem>
                       ))
-                    ) : (
-                      <div className="px-3 py-2 text-sm text-muted-foreground">
-                        لا توجد وحدات لهذه المادة
-                      </div>
                     )}
                   </SelectContent>
                 </Select>
               </div>
-            </div>
 
-            {/* السعر الإفرادي بالدولار */}
-            <div className="space-y-1.5">
-              <Label htmlFor="purchase-price" className="flex items-center gap-1.5 text-sm">
-                <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
-                السعر الإفرادي بالدولار <span className="text-red-500">*</span>
-              </Label>
-              <div className="relative">
+              {/* الكمية + الواحدة */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="purchase-quantity" className="flex items-center gap-1.5 text-sm">
+                    <Boxes className="w-3.5 h-3.5 text-muted-foreground" />
+                    الكمية <span className="text-red-500">*</span>
+                  </Label>
+                  <Input
+                    id="purchase-quantity"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={form.quantity}
+                    onChange={(e) => handleFieldChange('quantity', e.target.value)}
+                    placeholder="0"
+                    className="rounded-xl"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-sm">
+                    <Tag className="w-3.5 h-3.5 text-muted-foreground" />
+                    الواحدة <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={form.unitId}
+                    onValueChange={(v) => handleFieldChange('unitId', v)}
+                    disabled={!selectedMaterial}
+                  >
+                    <SelectTrigger className="rounded-xl">
+                      <SelectValue placeholder="اختر الواحدة" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedMaterial?.materialUnits && selectedMaterial.materialUnits.length > 0 ? (
+                        selectedMaterial.materialUnits.map((mu) => (
+                          <SelectItem key={mu.id} value={mu.unitId}>
+                            {mu.unit?.name || 'وحدة'}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <div className="px-3 py-2 text-sm text-muted-foreground">
+                          لا توجد وحدات لهذه المادة
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* السعر الإفرادي بالدولار */}
+              <div className="space-y-1.5">
+                <Label htmlFor="purchase-price" className="flex items-center gap-1.5 text-sm">
+                  <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
+                  السعر الإفرادي بالدولار <span className="text-red-500">*</span>
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="purchase-price"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={form.unitPriceUsd}
+                    onChange={(e) => handleFieldChange('unitPriceUsd', e.target.value)}
+                    placeholder="0.00"
+                    className="rounded-xl pl-8"
+                  />
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">
+                    $
+                  </span>
+                </div>
+              </div>
+
+              {/* البيان */}
+              <div className="space-y-1.5">
+                <Label htmlFor="purchase-description" className="text-sm">
+                  البيان
+                </Label>
                 <Input
-                  id="purchase-price"
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={form.unitPriceUsd}
-                  onChange={(e) => handleFieldChange('unitPriceUsd', e.target.value)}
-                  placeholder="0.00"
-                  className="rounded-xl pl-8"
+                  id="purchase-description"
+                  type="text"
+                  value={form.description}
+                  onChange={(e) => handleFieldChange('description', e.target.value)}
+                  placeholder="بيان اختياري..."
+                  className="rounded-xl"
                 />
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">
-                  $
-                </span>
+              </div>
+
+              {/* السعر الإجمالي — Read-only computed box */}
+              <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20 p-4">
+                <p className="text-xs text-muted-foreground mb-1">
+                  السعر الإجمالي للفاتورة بالدولار
+                </p>
+                <div className="flex items-baseline justify-between gap-2">
+                  <p className="text-[11px] text-muted-foreground">
+                    {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
+                  </p>
+                  <p className={cn(
+                    'text-xl font-bold text-emerald-600 dark:text-emerald-400',
+                    totalPrice === 0 && 'text-muted-foreground/70'
+                  )}>
+                    {formatNumber(totalPrice)} $
+                  </p>
+                </div>
               </div>
             </div>
+          )}
+        </div>
 
-            {/* البيان */}
-            <div className="space-y-1.5">
-              <Label htmlFor="purchase-description" className="text-sm">
-                البيان
-              </Label>
-              <Input
-                id="purchase-description"
-                type="text"
-                value={form.description}
-                onChange={(e) => handleFieldChange('description', e.target.value)}
-                placeholder="بيان اختياري..."
-                className="rounded-xl"
-              />
-            </div>
-
-            {/* السعر الإجمالي — Read-only computed box */}
-            <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20 p-4">
-              <p className="text-xs text-muted-foreground mb-1">
-                السعر الإجمالي للفاتورة بالدولار
-              </p>
-              <div className="flex items-baseline justify-between gap-2">
-                <p className="text-[11px] text-muted-foreground">
-                  {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
-                </p>
-                <p className={cn(
-                  'text-xl font-bold text-emerald-600 dark:text-emerald-400',
-                  totalPrice === 0 && 'text-muted-foreground/70'
-                )}>
-                  {formatNumber(totalPrice)} $
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        <DialogFooter className="gap-2">
+        {/* 🔸 Pinned footer — Save/Cancel always visible */}
+        <DialogFooter className="flex-shrink-0 gap-2 border-t bg-background px-6 py-4">
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}

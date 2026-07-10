@@ -243,6 +243,28 @@ export function SaleDialog({
     return quantityInBase > inventory.currentInBase + 0.0001;
   }, [inventory, form.materialId, quantityNum, quantityInBase]);
 
+  // 🔸 Stock in the selected (conversion) unit — purely informational.
+  // Derives the SAME available stock expressed in the selected unit using its
+  // baseFactor. No new queries, no logic change — just a display conversion:
+  //   stock in selected unit = inventory.currentInBase / baseFactor
+  // Falls back to null (→ "غير معرف") when:
+  //   - no inventory loaded
+  //   - no unit selected / no material-unit link
+  //   - the selected unit IS the default unit (baseFactor === 1) → not a
+  //     conversion unit, so the default-unit field already covers it
+  const stockInSelectedUnit = useMemo<{ value: string | null; unitName: string }>(() => {
+    if (!inventory || !selectedMaterialUnit) {
+      return { value: null, unitName: selectedMaterialUnit?.unit?.name || '' };
+    }
+    const factor = selectedMaterialUnit.baseFactor;
+    const unitName = selectedMaterialUnit.unit?.name || '';
+    if (!factor || factor <= 1) {
+      return { value: null, unitName };
+    }
+    const converted = inventory.currentInBase / factor;
+    return { value: formatNumber(converted), unitName };
+  }, [inventory, selectedMaterialUnit]);
+
   const handleFieldChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
@@ -425,38 +447,44 @@ export function SaleDialog({
                 </Select>
               </div>
 
-              {/* Inventory info box */}
+              {/* Inventory info box — default unit + conversion unit side by side */}
               {form.materialId && (
-                <div
-                  className={cn(
-                    'flex items-center gap-2 rounded-xl border px-3 py-2 text-xs',
-                    isLoadingInventory
-                      ? 'border-muted-foreground/20 bg-muted/30 text-muted-foreground'
-                      : 'border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300'
-                  )}
-                >
-                  {isLoadingInventory ? (
-                    <>
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      <span>جاري تحميل المخزون...</span>
-                    </>
-                  ) : inventory ? (
-                    <>
-                      <Info className="w-3.5 h-3.5" />
-                      <span>
+                isLoadingInventory ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-muted-foreground/20 bg-muted/30 text-muted-foreground px-3 py-2 text-xs">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>جاري تحميل المخزون...</span>
+                  </div>
+                ) : inventory ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* 🔸 Existing field: stock in default unit (content unchanged) */}
+                    <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="min-w-0 truncate">
                         المتوفر: {formatNumber(inventory.currentInDefaultUnit)}{' '}
-                        <span className="font-medium">
-                          {inventory.defaultUnitName}
-                        </span>
+                        <span className="font-medium">{inventory.defaultUnitName}</span>
                       </span>
-                    </>
-                  ) : (
-                    <>
-                      <Info className="w-3.5 h-3.5" />
-                      <span>لا توجد بيانات مخزون</span>
-                    </>
-                  )}
-                </div>
+                    </div>
+                    {/* 🔸 New field: stock in the selected conversion unit */}
+                    <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                      {stockInSelectedUnit.value !== null ? (
+                        <span className="min-w-0 truncate">
+                          بوحدة التحويل: {stockInSelectedUnit.value}{' '}
+                          <span className="font-medium">{stockInSelectedUnit.unitName}</span>
+                        </span>
+                      ) : (
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          بوحدة التحويل: غير معرف
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-3 py-2 text-xs">
+                    <Info className="w-3.5 h-3.5" />
+                    <span>لا توجد بيانات مخزون</span>
+                  </div>
+                )
               )}
 
               {/* الكمية + الواحدة */}

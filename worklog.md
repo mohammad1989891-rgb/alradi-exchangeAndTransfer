@@ -790,3 +790,53 @@ Stage Summary:
   2. One-click quick-fix: a new "إصلاح سريع: عمود طريقة السداد" sub-section in Settings → إعدادات المشتريات والمبيعات runs a minimal 2-line ALTER TABLE migration (with or without the db password). This lets the user permanently fix the root cause in seconds.
 - UI Freeze preserved — all changes are additive (new try/catch branches, new sub-section). No existing styling, layout, colors, or logic was changed.
 - The user should still run the quick-fix once (Settings → إعدادات المشتريات والمبيعات → إصلاح سريع → enter db password → click button) to add the column permanently, so the full cash/credit distinction is persisted. Until then, the app degrades gracefully (all sales treated as cash).
+
+---
+Task ID: 13
+Agent: Main Agent
+Task: Enhance Sale Dialog to show current stock in TWO units simultaneously (default unit + conversion unit) — UI Freeze preserved, no logic change
+
+Work Log:
+- Read the full SaleDialog.tsx to understand the existing inventory display: a single full-width info box showing "المتوفر: {currentInDefaultUnit} {defaultUnitName}" with emerald styling (border-emerald-200/70, bg-emerald-50/70, text-emerald-700, dark mode variants). The box appears when form.materialId is set, with 3 states: loading (spinner + "جاري تحميل المخزون..."), data (Info icon + stock text), no-data (Info icon + "لا توجد بيانات مخزون").
+- Verified the data layer: MaterialInventory interface has currentInBase + currentInDefaultUnit + defaultUnitName. getMaterialInventory() computes currentInBase = totalPurchasedInBase - totalSoldInBase, then currentInDefaultUnit = currentInBase / defaultFactor. The selectedMaterialUnit (already computed in the dialog via useMemo) provides baseFactor (how many base units = 1 selected unit, e.g., 1 barrel = 220 liters → baseFactor = 220).
+- Confirmed the computation: stock in selected unit = inventory.currentInBase / selectedMaterialUnit.baseFactor. Verified with real data: 3,960 liters / 220 = 18.00 barrels.
+
+- Added stockInSelectedUnit useMemo (after exceedsInventory, ~line 246-266):
+  • Pure derived state — no new queries, no logic change.
+  • Returns { value: string | null, unitName: string }.
+  • When inventory or selectedMaterialUnit is null → { value: null }.
+  • When baseFactor <= 1 (selected unit IS the default unit) → { value: null } (not a conversion unit).
+  • Otherwise → { value: formatNumber(currentInBase / baseFactor), unitName }.
+  • Dependencies: [inventory, selectedMaterialUnit] — updates automatically when material or unit changes.
+
+- Restructured the inventory info box (lines 450-488) into a 3-branch conditional:
+  • Loading state: single full-width box (UNCHANGED — "جاري تحميل المخزون..." with spinner).
+  • Data available state: NEW 2-column grid (grid grid-cols-2 gap-2) with two boxes side-by-side:
+      Box 1 (existing): "المتوفر: {currentInDefaultUnit} {defaultUnitName}" — content unchanged, same emerald styling, added min-w-0 + truncate for narrow screens.
+      Box 2 (new): "بوحدة التحويل: {value} {unitName}" or "بوحدة التحويل: غير معرف" — identical emerald styling (same border, bg, text colors, dark mode variants, px-2.5 py-2 text-xs). When value is null, uses text-muted-foreground to indicate "not applicable".
+  • No-data state: single full-width box (UNCHANGED — "لا توجد بيانات مخزون").
+  • Both boxes use the same Info icon (w-3.5 h-3.5 flex-shrink-0) for visual consistency.
+
+- UI Freeze preserved:
+  • Loading and no-data states are 100% unchanged (same full-width single box, same classes).
+  • Data-available state: the existing box's content, colors, font, border, padding are identical — only the width changed from full-width to half-width (necessary to place the new box "بجانب" it per spec).
+  • New box uses the exact same styling classes as the existing box.
+  • No logic change: no new DB queries, no change to addSale/updateSale/deleteSale, no change to recalculateVaultBalance, no change to inventory computation.
+
+- Verification:
+  • bun run lint → 0 errors, 0 warnings ✓
+  • Dev server compiles cleanly (HTTP 200, no errors in dev.log) ✓
+  • Verified the new code IS in the compiled client bundle: grepped .next/dev/static/chunks/ and found both "بوحدة التحويل: " and "بوحدة التحويل: غير معرف" strings, plus the "grid grid-cols-2 gap-2" class ✓
+  • Computation verified: 3,960 liters / 220 (barrel baseFactor) = 18.00 barrels ✓
+  • Browser verification partially completed: dialog opens cleanly, material selection works, existing "المتوفر: 3,960.00 لتر" field renders correctly. Full 2-box visual verification was limited by the 4GB sandbox OOM-killing the dev server during heavy browser interaction, but the compiled-code verification confirms both boxes are in the bundle.
+  • No console errors, no React warnings related to the change ✓
+
+Stage Summary:
+- Sale Dialog now displays the current stock in TWO units simultaneously:
+  1. Existing field (left): "المتوفر: 3,960.00 لتر" — stock in the default unit (unchanged)
+  2. New field (right): "بوحدة التحويل: 18.00 برميل" — stock in the selected conversion unit (new)
+- The new field updates live when the user changes the material or unit (via the existing selectedMaterialUnit useMemo dependency chain).
+- When the selected unit IS the default unit (baseFactor = 1), or no conversion factor exists, the new field shows "بوحدة التحويل: غير معرف" in muted text.
+- Computation: stock in selected unit = inventory.currentInBase / selectedMaterialUnit.baseFactor. No new queries — purely derived from existing inventory data + the material's baseFactor.
+- UI Freeze fully preserved: same emerald color palette, same border style, same padding, same font size, same Info icon. Loading and no-data states unchanged.
+- No accounting or inventory logic changed — purely an informational display enhancement.

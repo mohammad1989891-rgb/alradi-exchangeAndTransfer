@@ -21,14 +21,16 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
-import { formatNumber } from '@/lib/format';
-import { Loader2, ShoppingCart, Calendar, Package, DollarSign, Tag, Boxes } from 'lucide-react';
+import { formatNumber, computeConversionUnitStock } from '@/lib/format';
+import { Loader2, ShoppingCart, Calendar, Package, DollarSign, Tag, Boxes, Info } from 'lucide-react';
 import {
   getMaterials,
+  getMaterialInventory,
   addPurchase,
   updatePurchase,
   type Material,
   type Purchase,
+  type MaterialInventory,
 } from '@/lib/supabaseDb';
 
 export interface PurchaseDialogProps {
@@ -91,6 +93,13 @@ export function PurchaseDialog({
   const [isLoadingMaterials, setIsLoadingMaterials] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState<FormState>(getDefaultFormState());
+  // 🔸 Current inventory for the selected material — purely informational so
+  //    the user knows how much stock is on hand before adding a purchase.
+  //    Loaded via the existing getMaterialInventory() helper (same one used
+  //    by SaleDialog). No accounting logic depends on this; it's a display
+  //    value only.
+  const [inventory, setInventory] = useState<MaterialInventory | null>(null);
+  const [isLoadingInventory, setIsLoadingInventory] = useState(false);
 
   const isEditMode = !!editingPurchase;
 
@@ -113,6 +122,25 @@ export function PurchaseDialog({
     }
   }, [toast]);
 
+  // 🔸 Load inventory for a given material (reused on material change + on
+  //    dialog open when editing an existing purchase).
+  const loadInventory = useCallback(async (materialId: string) => {
+    if (!materialId) {
+      setInventory(null);
+      return;
+    }
+    setIsLoadingInventory(true);
+    try {
+      const inv = await getMaterialInventory(materialId);
+      setInventory(inv);
+    } catch (error) {
+      console.error('Error loading inventory:', error);
+      setInventory(null);
+    } finally {
+      setIsLoadingInventory(false);
+    }
+  }, []);
+
   // Initialize form when dialog opens
   useEffect(() => {
     if (!open) return;
@@ -126,10 +154,13 @@ export function PurchaseDialog({
         unitPriceUsd: String(editingPurchase.unitPriceUsd ?? ''),
         description: editingPurchase.description ?? '',
       });
+      // Preload inventory for the editing purchase's material
+      loadInventory(editingPurchase.materialId);
     } else {
       setForm(getDefaultFormState());
+      setInventory(null);
     }
-  }, [open, editingPurchase, loadMaterials]);
+  }, [open, editingPurchase, loadMaterials, loadInventory]);
 
   // Find the currently selected material
   const selectedMaterial = useMemo<Material | null>(() => {
@@ -137,7 +168,8 @@ export function PurchaseDialog({
     return materials.find((m) => m.id === form.materialId) || null;
   }, [form.materialId, materials]);
 
-  // When material changes, reset unitId to the material's default unit
+  // When material changes, reset unitId to the material's default unit and
+  // re-fetch the inventory for the newly selected material.
   const handleMaterialChange = (materialId: string) => {
     const mat = materials.find((m) => m.id === materialId) || null;
     let defaultUnitId = '';
@@ -155,7 +187,21 @@ export function PurchaseDialog({
       materialId,
       unitId: defaultUnitId,
     }));
+    loadInventory(materialId);
   };
+
+  // 🔸 Stock in the material's conversion unit (e.g. برميل) — purely
+  //    informational, derived from the already-loaded inventory + the
+  //    material's materialUnits list. No extra queries. Returns null when
+  //    no conversion unit exists → second field hidden.
+  const conversionStock = useMemo(() => {
+    if (!inventory) return null;
+    return computeConversionUnitStock(
+      inventory.currentInBase,
+      inventory.material.materialUnits,
+      inventory.material.defaultUnitId,
+    );
+  }, [inventory]);
 
   // Live total price calculation
   const quantityNum = useMemo(() => {
@@ -313,6 +359,55 @@ export function PurchaseDialog({
                   </SelectContent>
                 </Select>
               </div>
+
+              {/* Inventory info box — default unit + conversion unit side by side */}
+              {/* 🔸 Purely informational: shows the current stock in BOTH the
+                  default unit and the conversion unit (if any). Mirrors the
+                  SaleDialog layout exactly (same emerald styling, same
+                  grid-cols-2, same Info icon). No accounting logic depends
+                  on this — purchases ADD to inventory, so there's no
+                  exceeds-inventory check here. */}
+              {form.materialId && (
+                isLoadingInventory ? (
+                  <div className="flex items-center gap-2 rounded-xl border border-muted-foreground/20 bg-muted/30 text-muted-foreground px-3 py-2 text-xs">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>جاري تحميل المخزون...</span>
+                  </div>
+                ) : inventory ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* Stock in default unit */}
+                    <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+                      <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                      <span className="min-w-0 truncate">
+                        المتوفر: {formatNumber(inventory.currentInDefaultUnit)}{' '}
+                        <span className="font-medium">{inventory.defaultUnitName}</span>
+                      </span>
+                    </div>
+                    {/* Stock in conversion unit (hidden if no conversion unit) */}
+                    {conversionStock ? (
+                      <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+                        <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="min-w-0 truncate">
+                          بوحدة التحويل: {conversionStock.value}{' '}
+                          <span className="font-medium">{conversionStock.unitName}</span>
+                        </span>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-2.5 py-2 text-xs min-w-0">
+                        <Info className="w-3.5 h-3.5 flex-shrink-0" />
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          بوحدة التحويل: لا توجد
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-xl border border-emerald-200/70 bg-emerald-50/70 text-emerald-700 dark:border-emerald-800/40 dark:bg-emerald-950/20 dark:text-emerald-300 px-3 py-2 text-xs">
+                    <Info className="w-3.5 h-3.5" />
+                    <span>لا توجد بيانات مخزون</span>
+                  </div>
+                )
+              )}
 
               {/* الكمية + الواحدة */}
               <div className="grid grid-cols-2 gap-3">

@@ -47,7 +47,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { cn } from '@/lib/utils';
-import { formatNumber, formatDate } from '@/lib/format';
+import { formatNumber, formatDate, computeConversionUnitStock } from '@/lib/format';
 import {
   getPurchases,
   deletePurchase,
@@ -313,6 +313,14 @@ export function PurchasesPage({ externalAddTrigger }: PurchasesPageProps) {
             {inventories.map((inv) => {
               const isPositive = inv.currentInDefaultUnit > 0;
               const isZero = inv.currentInDefaultUnit === 0;
+              // 🔸 Compute the stock in the material's conversion unit (e.g. برميل)
+              //    purely from the already-loaded inventory + material-unit data.
+              //    Returns null when no conversion unit exists → second line hidden.
+              const conversionStock = computeConversionUnitStock(
+                inv.currentInBase,
+                inv.material.materialUnits,
+                inv.material.defaultUnitId,
+              );
               return (
                 <div
                   key={inv.material.id}
@@ -341,6 +349,21 @@ export function PurchasesPage({ externalAddTrigger }: PurchasesPageProps) {
                       {inv.defaultUnitName}
                     </span>
                   </p>
+                  {conversionStock && (
+                    <p className={cn(
+                      'text-xs font-medium mt-0.5',
+                      isZero
+                        ? 'text-red-500/80 dark:text-red-300/70'
+                        : isPositive
+                          ? 'text-emerald-500/80 dark:text-emerald-300/70'
+                          : 'text-red-500/80 dark:text-red-300/70'
+                    )}>
+                      {conversionStock.value}{' '}
+                      <span className="text-[10px] text-muted-foreground font-normal">
+                        {conversionStock.unitName}
+                      </span>
+                    </p>
+                  )}
                 </div>
               );
             })}

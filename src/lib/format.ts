@@ -98,6 +98,54 @@ export function calculateFees(
 }
 
 /**
+ * Conversion-unit stock computation for the Purchases & Sales section.
+ *
+ * Given a material's inventory (current stock in base units) and the
+ * material's `materialUnits` list (each carrying a `baseFactor`), find the
+ * FIRST conversion unit (a unit whose `baseFactor` is greater than 1 — i.e.
+ * NOT the default unit, which has baseFactor = 1) and compute the stock
+ * expressed in that unit.
+ *
+ * This is a PURE display helper:
+ *   - No queries, no side effects.
+ *   - Uses the already-loaded inventory + material-unit data.
+ *   - Returns null when no conversion unit exists (so the caller can hide
+ *     the second field or show "لا توجد وحدة تحويل" per spec).
+ *
+ * Formula:  stock in conversion unit = currentInBase / conversionBaseFactor
+ *
+ * @param currentInBase - The material's current stock in base units
+ *   (e.g. `inventory.currentInBase`).
+ * @param materialUnits - The material's unit links, each with `baseFactor`
+ *   and an optional `unit.name`. Pass `material.materialUnits`.
+ * @param defaultUnitId - The material's default unit id, so the default
+ *   unit (baseFactor === 1) is never picked as the "conversion" unit.
+ * @returns `{ value: string, unitName: string }` formatted with 2 decimals,
+ *   or `null` when no conversion unit is available.
+ */
+export function computeConversionUnitStock(
+  currentInBase: number,
+  materialUnits: { baseFactor: number; unitId: string; unit?: { name?: string } }[] | undefined,
+  defaultUnitId: string | undefined,
+): { value: string; unitName: string } | null {
+  if (!materialUnits || materialUnits.length === 0) return null;
+  // Find the first unit that is NOT the default unit and has baseFactor > 1.
+  // (The default unit has baseFactor === 1 and is already shown separately.)
+  const conversionMU = materialUnits.find(
+    (mu) => mu.baseFactor > 1 && mu.unitId !== defaultUnitId,
+  );
+  if (!conversionMU) return null;
+  const factor = conversionMU.baseFactor;
+  if (!factor || factor <= 0) return null;
+  const converted = currentInBase / factor;
+  return {
+    value: formatNumber(converted),
+    unitName: conversionMU.unit?.name || '',
+  };
+}
+
+
+/**
  * Calculate final balance for a transaction
  * @param amount - Base amount
  * @param conversionFactor - Conversion factor

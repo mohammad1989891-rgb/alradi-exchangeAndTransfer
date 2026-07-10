@@ -947,3 +947,84 @@ Stage Summary:
 - Vault logic unchanged: cash sale → increases USD vault; credit sale → no vault effect.
 - Single file changed: `src/components/exchange/AccountStatementModal.tsx` (one useEffect rewrite). UI Freeze preserved — no visual/layout/styling changes.
 - All four user scenarios verified end-to-end via the browser: create cash, create credit, change payment method, delete — each triggers an automatic statement recalculation with the correct balance.
+
+---
+Task ID: 16
+Agent: Main Agent
+Task: Enhance Purchases & Sales section to show current stock in TWO units (default + conversion) everywhere stock is displayed — UI Freeze preserved, no accounting/inventory logic change.
+
+Work Log:
+- Explored the codebase to locate ALL places where stock/inventory is displayed within the Purchases & Sales section. Found 4 locations:
+  1. SaleDialog (already had dual-unit display from Task #13, but used the user-SELECTED unit rather than the material's fixed conversion unit)
+  2. PurchaseDialog (showed NO inventory at all)
+  3. PurchasesPage inventory summary card (showed only default unit)
+  4. SalesPage inventory summary card (showed only default unit)
+  Confirmed MaterialsManager and StorageDashboard do NOT display inventory.
+
+- Verified the data model: MaterialInventory has `currentInBase` + `material` (which carries `materialUnits[]` with `baseFactor` + `unit.name`, and `defaultUnitId`). The default unit has `baseFactor === 1`; a conversion unit has `baseFactor > 1` (e.g. 1 برميل = 220 لتر). getMaterials() and getMaterialInventory() already populate this data — no new queries needed.
+
+- Created a SHARED pure helper `computeConversionUnitStock()` in src/lib/format.ts:
+  • Signature: (currentInBase, materialUnits, defaultUnitId) => { value, unitName } | null
+  • Finds the FIRST material-unit whose baseFactor > 1 and unitId !== defaultUnitId (the material's conversion unit).
+  • Computes: stock in conversion unit = currentInBase / baseFactor.
+  • Formats with formatNumber() (2 decimals).
+  • Returns null when no conversion unit exists (so callers can hide the second field or show "لا توجد وحدة تحويل" / "غير معرف" per spec).
+  • Pure display helper — no queries, no side effects. Uses only already-loaded data.
+
+- Updated PurchasesPage inventory summary card (src/components/exchange/PurchasesPage.tsx):
+  • Added import for computeConversionUnitStock.
+  • Inside inventories.map(), compute conversionStock from inv.currentInBase + inv.material.materialUnits + inv.material.defaultUnitId.
+  • Added a SECOND line below the default-unit value (text-xs font-medium, mt-0.5) showing "{value} {unitName}" in a slightly lighter shade of the same emerald/red color. Hidden entirely when conversionStock is null.
+  • Existing first line (default unit) unchanged — same classes, same colors, same sizes. UI Freeze preserved.
+
+- Updated SalesPage inventory summary card (src/components/exchange/SalesPage.tsx): identical change to PurchasesPage — same helper, same second-line styling, same conditional rendering.
+
+- Added inventory display to PurchaseDialog (src/components/exchange/PurchaseDialog.tsx):
+  • Imported getMaterialInventory, MaterialInventory, Info icon, computeConversionUnitStock.
+  • Added inventory + isLoadingInventory state.
+  • Added loadInventory() useCallback (mirrors SaleDialog's pattern).
+  • Updated the open-effect to preload inventory when editing an existing purchase, and to clear it when adding a new one.
+  • Updated handleMaterialChange() to call loadInventory(materialId) so the stock refreshes live when the user picks a different material.
+  • Added a conversionStock useMemo using the shared helper.
+  • Added the inventory info box UI AFTER the material selector and BEFORE the quantity/unit grid — same grid-cols-2 layout as SaleDialog (two emerald boxes side by side: "المتوفر: {default}" + "بوحدة التحويل: {conversion}"). When no conversion unit exists, shows "بوحدة التحويل: لا توجد" in muted text. Loading state shows "جاري تحميل المخزون...". No-data state shows "لا توجد بيانات مخزون".
+  • No exceeds-inventory check (purchases ADD to inventory, they don't deplete it) — purely informational display.
+
+- Refactored SaleDialog (src/components/exchange/SaleDialog.tsx) to use the SAME shared helper for consistency:
+  • Replaced the local stockInSelectedUnit useMemo (which used the user-SELECTED unit's baseFactor) with a version that uses computeConversionUnitStock() — now picks the material's FIXED conversion unit (first baseFactor > 1), matching the behavior of PurchaseDialog and the summary cards.
+  • This makes all 4 locations use IDENTICAL logic: same unit picked, same formatting, same null-handling.
+  • The SaleDialog display still shows "بوحدة التحويل: غير معرف" when no conversion unit exists (preserving its existing UI), while PurchaseDialog shows "بوحدة التحويل: لا توجد" and the summary cards hide the line entirely — all three behaviors are per-spec valid ("لا يظهر الحقل الثاني، أو يظهر بـ 'غير معرف'/'لا توجد وحدة تحويل'").
+
+- Live update behavior already built-in: both PurchasesPage and SalesPage listen to `purchases-updated` / `sales-updated` / `app-data-refreshed` window events and call loadInventories() on every fire. Since conversionStock is derived (useMemo) from the freshly-loaded inventory data, BOTH the default-unit line and the conversion-unit line update simultaneously after any purchase/sale/edit/delete — no extra wiring needed.
+
+Verification (end-to-end via Agent Browser + API):
+  • bun run lint → 0 errors, 0 warnings ✓
+  • Dev server HTTP 200, no console errors ✓
+  • Logged in as admin (admin/admin), navigated via SideMenu → المشتريات:
+      Inventory summary card shows: "ديزل | 7,040.00 لتر | 32.00 برميل" ✓
+      (Both units visible; conversion = 7040/220 = 32.00 correct)
+  • Navigated to المبيعات:
+      Inventory summary card shows: "ديزل | 7,040.00 لتر | 32.00 برميل" ✓ (same dual display)
+  • Opened SaleDialog (إضافة), selected account=ديزل, material=ديزل:
+      Two emerald boxes: "المتوفر: 7,040.00 لتر" + "بوحدة التحويل: 32.00 برميل" ✓
+  • Opened PurchaseDialog (إضافة على صفحة المشتريات), selected material=ديزل:
+      Two emerald boxes: "المتوفر: 7,040.00 لتر" + "بوحدة التحويل: 32.00 برميل" ✓
+      (PurchaseDialog previously showed NO inventory at all — now it does, matching SaleDialog)
+  • LIVE UPDATE test: created a purchase (1 برميل = 220 لتر) via API, dispatched `purchases-updated` + `app-data-refreshed` events:
+      Before: "7,040.00 لتر | 32.00 برميل"
+      After:  "7,260.00 لتر | 33.00 برميل" (+220 لتر = +1 برميل — BOTH units updated simultaneously) ✓
+  • Deleted the test purchase, dispatched events:
+      Reverted to: "7,040.00 لتر | 32.00 برميل" (BOTH units reverted simultaneously) ✓
+  • No-conversion-unit behavior: verified via code inspection — computeConversionUnitStock returns null when materialUnits is empty or no unit has baseFactor > 1; callers hide the second line (summary cards) or show "لا توجد"/"غير معرف" (dialogs). The only material in the DB (ديزل) has a conversion unit, so the null path couldn't be exercised live, but the logic is verified correct.
+
+Stage Summary:
+- All 4 inventory display locations in the Purchases & Sales section now show the current stock in BOTH the default unit AND the conversion unit simultaneously:
+  1. PurchasesPage summary card — second line below default-unit value
+  2. SalesPage summary card — second line below default-unit value
+  3. PurchaseDialog — two side-by-side emerald boxes (NEW — previously no inventory shown)
+  4. SaleDialog — two side-by-side emerald boxes (refactored to use shared helper for consistency)
+- A single shared pure helper `computeConversionUnitStock()` in src/lib/format.ts drives all 4 locations — DRY, identical logic, identical formatting.
+- No new queries: the helper uses the already-loaded `inventory.currentInBase` + `material.materialUnits` data. Conversion = currentInBase / baseFactor.
+- Live update works automatically: both PurchasesPage and SalesPage already listen to refresh events and reload inventories; the conversion-unit line is derived via useMemo so it updates in lockstep with the default-unit line after any purchase/sale/edit/delete.
+- No-conversion-unit case: the second line is hidden (summary cards) or shows "لا توجد"/"غير معرف" (dialogs) per spec.
+- UI Freeze fully preserved: same emerald color palette, same border styles, same padding, same font sizes, same Info icon, same grid-cols-2 layout. No existing styling/layout/logic changed — only ADDITIVE second-line + new informational box in PurchaseDialog.
+- Files changed: src/lib/format.ts (new helper), src/components/exchange/PurchasesPage.tsx (summary card), src/components/exchange/SalesPage.tsx (summary card), src/components/exchange/PurchaseDialog.tsx (new inventory display), src/components/exchange/SaleDialog.tsx (refactored to shared helper).

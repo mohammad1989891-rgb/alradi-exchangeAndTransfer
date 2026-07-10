@@ -22,7 +22,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { useAppStore } from '@/store/useAppStore';
 import { cn } from '@/lib/utils';
-import { formatNumber } from '@/lib/format';
+import { formatNumber, computeConversionUnitStock } from '@/lib/format';
 import {
   Loader2,
   TrendingUp,
@@ -243,27 +243,26 @@ export function SaleDialog({
     return quantityInBase > inventory.currentInBase + 0.0001;
   }, [inventory, form.materialId, quantityNum, quantityInBase]);
 
-  // 🔸 Stock in the selected (conversion) unit — purely informational.
-  // Derives the SAME available stock expressed in the selected unit using its
-  // baseFactor. No new queries, no logic change — just a display conversion:
-  //   stock in selected unit = inventory.currentInBase / baseFactor
-  // Falls back to null (→ "غير معرف") when:
-  //   - no inventory loaded
-  //   - no unit selected / no material-unit link
-  //   - the selected unit IS the default unit (baseFactor === 1) → not a
-  //     conversion unit, so the default-unit field already covers it
+  // 🔸 Stock in the material's conversion unit (e.g. برميل) — purely
+  //    informational. Uses the shared computeConversionUnitStock() helper so
+  //    the SAME logic + formatting is used across SaleDialog, PurchaseDialog,
+  //    and the inventory summary cards on PurchasesPage & SalesPage.
+  //    Picks the material's first unit whose baseFactor > 1 (i.e. NOT the
+  //    default unit). Returns null when no conversion unit exists → the
+  //    second field shows "غير معرف" (per spec: "إذا لم تكن المادة تحتوي
+  //    على وحدة تحويل ... يظهر بقيمة غير معرف").
   const stockInSelectedUnit = useMemo<{ value: string | null; unitName: string }>(() => {
-    if (!inventory || !selectedMaterialUnit) {
-      return { value: null, unitName: selectedMaterialUnit?.unit?.name || '' };
-    }
-    const factor = selectedMaterialUnit.baseFactor;
-    const unitName = selectedMaterialUnit.unit?.name || '';
-    if (!factor || factor <= 1) {
-      return { value: null, unitName };
-    }
-    const converted = inventory.currentInBase / factor;
-    return { value: formatNumber(converted), unitName };
-  }, [inventory, selectedMaterialUnit]);
+    if (!inventory) return { value: null, unitName: '' };
+    const result = computeConversionUnitStock(
+      inventory.currentInBase,
+      inventory.material.materialUnits,
+      inventory.material.defaultUnitId,
+    );
+    return {
+      value: result?.value ?? null,
+      unitName: result?.unitName ?? '',
+    };
+  }, [inventory]);
 
   const handleFieldChange = (field: keyof FormState, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));

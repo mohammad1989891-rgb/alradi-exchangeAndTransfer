@@ -148,3 +148,92 @@ model Setting {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+// ============================================
+// قسم المشتريات والمبيعات (Purchases & Sales)
+// ============================================
+
+// وحدات القياس (قائمة رئيسية تُدار من الإعدادات)
+model Unit {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  materialUnits MaterialUnit[]
+  purchases     Purchase[]
+  sales         Sale[]
+}
+
+// المواد
+model Material {
+  id            String   @id @default(cuid())
+  name          String   @unique
+  defaultUnitId String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  defaultUnit   Unit           @relation(fields: [defaultUnitId], references: [id])
+  materialUnits MaterialUnit[]
+  purchases     Purchase[]
+  sales         Sale[]
+}
+
+// ربط المواد بالوحدات + معامل التحويل (relative to base, internally)
+model MaterialUnit {
+  id           String   @id @default(cuid())
+  materialId   String
+  unitId       String
+  baseFactor   Float    @default(1) // معامل التحويل للوحدة الأساسية (used internally)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  material     Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  unit         Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
+
+  @@unique([materialId, unitId])
+}
+
+// المشتريات — تُخصم من صندوق الدولار عند الحفظ
+model Purchase {
+  id                  String   @id @default(cuid())
+  date                DateTime @default(now())
+  materialId          String
+  materialName        String   // snapshot
+  quantity            Float
+  unitId              String
+  unitName            String   // snapshot
+  baseFactorSnapshot  Float    @default(1) // snapshot of base_factor at time of recording
+  quantityInBase      Float    // snapshot = quantity × baseFactorSnapshot
+  unitPriceUsd        Float
+  totalPriceUsd       Float    // = quantity × unitPriceUsd
+  description         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  material            Material @relation(fields: [materialId], references: [id])
+  unit                Unit     @relation(fields: [unitId], references: [id])
+}
+
+// المبيعات — تُربط بحساب وتظهر في كشف الحساب، كلها بالدولار
+model Sale {
+  id                  String   @id @default(cuid())
+  date                DateTime @default(now())
+  accountId           String
+  accountName         String   // snapshot
+  materialId          String
+  materialName        String   // snapshot
+  quantity            Float
+  unitId              String
+  unitName            String   // snapshot
+  baseFactorSnapshot  Float    @default(1)
+  quantityInBase      Float    // snapshot
+  unitPrice           Float    // USD
+  totalPrice          Float    // USD = quantity × unitPrice
+  description         String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  material            Material @relation(fields: [materialId], references: [id])
+  unit                Unit     @relation(fields: [unitId], references: [id])
+}

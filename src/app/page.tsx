@@ -12,6 +12,8 @@ import { SettingsPage } from '@/components/exchange/SettingsPage';
 import { CurrencyExchangePage } from '@/components/exchange/CurrencyExchangePage';
 import { VehiclesPage } from '@/components/exchange/VehiclesPage';
 import { ReportsPage } from '@/components/exchange/ReportsPage';
+import { PurchasesPage } from '@/components/exchange/PurchasesPage';
+import { SalesPage } from '@/components/exchange/SalesPage';
 import { SideMenu } from '@/components/exchange/SideMenu';
 import { CurrencyTransactionsModal } from '@/components/exchange/CurrencyTransactionsModal';
 import { VaultQueryModal } from '@/components/exchange/VaultQueryModal';
@@ -338,6 +340,10 @@ export default function Home() {
         return <VehiclesPage />;
       case 'reports':
         return <ReportsPage />;
+      case 'purchases':
+        return <PurchasesPage />;
+      case 'sales':
+        return <SalesPage />;
       default:
         return <BalancesPage />;
     }

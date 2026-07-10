@@ -36,6 +36,11 @@ import {
   UserPlus,
   ShieldCheck,
   ShieldAlert,
+  Ruler,
+  Package,
+  ShoppingCart,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -72,6 +77,8 @@ import { exportAllData, importAllData, clearAllData, changePassword, changeUsern
 import { supabase } from '@/lib/supabase';
 import type { Currency as CurrencyType } from '@/types';
 import { StorageDashboard } from '@/components/exchange/StorageDashboard';
+import { UnitsManager } from '@/components/exchange/UnitsManager';
+import { MaterialsManager } from '@/components/exchange/MaterialsManager';
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
@@ -114,6 +121,11 @@ export function SettingsPage() {
   const [isArchiving, setIsArchiving] = useState(false);
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [archiveSetupResult, setArchiveSetupResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  // Purchases & Sales Database Setup
+  const [isSettingUpPurchasesSales, setIsSettingUpPurchasesSales] = useState(false);
+  const [purchasesSalesSetupResult, setPurchasesSalesSetupResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
+  const [sqlCopied, setSqlCopied] = useState(false);
 
   // Backup System
   const [backups, setBackups] = useState<Array<{
@@ -709,6 +721,250 @@ CREATE INDEX IF NOT EXISTS idx_debts_date ON debts(date);`;
       });
     } finally {
       setIsSettingUp(false);
+    }
+  };
+
+  // ============================================
+  // Purchases & Sales Database Setup Handler
+  // ============================================
+
+  // Full migration SQL for purchases & sales system (units, materials, material_units, purchases, sales)
+  // Mirrors supabase/migration-purchases-sales.sql — kept inline so the user never needs to
+  // manually open/copy the .sql file (which caused the "syntax error at or near 'supabase'" issue
+  // when the file PATH was pasted instead of file CONTENT).
+  const PURCHASES_SALES_MIGRATION_SQL = `-- ============================================
+-- Migration: المشتريات والمبيعات (Purchases & Sales)
+-- Adds: units, materials, material_units, purchases, sales
+-- Safe to re-run (uses IF NOT EXISTS)
+-- ============================================
+
+-- Units Table (وحدات القياس — قائمة رئيسية)
+CREATE TABLE IF NOT EXISTS units (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Materials Table (المواد)
+CREATE TABLE IF NOT EXISTS materials (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  default_unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Material Units Table (ربط المواد بالوحدات + معامل التحويل)
+CREATE TABLE IF NOT EXISTS material_units (
+  id TEXT PRIMARY KEY,
+  material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE CASCADE,
+  base_factor DOUBLE PRECISION NOT NULL DEFAULT 1,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(material_id, unit_id)
+);
+
+-- Purchases Table (المشتريات)
+CREATE TABLE IF NOT EXISTS purchases (
+  id TEXT PRIMARY KEY,
+  date TIMESTAMPTZ NOT NULL DEFAULT now(),
+  material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+  material_name TEXT NOT NULL,
+  quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+  unit_name TEXT NOT NULL,
+  base_factor_snapshot DOUBLE PRECISION NOT NULL DEFAULT 1,
+  quantity_in_base DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unit_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Sales Table (المبيعات — بالدولار، مرتبطة بحساب)
+-- payment_method: 'cash' (default) → adds totalPrice to USD vault
+--                 'credit'          → deferred; no vault change (unpaid invoice)
+CREATE TABLE IF NOT EXISTS sales (
+  id TEXT PRIMARY KEY,
+  date TIMESTAMPTZ NOT NULL DEFAULT now(),
+  account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE RESTRICT,
+  account_name TEXT NOT NULL,
+  material_id TEXT NOT NULL REFERENCES materials(id) ON DELETE RESTRICT,
+  material_name TEXT NOT NULL,
+  quantity DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unit_id TEXT NOT NULL REFERENCES units(id) ON DELETE RESTRICT,
+  unit_name TEXT NOT NULL,
+  base_factor_snapshot DOUBLE PRECISION NOT NULL DEFAULT 1,
+  quantity_in_base DOUBLE PRECISION NOT NULL DEFAULT 0,
+  unit_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total_price DOUBLE PRECISION NOT NULL DEFAULT 0,
+  payment_method TEXT NOT NULL DEFAULT 'cash',
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_materials_name ON materials(name);
+CREATE INDEX IF NOT EXISTS idx_materials_default_unit ON materials(default_unit_id);
+CREATE INDEX IF NOT EXISTS idx_material_units_material_id ON material_units(material_id);
+CREATE INDEX IF NOT EXISTS idx_material_units_unit_id ON material_units(unit_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_material_id ON purchases(material_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(date DESC);
+CREATE INDEX IF NOT EXISTS idx_purchases_unit_id ON purchases(unit_id);
+CREATE INDEX IF NOT EXISTS idx_sales_account_id ON sales(account_id);
+CREATE INDEX IF NOT EXISTS idx_sales_material_id ON sales(material_id);
+CREATE INDEX IF NOT EXISTS idx_sales_date ON sales(date DESC);
+CREATE INDEX IF NOT EXISTS idx_sales_unit_id ON sales(unit_id);
+CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);
+
+-- Row Level Security (RLS)
+ALTER TABLE units ENABLE ROW LEVEL SECURITY;
+ALTER TABLE materials ENABLE ROW LEVEL SECURITY;
+ALTER TABLE material_units ENABLE ROW LEVEL SECURITY;
+ALTER TABLE purchases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
+
+-- Drop existing policies (safe re-run)
+DROP POLICY IF EXISTS "Allow all on units" ON units;
+DROP POLICY IF EXISTS "Allow all on materials" ON materials;
+DROP POLICY IF EXISTS "Allow all on material_units" ON material_units;
+DROP POLICY IF EXISTS "Allow all on purchases" ON purchases;
+DROP POLICY IF EXISTS "Allow all on sales" ON sales;
+
+-- Allow all operations (private app with anon key)
+CREATE POLICY "Allow all on units" ON units FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on materials" ON materials FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on material_units" ON material_units FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on purchases" ON purchases FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow all on sales" ON sales FOR ALL USING (true) WITH CHECK (true);
+
+-- Enable Realtime
+ALTER PUBLICATION supabase_realtime ADD TABLE units;
+ALTER PUBLICATION supabase_realtime ADD TABLE materials;
+ALTER PUBLICATION supabase_realtime ADD TABLE material_units;
+ALTER PUBLICATION supabase_realtime ADD TABLE purchases;
+ALTER PUBLICATION supabase_realtime ADD TABLE sales;
+
+-- Seed default units (if not exists)
+INSERT INTO units (id, name) VALUES
+  ('unit_piece', 'قطعة'),
+  ('unit_kg', 'كيلو'),
+  ('unit_gram', 'غرام'),
+  ('unit_bag', 'كيس'),
+  ('unit_carton', 'كرتون'),
+  ('unit_ton', 'طن'),
+  ('unit_liter', 'لتر'),
+  ('unit_box', 'صندوق')
+ON CONFLICT (id) DO NOTHING;
+
+-- Add payment_method column for existing installations
+-- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';`;
+
+  // Setup Purchases & Sales Database — checks if tables exist and creates them if missing
+  const handleSetupPurchasesSales = async () => {
+    setIsSettingUpPurchasesSales(true);
+    setPurchasesSalesSetupResult(null);
+    setSqlCopied(false);
+    try {
+      // Check if all 5 tables exist by querying each one
+      const tableChecks = await Promise.all([
+        supabase.from('units').select('id').limit(1),
+        supabase.from('materials').select('id').limit(1),
+        supabase.from('material_units').select('id').limit(1),
+        supabase.from('purchases').select('id').limit(1),
+        supabase.from('sales').select('id').limit(1),
+      ]);
+
+      const tableNames = ['units', 'materials', 'material_units', 'purchases', 'sales'];
+      const missingTables: string[] = [];
+      tableChecks.forEach((res, idx) => {
+        if (res.error) {
+          const msg = (res.error.message || '').toLowerCase();
+          if (msg.includes('does not exist') || msg.includes('could not find') || msg.includes('relation') || msg.includes('schema cache')) {
+            missingTables.push(tableNames[idx]);
+          }
+        }
+      });
+
+      if (missingTables.length === 0) {
+        setPurchasesSalesSetupResult({
+          success: true,
+          message: 'تم إعداد نظام المشتريات والمبيعات بنجاح ✓ جميع الجداول موجودة (units, materials, material_units, purchases, sales).',
+        });
+        return;
+      }
+
+      // Some tables are missing — try to create them with dbPassword
+      if (dbPassword) {
+        try {
+          const response = await fetch('/api/execute-sql', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sql: PURCHASES_SALES_MIGRATION_SQL,
+              dbPassword,
+              userRole: currentRole,
+            }),
+          });
+          const result = await response.json();
+
+          if (result.success) {
+            setPurchasesSalesSetupResult({
+              success: true,
+              message: 'تم إعداد نظام المشتريات والمبيعات بنجاح ✓ تم إنشاء جميع الجداول (units, materials, material_units, purchases, sales) + الفهارس + RLS + الوحدات الافتراضية.',
+            });
+            return;
+          } else if (result.error) {
+            setPurchasesSalesSetupResult({
+              success: false,
+              message: result.error,
+              sql: PURCHASES_SALES_MIGRATION_SQL,
+            });
+            return;
+          }
+        } catch (fetchError) {
+          console.error('Execute SQL fetch error:', fetchError);
+          setPurchasesSalesSetupResult({
+            success: false,
+            message: 'فشل الاتصال بالخادم لتنفيذ SQL. تأكد من اتصال الإنترنت.',
+            sql: PURCHASES_SALES_MIGRATION_SQL,
+          });
+          return;
+        }
+      }
+
+      // No password provided — provide SQL for manual execution
+      setPurchasesSalesSetupResult({
+        success: false,
+        message: `⚠️ الجداول التالية غير موجودة: ${missingTables.join(', ')}. أدخل كلمة مرور قاعدة البيانات أعلاه للإنشاء التلقائي، أو انسخ SQL التالي وشغّله يدوياً في Supabase SQL Editor:`,
+        sql: PURCHASES_SALES_MIGRATION_SQL,
+      });
+    } catch (error) {
+      console.error('Purchases & Sales setup error:', error);
+      setPurchasesSalesSetupResult({
+        success: false,
+        message: 'خطأ في إعداد نظام المشتريات والمبيعات. حاول مرة أخرى.',
+        sql: PURCHASES_SALES_MIGRATION_SQL,
+      });
+    } finally {
+      setIsSettingUpPurchasesSales(false);
+    }
+  };
+
+  // Copy SQL to clipboard
+  const handleCopySql = async (sql: string) => {
+    try {
+      await navigator.clipboard.writeText(sql);
+      setSqlCopied(true);
+      toast({ title: 'تم النسخ', description: 'تم نسخ SQL إلى الحافظة — الصقه في Supabase SQL Editor' });
+      setTimeout(() => setSqlCopied(false), 3000);
+    } catch {
+      toast({ title: 'فشل النسخ', description: 'تعذر النسخ إلى الحافظة. حاول نسخ النص يدوياً.', variant: 'destructive' });
     }
   };
 
@@ -1676,11 +1932,130 @@ CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK 
       ),
     },
     {
+      id: 'purchases-sales-setup',
+      title: 'إعداد المشتريات والمبيعات',
+      icon: ShoppingCart,
+      content: (
+        <div className="space-y-4">
+          {!isAdmin && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+                <p className="text-xs text-red-600 dark:text-red-400/80">لا تملك صلاحية الوصول إلى هذا القسم. فقط المدير يمكنه إعداد قاعدة بيانات المشتريات والمبيعات.</p>
+              </div>
+            </div>
+          )}
+          <div className={cn(!isAdmin && 'opacity-50 pointer-events-none')}>
+          {/* Setup Database */}
+          <div className="p-4 rounded-xl bg-muted/50">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+                <ShoppingCart className="w-5 h-5 text-emerald-500" />
+              </div>
+              <div>
+                <p className="font-medium">إعداد قاعدة بيانات المشتريات والمبيعات</p>
+                <p className="text-xs text-muted-foreground">إنشاء جداول: units, materials, material_units, purchases, sales + الفهارس + RLS + الوحدات الافتراضية</p>
+              </div>
+            </div>
+
+            {/* Status info card */}
+            <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 mb-3">
+              <p className="text-xs text-blue-700 dark:text-blue-400 leading-relaxed">
+                هذا القسم ينشئ جداول المشتريات والمبيعات تلقائياً. أدخل كلمة مرور قاعدة البيانات من Supabase للإنشاء التلقائي، أو اتركها فارغة للحصول على SQL جاهز للنسخ.
+              </p>
+            </div>
+
+            <div className="relative mb-3">
+              <Input
+                type={showDbPassword ? 'text' : 'password'}
+                placeholder="كلمة مرور قاعدة البيانات (اختياري - للإنشاء التلقائي)"
+                value={dbPassword}
+                onChange={(e) => setDbPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowDbPassword(!showDbPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase للإنشاء التلقائي، أو اتركها فارغة للحصول على SQL جاهز للنسخ</p>
+            <Button
+              onClick={handleSetupPurchasesSales}
+              disabled={isSettingUpPurchasesSales}
+              variant="outline"
+              className="w-full gap-2"
+            >
+              {isSettingUpPurchasesSales ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShoppingCart className="w-4 h-4" />}
+              {isSettingUpPurchasesSales ? 'جاري الإعداد...' : 'إعداد قاعدة بيانات المشتريات والمبيعات'}
+            </Button>
+
+            {purchasesSalesSetupResult && (
+              <div className="mt-3 space-y-2">
+                <p className={cn('text-xs', purchasesSalesSetupResult.success ? 'text-emerald-600' : 'text-red-600')}>
+                  {purchasesSalesSetupResult.message}
+                </p>
+
+                {purchasesSalesSetupResult.sql && (
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <div className="flex items-center justify-between bg-muted/80 px-3 py-2 border-b border-border">
+                      <span className="text-[11px] font-medium text-muted-foreground">SQL جاهز للنسخ — الصقه في Supabase SQL Editor</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 text-xs"
+                        onClick={() => handleCopySql(purchasesSalesSetupResult.sql!)}
+                      >
+                        {sqlCopied ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-500" />
+                            <span className="text-emerald-600">تم النسخ</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            نسخ SQL
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <pre className="text-[10px] leading-relaxed text-muted-foreground bg-background p-3 overflow-auto max-h-80 rtl:text-left" dir="ltr">
+                      {purchasesSalesSetupResult.sql}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          </div>
+        </div>
+      ),
+    },
+    {
       id: 'storage',
       title: 'إدارة التخزين',
       icon: Database,
       content: <StorageDashboard />,
     },
+    // Units & Materials Management — Admin Only
+    ...(isAdmin ? [
+      {
+        id: 'units' as const,
+        title: 'وحدات القياس',
+        icon: Ruler,
+        content: <UnitsManager />,
+      },
+      {
+        id: 'materials' as const,
+        title: 'المواد والوحدات',
+        icon: Package,
+        content: <MaterialsManager />,
+      },
+    ] : []),
     // User Management Section — Admin Only
     ...(isAdmin ? [{
       id: 'user-management' as const,

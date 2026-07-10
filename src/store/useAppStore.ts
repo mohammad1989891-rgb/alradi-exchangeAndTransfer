@@ -11,7 +11,7 @@ import {
   getTotalDebtRemaining,
 } from '@/lib/supabaseDb';
 
-type Tab = 'balances' | 'accounts' | 'transactions' | 'debts' | 'settings' | 'exchange' | 'vehicles' | 'reports';
+type Tab = 'balances' | 'accounts' | 'transactions' | 'debts' | 'settings' | 'exchange' | 'vehicles' | 'reports' | 'purchases' | 'sales';
 
 interface AppState {
   // Navigation

@@ -17,6 +17,8 @@ import {
   ShieldCheck,
   Car,
   Archive,
+  ShoppingCart,
+  TrendingUp,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 
@@ -48,6 +50,20 @@ const menuItems = [
     description: 'إدارة شراكات المركبات',
     icon: Car,
     color: 'bg-cyan-500',
+  },
+  {
+    id: 'purchases',
+    title: 'المشتريات',
+    description: 'شراء المواد وخصمها من الصندوق',
+    icon: ShoppingCart,
+    color: 'bg-rose-500',
+  },
+  {
+    id: 'sales',
+    title: 'المبيعات',
+    description: 'بيع المواد وربطها بالحسابات',
+    icon: TrendingUp,
+    color: 'bg-green-600',
   },
   {
     id: 'currencies',
@@ -91,6 +107,12 @@ export function SideMenu() {
         break;
       case 'vehicles':
         setActiveTab('vehicles');
+        break;
+      case 'purchases':
+        setActiveTab('purchases');
+        break;
+      case 'sales':
+        setActiveTab('sales');
         break;
       case 'reports':
         setActiveTab('reports');

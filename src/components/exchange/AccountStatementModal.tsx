@@ -1,8 +1,10 @@
 'use client';
 
-import { useState, useMemo, Fragment } from 'react';
+import { useState, useMemo, useEffect, Fragment } from 'react';
 import { useAppStore } from '@/store/useAppStore';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
+import { getSalesByAccount } from '@/lib/supabaseDb';
+import type { Sale } from '@/lib/supabaseDb';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -20,8 +22,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { 
-  BookOpen, Printer, FileText, X
+import {
+  BookOpen, Printer, FileText, X, TrendingUp
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatNumber } from '@/lib/format';
@@ -47,6 +49,31 @@ export function AccountStatementModal() {
   }, [selectedAccountForStatement, accounts]);
   
   const [selectedAccountId, setSelectedAccountId] = useState<string>(defaultAccountId);
+
+  // 🔸 Sales linked to the selected account (all in USD per spec)
+  const [accountSales, setAccountSales] = useState<Sale[]>([]);
+  const [isLoadingSales, setIsLoadingSales] = useState(false);
+
+  // Fetch sales whenever the selected account changes
+  useEffect(() => {
+    if (!selectedAccountId) {
+      return;
+    }
+    let cancelled = false;
+    getSalesByAccount(selectedAccountId)
+      .then((sales) => {
+        if (cancelled) return;
+        setAccountSales(sales);
+      })
+      .catch((err) => {
+        console.error('Error fetching sales for account:', err);
+        if (!cancelled) setAccountSales([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingSales(false);
+      });
+    return () => { cancelled = true; };
+  }, [selectedAccountId]);
   
   // Date filter state
   const [dateFrom, setDateFrom] = useState('');
@@ -102,46 +129,147 @@ export function AccountStatementModal() {
     return grouped;
   }, [accountTransactions]);
   
-  // Calculate totals per currency
+  // 🔸 Date-filtered sales for this account (all sales are USD per spec)
+  const filteredAccountSales = useMemo(() => {
+    if (!hasDateFilter) return accountSales;
+    return accountSales.filter(s => {
+      const sDate = new Date(s.date).toISOString().split('T')[0];
+      const matchesDateFrom = !dateFrom || sDate >= dateFrom;
+      const matchesDateTo = !dateTo || sDate <= dateTo;
+      return matchesDateFrom && matchesDateTo;
+    });
+  }, [accountSales, dateFrom, dateTo, hasDateFilter]);
+
+  // 🔸 Unified statement item type: a transaction OR a sale, with runningBalance
+  type StatementItem = {
+    id: string;
+    date: Date;
+    type: 'INCOME' | 'EXPENSE';
+    amount: number;
+    finalBalance: number;
+    description?: string | null;
+    runningBalance: number;
+    isSale: boolean;
+    paymentMethod?: 'cash' | 'credit';
+    materialName?: string;
+    quantity?: number;
+    unitName?: string;
+  };
+
+  // Calculate totals per currency — for USD, merge sales into the running balance
   const currencyStats = useMemo(() => {
     const stats: Record<string, {
       currency: Currency | undefined;
       totalIncome: number;
       totalExpense: number;
       netBalance: number;
-      transactions: (Transaction & { runningBalance: number })[];
+      items: StatementItem[];
     }> = {};
-    
+
+    // Find USD currency id (sales are always USD)
+    const usdCurrency = currencies.find(c => c.code === 'USD');
+
     for (const currencyId in transactionsByCurrency) {
       const currency = currencies.find(c => c.id === currencyId);
       const txs = transactionsByCurrency[currencyId];
-      
+
+      // Build items: convert transactions to StatementItem
+      let items: StatementItem[] = txs.map(tx => ({
+        id: tx.id,
+        date: new Date(tx.date),
+        type: tx.type,
+        amount: tx.amount,
+        finalBalance: tx.finalBalance,
+        description: tx.description,
+        runningBalance: 0,
+        isSale: false,
+      }));
+
+      // 🔸 If this is the USD currency, merge sales (treat each sale as INCOME)
+      if (usdCurrency && currencyId === usdCurrency.id && filteredAccountSales.length > 0) {
+        const saleItems: StatementItem[] = filteredAccountSales.map(s => ({
+          id: s.id,
+          date: new Date(s.date),
+          type: 'INCOME' as const, // Sale = customer owes us → لنا
+          amount: s.totalPrice,
+          finalBalance: s.totalPrice,
+          description: s.description || `بيع ${s.materialName}`,
+          runningBalance: 0,
+          isSale: true,
+          paymentMethod: s.paymentMethod,
+          materialName: s.materialName,
+          quantity: s.quantity,
+          unitName: s.unitName,
+        }));
+        items = items.concat(saleItems);
+      }
+
+      // Sort by date ascending (then by createdAt for stable order — use id as tiebreaker)
+      items.sort((a, b) => {
+        const diff = a.date.getTime() - b.date.getTime();
+        if (diff !== 0) return diff;
+        return a.id.localeCompare(b.id);
+      });
+
+      // Compute running balance
       let totalIncome = 0;
       let totalExpense = 0;
       let runningBalance = 0;
-      
-      const txsWithBalance = txs.map(tx => {
-        if (tx.type === 'INCOME') {
-          totalIncome += tx.finalBalance;
-          runningBalance += tx.finalBalance;
+      items = items.map(it => {
+        if (it.type === 'INCOME') {
+          totalIncome += it.finalBalance;
+          runningBalance += it.finalBalance;
         } else {
-          totalExpense += tx.finalBalance;
-          runningBalance -= tx.finalBalance;
+          totalExpense += it.finalBalance;
+          runningBalance -= it.finalBalance;
         }
-        return { ...tx, runningBalance };
+        return { ...it, runningBalance };
       });
-      
+
       stats[currencyId] = {
         currency,
         totalIncome,
         totalExpense,
         netBalance: runningBalance,
-        transactions: txsWithBalance,
+        items,
       };
     }
-    
+
+    // 🔸 Edge case: account has sales but NO USD transactions — still show USD section
+    if (usdCurrency && !stats[usdCurrency.id] && filteredAccountSales.length > 0) {
+      let items: StatementItem[] = filteredAccountSales.map(s => ({
+        id: s.id,
+        date: new Date(s.date),
+        type: 'INCOME' as const,
+        amount: s.totalPrice,
+        finalBalance: s.totalPrice,
+        description: s.description || `بيع ${s.materialName}`,
+        runningBalance: 0,
+        isSale: true,
+        paymentMethod: s.paymentMethod,
+        materialName: s.materialName,
+        quantity: s.quantity,
+        unitName: s.unitName,
+      }));
+      items.sort((a, b) => a.date.getTime() - b.date.getTime());
+      let totalIncome = 0;
+      let runningBalance = 0;
+      items = items.map(it => {
+        totalIncome += it.finalBalance;
+        runningBalance += it.finalBalance;
+        return { ...it, runningBalance };
+      });
+      stats[usdCurrency.id] = {
+        currency: usdCurrency,
+        totalIncome,
+        totalExpense: 0,
+        netBalance: runningBalance,
+        items,
+      };
+    }
+
     return stats;
-  }, [transactionsByCurrency, currencies]);
+  }, [transactionsByCurrency, currencies, filteredAccountSales]);
   
   // Group debts by currency
   const debtsByCurrency = useMemo(() => {
@@ -296,6 +424,18 @@ export function AccountStatementModal() {
           .income-row { background: #f0fdf4; }
           .expense-row { background: #fef2f2; }
           .debt-row { background: #fffbeb; }
+          .sale-row { background: #f0f9ff; }
+          .sale-credit-row { background: #fffbeb; }
+          .badge {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+            font-weight: 600;
+            margin-inline-start: 4px;
+          }
+          .badge-cash { background: #d1fae5; color: #065f46; }
+          .badge-credit { background: #fef3c7; color: #92400e; }
           
           .debt-section {
             margin-top: 15px;
@@ -361,31 +501,42 @@ export function AccountStatementModal() {
               </div>
             </div>
             
-            ${stat.transactions.length > 0 ? `
+            ${stat.items.length > 0 ? `
               <table>
                 <thead>
                   <tr>
                     <th>التاريخ</th>
-                    <th>المبلغ الأساسي</th>
-                    <th>العملة</th>
+                    <th>النوع</th>
                     <th>المبلغ</th>
                     <th>الرصيد التراكمي</th>
                     <th>البيان</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${stat.transactions.map(t => `
-                    <tr class="${t.type === 'INCOME' ? 'income-row' : 'expense-row'}">
+                  ${stat.items.map(t => {
+                    const rowClass = t.isSale
+                      ? (t.paymentMethod === 'credit' ? 'sale-credit-row' : 'sale-row')
+                      : (t.type === 'INCOME' ? 'income-row' : 'expense-row');
+                    const typeLabel = t.isSale
+                      ? (t.paymentMethod === 'credit'
+                          ? '🛒 بيع <span class="badge badge-credit">آجل</span>'
+                          : '🛒 بيع <span class="badge badge-cash">كاش</span>')
+                      : (t.type === 'INCOME' ? 'لنا' : 'علينا');
+                    const descLabel = t.isSale && t.materialName
+                      ? `بيع ${t.materialName} (${formatNumber(t.quantity || 0)} ${t.unitName || ''})${t.paymentMethod === 'credit' ? ' — فاتورة غير مسددة' : ''}`
+                      : (t.description || '-');
+                    return `
+                    <tr class="${rowClass}">
                       <td>${format(new Date(t.date), 'dd/MM/yyyy')}</td>
-                      <td>${formatNumber(t.amount)}</td>
-                      <td>${(() => { const c = currencies.find(c => c.id === (t.baseCurrencyId || t.currencyId)); return c ? c.code : ''; })()}</td>
+                      <td>${typeLabel}</td>
                       <td class="${t.type === 'INCOME' ? 'income' : 'expense'}">
                         ${t.type === 'INCOME' ? '+' : '-'}${formatNumber(t.finalBalance)}
                       </td>
                       <td>${formatNumber(t.runningBalance)}</td>
-                      <td>${t.description || '-'}</td>
+                      <td>${descLabel}</td>
                     </tr>
-                  `).join('')}
+                  `;
+                  }).join('')}
                 </tbody>
               </table>
             ` : '<p style="text-align: center; color: #999;">لا توجد حركات</p>'}

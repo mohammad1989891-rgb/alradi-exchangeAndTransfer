@@ -1241,6 +1241,54 @@ export async function recalculateVaultBalance(currencyId: string): Promise<Vault
     }
   }
 
+  // 5. PURCHASES: Deduct total_price_usd from USD vault only
+  //    (purchases are always paid in USD cash per the spec)
+  let purchaseQuery = supabase.from('purchases').select('*');
+
+  if (dateFilter) {
+    purchaseQuery = purchaseQuery.gt('date', dateFilter);
+  }
+
+  const { data: purchases } = await purchaseQuery;
+  if (purchases) {
+    // Find the USD currency id once
+    const { data: usdCurrencyRow } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+    const usdCurrencyId = usdCurrencyRow && usdCurrencyRow.length > 0 ? (usdCurrencyRow[0] as Record<string, unknown>).id as string : null;
+    if (usdCurrencyId && currencyId === usdCurrencyId) {
+      for (const p of purchases) {
+        const purchaseObj = rowToPurchase(p);
+        // Purchase: cash goes OUT → vault decreases
+        delta -= purchaseObj.totalPriceUsd;
+      }
+    }
+  }
+
+  // 6. SALES (cash mode only): Add total_price to USD vault
+  //    - cash sale   → customer pays USD now → vault increases
+  //    - credit sale → deferred; NO vault change until a later collection
+  //    (Per spec: credit sales must NOT create a debt record. They live as
+  //     unpaid invoices in the Sales subsystem and appear in the account
+  //     statement marked as "آجل".)
+  let saleQuery = supabase.from('sales').select('*').eq('payment_method', 'cash');
+
+  if (dateFilter) {
+    saleQuery = saleQuery.gt('date', dateFilter);
+  }
+
+  const { data: salesRows } = await saleQuery;
+  if (salesRows) {
+    // Find the USD currency id once (sales are always USD per spec)
+    const { data: usdCurrencyRow2 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+    const usdCurrencyId2 = usdCurrencyRow2 && usdCurrencyRow2.length > 0 ? (usdCurrencyRow2[0] as Record<string, unknown>).id as string : null;
+    if (usdCurrencyId2 && currencyId === usdCurrencyId2) {
+      for (const s of salesRows) {
+        const saleObj = rowToSale(s);
+        // Cash sale: USD comes IN → vault increases
+        delta += saleObj.totalPrice;
+      }
+    }
+  }
+
   // Compute new balance
   const newBalance = openingBalance + delta;
 
@@ -4221,4 +4269,973 @@ export async function restoreArchivedRecords(
 ): Promise<void> {
   // This is the same as unarchiveRecords — sets is_archived = false
   await unarchiveRecords(table, ids);
+}
+
+// ============================================
+// ============================================
+// ============================================
+// قسم المشتريات والمبيعات (Purchases & Sales)
+// ============================================
+// ============================================
+// ============================================
+
+// ---- Types ----
+
+export interface Unit {
+  id: string;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Material {
+  id: string;
+  name: string;
+  defaultUnitId: string;
+  defaultUnit?: Unit;
+  materialUnits?: MaterialUnit[];
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface MaterialUnit {
+  id: string;
+  materialId: string;
+  unitId: string;
+  baseFactor: number; // معامل التحويل الداخلي للوحدة الأساسية
+  unit?: Unit;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface Purchase {
+  id: string;
+  date: Date;
+  materialId: string;
+  materialName: string;
+  quantity: number;
+  unitId: string;
+  unitName: string;
+  baseFactorSnapshot: number;
+  quantityInBase: number;
+  unitPriceUsd: number;
+  totalPriceUsd: number;
+  description?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  material?: Material;
+  unit?: Unit;
+}
+
+// ============================================
+// Sale Payment Method type
+// - 'cash'   → adds totalPrice (USD) to the USD cash box immediately
+// - 'credit' → deferred sale; does NOT affect any cash box until a later collection
+//              (appears as an unpaid invoice in the account statement)
+// Per spec: NO integration with the Debts system. Credit sales live entirely
+// inside the Sales subsystem as unpaid invoices linked to an account.
+// ============================================
+export type SalePaymentMethod = 'cash' | 'credit';
+
+export interface Sale {
+  id: string;
+  date: Date;
+  accountId: string;
+  accountName: string;
+  materialId: string;
+  materialName: string;
+  quantity: number;
+  unitId: string;
+  unitName: string;
+  baseFactorSnapshot: number;
+  quantityInBase: number;
+  unitPrice: number;
+  totalPrice: number;
+  paymentMethod: SalePaymentMethod;
+  description?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  material?: Material;
+  unit?: Unit;
+  account?: Account;
+}
+
+// Inventory summary for a material
+export interface MaterialInventory {
+  material: Material;
+  totalPurchasedInBase: number;
+  totalSoldInBase: number;
+  currentInBase: number;
+  currentInDefaultUnit: number;
+  defaultUnitName: string;
+}
+
+// ---- Row Mappers ----
+
+function rowToUnit(row: Record<string, unknown>): Unit {
+  const obj = toCamelCase<Unit>(row);
+  obj.createdAt = new Date(obj.createdAt as unknown as string);
+  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  return obj;
+}
+
+function rowToMaterial(row: Record<string, unknown>): Material {
+  const obj = toCamelCase<Material>(row);
+  obj.createdAt = new Date(obj.createdAt as unknown as string);
+  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  return obj;
+}
+
+function rowToMaterialUnit(row: Record<string, unknown>): MaterialUnit {
+  const obj = toCamelCase<MaterialUnit>(row);
+  obj.createdAt = new Date(obj.createdAt as unknown as string);
+  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  return obj;
+}
+
+function rowToPurchase(row: Record<string, unknown>): Purchase {
+  const obj = toCamelCase<Purchase>(row);
+  obj.date = new Date(obj.date as unknown as string);
+  obj.createdAt = new Date(obj.createdAt as unknown as string);
+  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  return obj;
+}
+
+function rowToSale(row: Record<string, unknown>): Sale {
+  const obj = toCamelCase<Sale>(row);
+  obj.date = new Date(obj.date as unknown as string);
+  obj.createdAt = new Date(obj.createdAt as unknown as string);
+  obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  // 🔸 Backward-compat: older rows may not have payment_method — default to 'cash'
+  const raw = (row.payment_method as string | undefined)?.toLowerCase();
+  obj.paymentMethod = raw === 'credit' ? 'credit' : 'cash';
+  return obj;
+}
+
+// ---- toRow helpers ----
+
+function unitToRow(unit: Partial<Unit>): Record<string, unknown> {
+  const row = toSnakeCase<Record<string, unknown>>(unit as Record<string, unknown>);
+  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  return row;
+}
+
+function materialToRow(material: Partial<Material>): Record<string, unknown> {
+  const row = toSnakeCase<Record<string, unknown>>(material as Record<string, unknown>);
+  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  return row;
+}
+
+function materialUnitToRow(mu: Partial<MaterialUnit>): Record<string, unknown> {
+  const row = toSnakeCase<Record<string, unknown>>(mu as Record<string, unknown>);
+  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  return row;
+}
+
+function purchaseToRow(p: Partial<Purchase>): Record<string, unknown> {
+  const row = toSnakeCase<Record<string, unknown>>(p as Record<string, unknown>);
+  if (row.date) row.date = dateToIso(row.date as Date);
+  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  return row;
+}
+
+function saleToRow(s: Partial<Sale>): Record<string, unknown> {
+  const row = toSnakeCase<Record<string, unknown>>(s as Record<string, unknown>);
+  if (row.date) row.date = dateToIso(row.date as Date);
+  if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
+  if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  // 🔸 Ensure payment_method is always written (default 'cash' if missing)
+  if (!row.payment_method) row.payment_method = 'cash';
+  return row;
+}
+
+// ---- Helper: get USD currency id ----
+
+async function getUsdCurrencyId(): Promise<string | null> {
+  const { data } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+  if (data && data.length > 0) return (data[0] as Record<string, unknown>).id as string;
+  // Fallback: default currency
+  const { data: defData } = await supabase.from('currencies').select('id').eq('is_default', true).limit(1);
+  if (defData && defData.length > 0) return (defData[0] as Record<string, unknown>).id as string;
+  return null;
+}
+
+// ============================================
+// Units CRUD
+// ============================================
+
+export async function getUnits(): Promise<Unit[]> {
+  await initializeDatabase();
+  if (!tablesExist) return [];
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('units').select('*').order('name', { ascending: true });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) return [];
+  return (result || []).map(rowToUnit);
+}
+
+export async function addUnit(name: string): Promise<Unit | null> {
+  await initializeDatabase();
+  const now = new Date();
+  const unit: Unit = {
+    id: 'unit_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    name: name.trim(),
+    createdAt: now,
+    updatedAt: now,
+  };
+  const { error } = await supabase.from('units').insert([unitToRow(unit)]);
+  if (error) throw new Error(error.message);
+  return unit;
+}
+
+export async function updateUnit(id: string, name: string): Promise<Unit | null> {
+  await initializeDatabase();
+  const { error } = await supabase.from('units').update({
+    name: name.trim(),
+    updated_at: new Date().toISOString(),
+  }).eq('id', id);
+  if (error) throw new Error(error.message);
+  const { data } = await supabase.from('units').select('*').eq('id', id).single();
+  return data ? rowToUnit(data) : null;
+}
+
+export async function deleteUnit(id: string): Promise<void> {
+  await initializeDatabase();
+  // Check if unit is used as a default for any material
+  const { data: materialsUsing } = await supabase.from('materials').select('id, name').eq('default_unit_id', id);
+  if (materialsUsing && materialsUsing.length > 0) {
+    const names = materialsUsing.map(m => (m as Record<string, unknown>).name).join('، ');
+    throw new Error(`لا يمكن حذف الوحدة لأنها مستخدمة كوحدة افتراضية للمواد: ${names}`);
+  }
+  const { error } = await supabase.from('units').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ============================================
+// Materials CRUD
+// ============================================
+
+export async function getMaterials(): Promise<Material[]> {
+  await initializeDatabase();
+  if (!tablesExist) return [];
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('materials').select('*').order('name', { ascending: true });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) return [];
+  const materials = (result || []).map(rowToMaterial);
+
+  // Load all units and material_units in one query each (avoid N+1)
+  const { data: allUnits } = await supabase.from('units').select('*');
+  const unitsMap = new Map<string, Unit>();
+  if (allUnits) {
+    for (const u of allUnits) {
+      const unit = rowToUnit(u);
+      unitsMap.set(unit.id, unit);
+    }
+  }
+
+  const { data: allMU } = await supabase.from('material_units').select('*');
+  const muByMaterial = new Map<string, MaterialUnit[]>();
+  if (allMU) {
+    for (const mu of allMU) {
+      const materialUnit = rowToMaterialUnit(mu);
+      materialUnit.unit = unitsMap.get(materialUnit.unitId);
+      const list = muByMaterial.get(materialUnit.materialId) || [];
+      list.push(materialUnit);
+      muByMaterial.set(materialUnit.materialId, list);
+    }
+  }
+
+  for (const m of materials) {
+    m.materialUnits = muByMaterial.get(m.id) || [];
+    m.defaultUnit = unitsMap.get(m.defaultUnitId);
+  }
+
+  return materials;
+}
+
+export async function getMaterialById(id: string): Promise<Material | null> {
+  await initializeDatabase();
+  const { data, error } = await supabase.from('materials').select('*').eq('id', id).single();
+  if (error || !data) return null;
+  const material = rowToMaterial(data);
+
+  // Load material units + units
+  const { data: muRows } = await supabase.from('material_units').select('*').eq('material_id', id);
+  const unitIds = new Set<string>();
+  const mus: MaterialUnit[] = [];
+  if (muRows) {
+    for (const mu of muRows) {
+      const materialUnit = rowToMaterialUnit(mu);
+      unitIds.add(materialUnit.unitId);
+      mus.push(materialUnit);
+    }
+  }
+  if (unitIds.size > 0) {
+    const { data: unitRows } = await supabase.from('units').select('*').in('id', Array.from(unitIds));
+    const unitsMap = new Map<string, Unit>();
+    if (unitRows) {
+      for (const u of unitRows) {
+        const unit = rowToUnit(u);
+        unitsMap.set(unit.id, unit);
+      }
+    }
+    for (const mu of mus) {
+      mu.unit = unitsMap.get(mu.unitId);
+    }
+    material.defaultUnit = unitsMap.get(material.defaultUnitId);
+  }
+  material.materialUnits = mus;
+  return material;
+}
+
+export async function addMaterial(data: {
+  name: string;
+  defaultUnitId: string;
+  units?: { unitId: string; baseFactor: number }[];
+}): Promise<Material> {
+  await initializeDatabase();
+  const now = new Date();
+  const material: Material = {
+    id: 'mat_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    name: data.name.trim(),
+    defaultUnitId: data.defaultUnitId,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const { error } = await supabase.from('materials').insert([materialToRow(material)]);
+  if (error) throw new Error(error.message);
+
+  // Insert material_units — always include the default unit (baseFactor = 1)
+  const unitsToInsert: MaterialUnit[] = [];
+  const seenUnitIds = new Set<string>();
+  // Default unit with baseFactor = 1
+  unitsToInsert.push({
+    id: 'mu_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    materialId: material.id,
+    unitId: data.defaultUnitId,
+    baseFactor: 1,
+    createdAt: now,
+    updatedAt: now,
+  });
+  seenUnitIds.add(data.defaultUnitId);
+
+  if (data.units) {
+    for (const u of data.units) {
+      if (seenUnitIds.has(u.unitId)) continue;
+      seenUnitIds.add(u.unitId);
+      unitsToInsert.push({
+        id: 'mu_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9) + '_' + u.unitId.slice(-4),
+        materialId: material.id,
+        unitId: u.unitId,
+        baseFactor: u.baseFactor || 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+  }
+
+  if (unitsToInsert.length > 0) {
+    const { error: muError } = await supabase.from('material_units').insert(unitsToInsert.map(materialUnitToRow));
+    if (muError) throw new Error(muError.message);
+  }
+
+  return material;
+}
+
+export async function updateMaterial(id: string, data: {
+  name?: string;
+  defaultUnitId?: string;
+}): Promise<Material | null> {
+  await initializeDatabase();
+  const updateData: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (data.name !== undefined) updateData.name = data.name.trim();
+  if (data.defaultUnitId !== undefined) updateData.default_unit_id = data.defaultUnitId;
+
+  const { error } = await supabase.from('materials').update(updateData).eq('id', id);
+  if (error) throw new Error(error.message);
+
+  // If default unit changed, ensure the new default exists in material_units with baseFactor = 1
+  // and recompute all other baseFactors relative to the new default.
+  if (data.defaultUnitId !== undefined) {
+    await recomputeMaterialBaseFactors(id, data.defaultUnitId);
+  }
+
+  return await getMaterialById(id);
+}
+
+// Recompute base_factors when default unit changes.
+// Strategy: read old material_units (their baseFactors relative to old default),
+// compute new baseFactors relative to new default using:
+//   new_base_factor = old_base_factor / new_default_old_base_factor
+async function recomputeMaterialBaseFactors(materialId: string, newDefaultUnitId: string): Promise<void> {
+  const { data: muRows } = await supabase.from('material_units').select('*').eq('material_id', materialId);
+  if (!muRows || muRows.length === 0) return;
+
+  const mus = muRows.map(rowToMaterialUnit);
+  const newDefaultMU = mus.find(m => m.unitId === newDefaultUnitId);
+  if (!newDefaultMU) {
+    // New default not in list — insert it with baseFactor = 1
+    const now = new Date();
+    const newMU: MaterialUnit = {
+      id: 'mu_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+      materialId,
+      unitId: newDefaultUnitId,
+      baseFactor: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
+    await supabase.from('material_units').insert([materialUnitToRow(newMU)]);
+    return;
+  }
+
+  const newDefaultOldFactor = newDefaultMU.baseFactor || 1;
+  // Update all material_units: new_base_factor = old_base_factor / newDefaultOldFactor
+  for (const mu of mus) {
+    const newFactor = mu.baseFactor / newDefaultOldFactor;
+    await supabase.from('material_units').update({
+      base_factor: newFactor,
+      updated_at: new Date().toISOString(),
+    }).eq('id', mu.id);
+  }
+}
+
+export async function deleteMaterial(id: string): Promise<void> {
+  await initializeDatabase();
+  // Check for existing purchases/sales
+  const { data: purchases } = await supabase.from('purchases').select('id').eq('material_id', id).limit(1);
+  if (purchases && purchases.length > 0) {
+    throw new Error('لا يمكن حذف المادة لوجود حركات شراء مرتبطة بها');
+  }
+  const { data: sales } = await supabase.from('sales').select('id').eq('material_id', id).limit(1);
+  if (sales && sales.length > 0) {
+    throw new Error('لا يمكن حذف المادة لوجود حركات بيع مرتبطة بها');
+  }
+  const { error } = await supabase.from('materials').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ============================================
+// Material Units CRUD (manage which units apply to a material + their base_factors)
+// ============================================
+
+export async function addMaterialUnit(data: {
+  materialId: string;
+  unitId: string;
+  baseFactor: number;
+}): Promise<MaterialUnit | null> {
+  await initializeDatabase();
+  const now = new Date();
+  const mu: MaterialUnit = {
+    id: 'mu_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    materialId: data.materialId,
+    unitId: data.unitId,
+    baseFactor: data.baseFactor || 1,
+    createdAt: now,
+    updatedAt: now,
+  };
+  const { error } = await supabase.from('material_units').insert([materialUnitToRow(mu)]);
+  if (error) throw new Error(error.message);
+  return mu;
+}
+
+export async function updateMaterialUnit(id: string, baseFactor: number): Promise<void> {
+  await initializeDatabase();
+  const { error } = await supabase.from('material_units').update({
+    base_factor: baseFactor,
+    updated_at: new Date().toISOString(),
+  }).eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteMaterialUnit(id: string): Promise<void> {
+  await initializeDatabase();
+  // Check if this is the default unit for the material
+  const { data: muRow } = await supabase.from('material_units').select('material_id, unit_id').eq('id', id).single();
+  if (muRow) {
+    const mu = rowToMaterialUnit(muRow);
+    const { data: materialRow } = await supabase.from('materials').select('default_unit_id').eq('id', mu.materialId).single();
+    if (materialRow) {
+      const defaultUnitId = (materialRow as Record<string, unknown>).default_unit_id as string;
+      if (defaultUnitId === mu.unitId) {
+        throw new Error('لا يمكن حذف الوحدة الافتراضية للمادة. قم بتغيير الوحدة الافتراضية أولاً.');
+      }
+    }
+  }
+  const { error } = await supabase.from('material_units').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+}
+
+// ============================================
+// Inventory calculation
+// ============================================
+
+export async function getMaterialInventory(materialId: string): Promise<MaterialInventory | null> {
+  const material = await getMaterialById(materialId);
+  if (!material) return null;
+
+  // Sum purchases and sales in base units
+  const { data: purchases } = await supabase.from('purchases').select('quantity_in_base').eq('material_id', materialId);
+  const { data: sales } = await supabase.from('sales').select('quantity_in_base').eq('material_id', materialId);
+
+  const totalPurchasedInBase = (purchases || []).reduce((sum, p) => sum + ((p as Record<string, unknown>).quantity_in_base as number) || 0, 0);
+  const totalSoldInBase = (sales || []).reduce((sum, s) => sum + ((s as Record<string, unknown>).quantity_in_base as number) || 0, 0);
+  const currentInBase = totalPurchasedInBase - totalSoldInBase;
+
+  // Convert to default unit: divide by default unit's baseFactor (which is 1 after normalization, but be safe)
+  const defaultMU = material.materialUnits?.find(mu => mu.unitId === material.defaultUnitId);
+  const defaultFactor = defaultMU?.baseFactor || 1;
+  const currentInDefaultUnit = currentInBase / defaultFactor;
+
+  return {
+    material,
+    totalPurchasedInBase,
+    totalSoldInBase,
+    currentInBase,
+    currentInDefaultUnit,
+    defaultUnitName: material.defaultUnit?.name || '',
+  };
+}
+
+export async function getAllMaterialInventories(): Promise<MaterialInventory[]> {
+  const materials = await getMaterials();
+  const result: MaterialInventory[] = [];
+  for (const m of materials) {
+    const inv = await getMaterialInventory(m.id);
+    if (inv) result.push(inv);
+  }
+  return result;
+}
+
+// Helper: get base_factor for a material+unit, falling back gracefully
+async function getMaterialUnitBaseFactor(materialId: string, unitId: string): Promise<{ baseFactor: number; unitName: string; materialName: string } | null> {
+  const { data: muRow } = await supabase.from('material_units').select('*').eq('material_id', materialId).eq('unit_id', unitId).limit(1);
+  if (muRow && muRow.length > 0) {
+    const mu = rowToMaterialUnit(muRow[0]);
+    const { data: unitRow } = await supabase.from('units').select('name').eq('id', unitId).single();
+    const { data: materialRow } = await supabase.from('materials').select('name').eq('id', materialId).single();
+    return {
+      baseFactor: mu.baseFactor,
+      unitName: unitRow ? (unitRow as Record<string, unknown>).name as string : '',
+      materialName: materialRow ? (materialRow as Record<string, unknown>).name as string : '',
+    };
+  }
+  // Fallback: unit might not be in material_units — use baseFactor = 1
+  const { data: unitRow } = await supabase.from('units').select('name').eq('id', unitId).single();
+  const { data: materialRow } = await supabase.from('materials').select('name').eq('id', materialId).single();
+  if (!unitRow || !materialRow) return null;
+  return {
+    baseFactor: 1,
+    unitName: (unitRow as Record<string, unknown>).name as string,
+    materialName: (materialRow as Record<string, unknown>).name as string,
+  };
+}
+
+// ============================================
+// Purchases CRUD
+// ============================================
+
+export async function getPurchases(): Promise<Purchase[]> {
+  await initializeDatabase();
+  if (!tablesExist) return [];
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('purchases').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) return [];
+  const purchases = (result || []).map(rowToPurchase);
+
+  // Enrich with material and unit names (already snapshotted, but provide objects too)
+  const materialIds = new Set<string>();
+  const unitIds = new Set<string>();
+  for (const p of purchases) {
+    materialIds.add(p.materialId);
+    unitIds.add(p.unitId);
+  }
+  let materialsMap = new Map<string, Material>();
+  let unitsMap = new Map<string, Unit>();
+  if (materialIds.size > 0) {
+    const { data: mRows } = await supabase.from('materials').select('*').in('id', Array.from(materialIds));
+    if (mRows) for (const r of mRows) { const m = rowToMaterial(r); materialsMap.set(m.id, m); }
+  }
+  if (unitIds.size > 0) {
+    const { data: uRows } = await supabase.from('units').select('*').in('id', Array.from(unitIds));
+    if (uRows) for (const r of uRows) { const u = rowToUnit(r); unitsMap.set(u.id, u); }
+  }
+  for (const p of purchases) {
+    p.material = materialsMap.get(p.materialId);
+    p.unit = unitsMap.get(p.unitId);
+  }
+  return purchases;
+}
+
+export async function addPurchase(data: {
+  date: string;
+  materialId: string;
+  quantity: number;
+  unitId: string;
+  unitPriceUsd: number;
+  description?: string;
+}): Promise<Purchase> {
+  await initializeDatabase();
+  const now = new Date();
+
+  // Get base_factor snapshot
+  const muInfo = await getMaterialUnitBaseFactor(data.materialId, data.unitId);
+  if (!muInfo) throw new Error('المادة أو الوحدة غير موجودة');
+
+  const baseFactorSnapshot = muInfo.baseFactor;
+  const quantityInBase = data.quantity * baseFactorSnapshot;
+  const totalPriceUsd = data.quantity * data.unitPriceUsd;
+
+  const purchase: Purchase = {
+    id: 'pur_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    date: new Date(data.date),
+    materialId: data.materialId,
+    materialName: muInfo.materialName,
+    quantity: data.quantity,
+    unitId: data.unitId,
+    unitName: muInfo.unitName,
+    baseFactorSnapshot,
+    quantityInBase,
+    unitPriceUsd: data.unitPriceUsd,
+    totalPriceUsd,
+    description: data.description || null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const { error } = await supabase.from('purchases').insert([purchaseToRow(purchase)]);
+  if (error) throw new Error(error.message);
+
+  // Deduct from USD vault — recalculate USD vault balance
+  const usdCurrencyId = await getUsdCurrencyId();
+  if (usdCurrencyId) {
+    await recalculateVaultBalance(usdCurrencyId);
+  }
+
+  return purchase;
+}
+
+export async function updatePurchase(id: string, data: {
+  date?: string;
+  materialId?: string;
+  quantity?: number;
+  unitId?: string;
+  unitPriceUsd?: number;
+  description?: string;
+}): Promise<Purchase | null> {
+  await initializeDatabase();
+
+  const { data: oldRow, error: fetchError } = await supabase.from('purchases').select('*').eq('id', id).single();
+  if (fetchError || !oldRow) throw new Error('عملية الشراء غير موجودة');
+  const old = rowToPurchase(oldRow);
+
+  const effectiveMaterialId = data.materialId ?? old.materialId;
+  const effectiveUnitId = data.unitId ?? old.unitId;
+  const effectiveQuantity = data.quantity ?? old.quantity;
+  const effectiveUnitPrice = data.unitPriceUsd ?? old.unitPriceUsd;
+  const effectiveDate = data.date ? new Date(data.date) : old.date;
+  const effectiveDescription = data.description !== undefined ? data.description : old.description;
+
+  // Re-fetch base_factor if material or unit changed
+  let baseFactorSnapshot = old.baseFactorSnapshot;
+  let quantityInBase = effectiveQuantity * baseFactorSnapshot;
+  let materialName = old.materialName;
+  let unitName = old.unitName;
+  if (data.materialId || data.unitId) {
+    const muInfo = await getMaterialUnitBaseFactor(effectiveMaterialId, effectiveUnitId);
+    if (!muInfo) throw new Error('المادة أو الوحدة غير موجودة');
+    baseFactorSnapshot = muInfo.baseFactor;
+    quantityInBase = effectiveQuantity * baseFactorSnapshot;
+    materialName = muInfo.materialName;
+    unitName = muInfo.unitName;
+  }
+
+  const totalPriceUsd = effectiveQuantity * effectiveUnitPrice;
+
+  const updateObj: Record<string, unknown> = {
+    date: effectiveDate.toISOString(),
+    material_id: effectiveMaterialId,
+    material_name: materialName,
+    quantity: effectiveQuantity,
+    unit_id: effectiveUnitId,
+    unit_name: unitName,
+    base_factor_snapshot: baseFactorSnapshot,
+    quantity_in_base: quantityInBase,
+    unit_price_usd: effectiveUnitPrice,
+    total_price_usd: totalPriceUsd,
+    description: effectiveDescription,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from('purchases').update(updateObj).eq('id', id);
+  if (error) throw new Error(error.message);
+
+  // Recalculate USD vault (in case totalPriceUsd changed)
+  const usdCurrencyId = await getUsdCurrencyId();
+  if (usdCurrencyId) {
+    await recalculateVaultBalance(usdCurrencyId);
+  }
+
+  const { data: updatedRow } = await supabase.from('purchases').select('*').eq('id', id).single();
+  return updatedRow ? rowToPurchase(updatedRow) : null;
+}
+
+export async function deletePurchase(id: string): Promise<void> {
+  await initializeDatabase();
+  const { error } = await supabase.from('purchases').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+
+  // Recalculate USD vault
+  const usdCurrencyId = await getUsdCurrencyId();
+  if (usdCurrencyId) {
+    await recalculateVaultBalance(usdCurrencyId);
+  }
+}
+
+// ============================================
+// Sales CRUD
+// ============================================
+
+export async function getSales(): Promise<Sale[]> {
+  await initializeDatabase();
+  if (!tablesExist) return [];
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('sales').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) return [];
+  const sales = (result || []).map(rowToSale);
+
+  // Enrich
+  const materialIds = new Set<string>();
+  const unitIds = new Set<string>();
+  const accountIds = new Set<string>();
+  for (const s of sales) {
+    materialIds.add(s.materialId);
+    unitIds.add(s.unitId);
+    accountIds.add(s.accountId);
+  }
+  let materialsMap = new Map<string, Material>();
+  let unitsMap = new Map<string, Unit>();
+  let accountsMap = new Map<string, Account>();
+  if (materialIds.size > 0) {
+    const { data: mRows } = await supabase.from('materials').select('*').in('id', Array.from(materialIds));
+    if (mRows) for (const r of mRows) { const m = rowToMaterial(r); materialsMap.set(m.id, m); }
+  }
+  if (unitIds.size > 0) {
+    const { data: uRows } = await supabase.from('units').select('*').in('id', Array.from(unitIds));
+    if (uRows) for (const r of uRows) { const u = rowToUnit(r); unitsMap.set(u.id, u); }
+  }
+  if (accountIds.size > 0) {
+    const { data: aRows } = await supabase.from('accounts').select('*').in('id', Array.from(accountIds));
+    if (aRows) for (const r of aRows) { const a = rowToAccount(r); accountsMap.set(a.id, a); }
+  }
+  for (const s of sales) {
+    s.material = materialsMap.get(s.materialId);
+    s.unit = unitsMap.get(s.unitId);
+    s.account = accountsMap.get(s.accountId);
+  }
+  return sales;
+}
+
+export async function getSalesByAccount(accountId: string): Promise<Sale[]> {
+  await initializeDatabase();
+  if (!tablesExist) return [];
+  const result = await fetchWithRetry(async () => {
+    const { data, error } = await supabase.from('sales').select('*').eq('account_id', accountId).order('date', { ascending: true });
+    if (error) throw error;
+    return data;
+  });
+  if (result === null) return [];
+  return (result || []).map(rowToSale);
+}
+
+export async function addSale(data: {
+  date: string;
+  accountId: string;
+  materialId: string;
+  quantity: number;
+  unitId: string;
+  unitPrice: number;
+  paymentMethod?: SalePaymentMethod;
+  description?: string;
+}): Promise<Sale> {
+  await initializeDatabase();
+  const now = new Date();
+
+  // Get base_factor snapshot
+  const muInfo = await getMaterialUnitBaseFactor(data.materialId, data.unitId);
+  if (!muInfo) throw new Error('المادة أو الوحدة غير موجودة');
+
+  // Get account name
+  const { data: accountRow } = await supabase.from('accounts').select('name').eq('id', data.accountId).single();
+  if (!accountRow) throw new Error('الحساب غير موجود');
+  const accountName = (accountRow as Record<string, unknown>).name as string;
+
+  const baseFactorSnapshot = muInfo.baseFactor;
+  const quantityInBase = data.quantity * baseFactorSnapshot;
+  const totalPrice = data.quantity * data.unitPrice;
+  // 🔸 Default to 'cash' if not specified (backward compatible with old callers)
+  const paymentMethod: SalePaymentMethod = data.paymentMethod === 'credit' ? 'credit' : 'cash';
+
+  // Check inventory availability
+  const inv = await getMaterialInventory(data.materialId);
+  if (inv && quantityInBase > inv.currentInBase + 0.0001) {
+    throw new Error(`الكمية المطلوبة تتجاوز المخزون المتوفر. المتوفر: ${inv.currentInDefaultUnit.toFixed(2)} ${inv.defaultUnitName}`);
+  }
+
+  const sale: Sale = {
+    id: 'sale_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
+    date: new Date(data.date),
+    accountId: data.accountId,
+    accountName,
+    materialId: data.materialId,
+    materialName: muInfo.materialName,
+    quantity: data.quantity,
+    unitId: data.unitId,
+    unitName: muInfo.unitName,
+    baseFactorSnapshot,
+    quantityInBase,
+    unitPrice: data.unitPrice,
+    totalPrice,
+    paymentMethod,
+    description: data.description || null,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  const { error } = await supabase.from('sales').insert([saleToRow(sale)]);
+  if (error) throw new Error(error.message);
+
+  // 🔸 Cash-box integration per spec:
+  //   - cash sale   → add totalPrice (USD) to the USD cash box
+  //   - credit sale → NO cash box change (deferred; unpaid invoice)
+  // recalculateVaultBalance reads payment_method from the sales table itself
+  // (see section #6 in recalculateVaultBalance), so we just trigger a recompute.
+  if (paymentMethod === 'cash') {
+    const usdCurrencyId = await getUsdCurrencyId();
+    if (usdCurrencyId) {
+      await recalculateVaultBalance(usdCurrencyId);
+    }
+  }
+
+  return sale;
+}
+
+export async function updateSale(id: string, data: {
+  date?: string;
+  accountId?: string;
+  materialId?: string;
+  quantity?: number;
+  unitId?: string;
+  unitPrice?: number;
+  paymentMethod?: SalePaymentMethod;
+  description?: string;
+}): Promise<Sale | null> {
+  await initializeDatabase();
+
+  const { data: oldRow, error: fetchError } = await supabase.from('sales').select('*').eq('id', id).single();
+  if (fetchError || !oldRow) throw new Error('عملية البيع غير موجودة');
+  const old = rowToSale(oldRow);
+
+  const effectiveMaterialId = data.materialId ?? old.materialId;
+  const effectiveUnitId = data.unitId ?? old.unitId;
+  const effectiveQuantity = data.quantity ?? old.quantity;
+  const effectiveUnitPrice = data.unitPrice ?? old.unitPrice;
+  const effectiveDate = data.date ? new Date(data.date) : old.date;
+  const effectiveDescription = data.description !== undefined ? data.description : old.description;
+  const effectiveAccountId = data.accountId ?? old.accountId;
+  // 🔸 Resolve effective payment method (default to old value; normalize to 'cash' | 'credit')
+  const effectivePaymentMethod: SalePaymentMethod =
+    data.paymentMethod !== undefined
+      ? (data.paymentMethod === 'credit' ? 'credit' : 'cash')
+      : old.paymentMethod;
+
+  let baseFactorSnapshot = old.baseFactorSnapshot;
+  let quantityInBase = effectiveQuantity * baseFactorSnapshot;
+  let materialName = old.materialName;
+  let unitName = old.unitName;
+  if (data.materialId || data.unitId) {
+    const muInfo = await getMaterialUnitBaseFactor(effectiveMaterialId, effectiveUnitId);
+    if (!muInfo) throw new Error('المادة أو الوحدة غير موجودة');
+    baseFactorSnapshot = muInfo.baseFactor;
+    quantityInBase = effectiveQuantity * baseFactorSnapshot;
+    materialName = muInfo.materialName;
+    unitName = muInfo.unitName;
+  }
+
+  let accountName = old.accountName;
+  if (data.accountId && data.accountId !== old.accountId) {
+    const { data: accountRow } = await supabase.from('accounts').select('name').eq('id', effectiveAccountId).single();
+    if (accountRow) accountName = (accountRow as Record<string, unknown>).name as string;
+  }
+
+  const totalPrice = effectiveQuantity * effectiveUnitPrice;
+
+  const updateObj: Record<string, unknown> = {
+    date: effectiveDate.toISOString(),
+    account_id: effectiveAccountId,
+    account_name: accountName,
+    material_id: effectiveMaterialId,
+    material_name: materialName,
+    quantity: effectiveQuantity,
+    unit_id: effectiveUnitId,
+    unit_name: unitName,
+    base_factor_snapshot: baseFactorSnapshot,
+    quantity_in_base: quantityInBase,
+    unit_price: effectiveUnitPrice,
+    total_price: totalPrice,
+    payment_method: effectivePaymentMethod,
+    description: effectiveDescription,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { error } = await supabase.from('sales').update(updateObj).eq('id', id);
+  if (error) throw new Error(error.message);
+
+  // 🔸 Recalculate USD vault if any cash-affecting field changed
+  // (amount, payment method, or date relative to opening_balance_date)
+  const amountChanged = totalPrice !== old.totalPrice;
+  const paymentMethodChanged = effectivePaymentMethod !== old.paymentMethod;
+  if (amountChanged || paymentMethodChanged) {
+    const usdCurrencyId = await getUsdCurrencyId();
+    if (usdCurrencyId) {
+      await recalculateVaultBalance(usdCurrencyId);
+    }
+  }
+
+  const { data: updatedRow } = await supabase.from('sales').select('*').eq('id', id).single();
+  return updatedRow ? rowToSale(updatedRow) : null;
+}
+
+export async function deleteSale(id: string): Promise<void> {
+  await initializeDatabase();
+  // 🔸 Fetch the sale before deleting so we know whether it was a cash sale
+  // (cash sales affect the USD vault; credit sales do not)
+  const { data: row } = await supabase.from('sales').select('payment_method, total_price').eq('id', id).maybeSingle();
+  const wasCash = (row as { payment_method?: string } | null)?.payment_method !== 'credit';
+
+  const { error } = await supabase.from('sales').delete().eq('id', id);
+  if (error) throw new Error(error.message);
+
+  // 🔸 If the deleted sale was a cash sale, recompute the USD vault balance
+  if (wasCash) {
+    const usdCurrencyId = await getUsdCurrencyId();
+    if (usdCurrencyId) {
+      await recalculateVaultBalance(usdCurrencyId);
+    }
+  }
 }

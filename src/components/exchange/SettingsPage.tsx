@@ -222,6 +222,20 @@ ON CONFLICT (id) DO NOTHING;
 -- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';`;
 
+// ============================================
+// 🔸 PAYMENT_METHOD_FIX_SQL (module scope)
+// Minimal, targeted migration that ONLY adds the `payment_method` column to the
+// `sales` table. Used by the "إصلاح سريع" (Quick Fix) sub-section when sales
+// are failing with: "Could not find the 'payment_method' column of 'sales' in
+// the schema cache". Much smaller than the full migration, so it's faster and
+// more likely to succeed on flaky connections.
+// ============================================
+const PAYMENT_METHOD_FIX_SQL = `-- Quick fix: add payment_method column to sales table
+-- (for older installations that created the sales table before the cash/credit feature)
+-- Safe to re-run: IF NOT EXISTS won't error if the column already exists.
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+CREATE INDEX IF NOT EXISTS idx_sales_payment_method ON sales(payment_method);`;
+
 
 export function SettingsPage() {
   const { theme, setTheme } = useTheme();
@@ -2514,6 +2528,10 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
   const [isSettingUpPurchasesSales, setIsSettingUpPurchasesSales] = useState(false);
   const [purchasesSalesSetupResult, setPurchasesSalesSetupResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
   const [sqlCopied, setSqlCopied] = useState(false);
+  // 🔸 Quick-fix state for the targeted payment_method column migration
+  const [isFixingPaymentMethod, setIsFixingPaymentMethod] = useState(false);
+  const [paymentMethodFixResult, setPaymentMethodFixResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
+  const [paymentMethodSqlCopied, setPaymentMethodSqlCopied] = useState(false);
 
   // القسم الفرعي المفتوح حالياً (افتراضياً: إعداد قاعدة البيانات)
   const [openSub, setOpenSub] = useState<string | null>('db-setup');
@@ -2603,6 +2621,49 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
       setTimeout(() => setSqlCopied(false), 2000);
     } catch {
       toast({ title: 'فشل النسخ', description: 'تعذر النسخ إلى الحافظة. حاول نسخ النص يدوياً.', variant: 'destructive' });
+    }
+  };
+
+  // 🔸 إصلاح سريع: إضافة عمود payment_method فقط (للمنشآت القديمة)
+  // يعالج خطأ: "Could not find the 'payment_method' column of 'sales' in the schema cache"
+  const handleQuickFixPaymentMethod = async () => {
+    setIsFixingPaymentMethod(true);
+    setPaymentMethodFixResult(null);
+    setPaymentMethodSqlCopied(false);
+    try {
+      if (dbPassword) {
+        // Auto-fix via execute-sql API
+        const resp = await fetch('/api/execute-sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql: PAYMENT_METHOD_FIX_SQL,
+            dbPassword,
+            userRole: 'admin',
+          }),
+        });
+        const json = await resp.json();
+        if (resp.ok && json?.success) {
+          setPaymentMethodFixResult({ success: true, message: 'تمت إضافة عمود طريقة السداد (payment_method) بنجاح ✓ — يمكن الآن حفظ المبيعات بكاش أو آجل.' });
+          toast({ title: 'تم الإصلاح', description: 'تمت إضافة عمود طريقة السداد بنجاح.' });
+        } else {
+          setPaymentMethodFixResult({ success: false, message: json?.error || 'فشل الإصلاح التلقائي.' });
+        }
+      } else {
+        // No password → provide SQL to copy
+        setPaymentMethodFixResult({
+          success: true,
+          message: 'تم تجهيز SQL. انسخه والصقه في Supabase SQL Editor ثم اضغط Run.',
+          sql: PAYMENT_METHOD_FIX_SQL,
+        });
+      }
+    } catch (error) {
+      setPaymentMethodFixResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'حدث خطأ غير متوقع.',
+      });
+    } finally {
+      setIsFixingPaymentMethod(false);
     }
   };
 
@@ -2697,6 +2758,112 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
                     </div>
                     <pre className="text-[10px] leading-relaxed text-muted-foreground bg-background p-3 overflow-auto max-h-80 rtl:text-left" dir="ltr">
                       {purchasesSalesSetupResult.sql}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      ),
+    },
+    {
+      id: 'quick-fix-payment-method',
+      title: 'إصلاح سريع: عمود طريقة السداد',
+      icon: AlertTriangle,
+      description: 'إضافة عمود payment_method لجدول المبيعات — يحل خطأ "Could not find the payment_method column" عند حفظ المبيعات',
+      body: (
+        <div className="space-y-3">
+          {!isAdmin && (
+            <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 flex items-center gap-3">
+              <ShieldAlert className="w-5 h-5 text-red-500 shrink-0" />
+              <div>
+                <p className="text-sm font-medium text-red-700 dark:text-red-400">صلاحية مطلوبة</p>
+                <p className="text-xs text-red-600 dark:text-red-400/80">فقط المدير يمكنه إصلاح عمود طريقة السداد.</p>
+              </div>
+            </div>
+          )}
+          <div className={cn('p-4 rounded-xl bg-muted/50', !isAdmin && 'opacity-50 pointer-events-none')}>
+            {/* Urgent warning card */}
+            <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 mb-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-amber-800 dark:text-amber-400">ظهور خطأ عند حفظ المبيعات؟</p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
+                    إذا ظهر خطأ «Could not find the &apos;payment_method&apos; column of &apos;sales&apos;»، فهذا يعني أن جدول المبيعات أُنشئ قبل إضافة ميزة كاش/آجل. هذا الإصلاح السريع يضيف العمود المفقود فقط (بدون إعادة تشغيل التهجير الكامل).
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative mb-3">
+              <Input
+                type={showDbPassword ? 'text' : 'password'}
+                placeholder="كلمة مرور قاعدة البيانات (اختياري - للإصلاح التلقائي)"
+                value={dbPassword}
+                onChange={(e) => setDbPassword(e.target.value)}
+                className="pr-10"
+              />
+              <button
+                type="button"
+                onClick={() => setShowDbPassword(!showDbPassword)}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+              >
+                {showDbPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-3">أدخل كلمة مرور قاعدة البيانات من Supabase للإصلاح التلقائي، أو اتركها فارغة للحصول على SQL جاهز للنسخ</p>
+            <Button
+              onClick={handleQuickFixPaymentMethod}
+              disabled={isFixingPaymentMethod}
+              variant="outline"
+              className="w-full gap-2 border-amber-400 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/20"
+            >
+              {isFixingPaymentMethod ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+              {isFixingPaymentMethod ? 'جاري الإصلاح...' : 'إصلاح عمود طريقة السداد'}
+            </Button>
+
+            {paymentMethodFixResult && (
+              <div className="mt-3 space-y-2">
+                <p className={cn('text-xs', paymentMethodFixResult.success ? 'text-emerald-600' : 'text-red-600')}>
+                  {paymentMethodFixResult.message}
+                </p>
+
+                {paymentMethodFixResult.sql && (
+                  <div className="rounded-lg border border-border overflow-hidden">
+                    <div className="flex items-center justify-between bg-muted/80 px-3 py-2 border-b border-border">
+                      <span className="text-[11px] font-medium text-muted-foreground">SQL جاهز للنسخ — الصقه في Supabase SQL Editor</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 gap-1 text-xs"
+                        onClick={() => {
+                          navigator.clipboard.writeText(paymentMethodFixResult.sql!).then(() => {
+                            setPaymentMethodSqlCopied(true);
+                            toast({ title: 'تم النسخ', description: 'تم نسخ SQL إلى الحافظة' });
+                            setTimeout(() => setPaymentMethodSqlCopied(false), 2000);
+                          }).catch(() => {
+                            toast({ title: 'فشل النسخ', description: 'تعذر النسخ إلى الحافظة.', variant: 'destructive' });
+                          });
+                        }}
+                      >
+                        {paymentMethodSqlCopied ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-500" />
+                            <span className="text-emerald-600">تم النسخ</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            نسخ SQL
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    <pre className="text-[10px] leading-relaxed text-muted-foreground bg-background p-3 overflow-auto max-h-40 rtl:text-left" dir="ltr">
+                      {paymentMethodFixResult.sql}
                     </pre>
                   </div>
                 )}

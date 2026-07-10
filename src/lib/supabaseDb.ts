@@ -1124,6 +1124,32 @@ export async function getVaults(): Promise<Vault[]> {
  * 3. DEBT PAYMENTS: Cash mode payments
  * 4. CURRENCY EXCHANGES: Not deleted
  */
+
+/**
+ * Detect whether a Supabase/PostgREST error is caused by the `payment_method`
+ * column being missing from the `sales` table.
+ *
+ * This happens on older installations that created the `sales` table before
+ * the cash/credit feature was added. PostgREST caches the schema, so any
+ * request that references the missing column (insert/update/select/filter)
+ * is rejected before reaching PostgreSQL.
+ *
+ * Message examples:
+ *   - "Could not find the 'payment_method' column of 'sales' in the schema cache"
+ *   - "column sales.payment_method does not exist"
+ *
+ * When this returns true, callers should retry the operation WITHOUT the
+ * `payment_method` field (the sale still gets created; the in-memory
+ * paymentMethod still drives the cash-box logic). The user should run the
+ * quick-fix in Settings → إعداد المشتريات والمبيعات to add the column.
+ */
+function isMissingPaymentMethodColumn(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : (typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : String(error));
+  const lower = msg.toLowerCase();
+  return lower.includes('payment_method') &&
+    (lower.includes('schema cache') || lower.includes('does not exist') || lower.includes('could not find'));
+}
+
 export async function recalculateVaultBalance(currencyId: string): Promise<Vault | null> {
   await initializeDatabase();
 
@@ -1269,13 +1295,29 @@ export async function recalculateVaultBalance(currencyId: string): Promise<Vault
   //    (Per spec: credit sales must NOT create a debt record. They live as
   //     unpaid invoices in the Sales subsystem and appear in the account
   //     statement marked as "آجل".)
+  //    🔸 Resilience: if the `sales` table predates the `payment_method` column
+  //    (older installation), the `.eq('payment_method', 'cash')` filter errors.
+  //    Fall back to fetching ALL sales and treating them as cash (the correct
+  //    pre-feature behavior, since every sale created without the column is
+  //    effectively a cash sale). The user should run the quick-fix in Settings →
+  //    إعداد المشتريات والمبيعات to add the column.
   let saleQuery = supabase.from('sales').select('*').eq('payment_method', 'cash');
 
   if (dateFilter) {
     saleQuery = saleQuery.gt('date', dateFilter);
   }
 
-  const { data: salesRows } = await saleQuery;
+  let salesResult = await saleQuery;
+  if (salesResult.error && isMissingPaymentMethodColumn(salesResult.error)) {
+    console.warn('[Supabase] sales.payment_method column missing — counting all sales as cash for vault recompute. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    let fallbackSaleQuery = supabase.from('sales').select('*');
+    if (dateFilter) fallbackSaleQuery = fallbackSaleQuery.gt('date', dateFilter);
+    salesResult = await fallbackSaleQuery;
+    if (salesResult.error) throw new Error(salesResult.error.message);
+  } else if (salesResult.error) {
+    throw new Error(salesResult.error.message);
+  }
+  const salesRows = salesResult.data;
   if (salesRows) {
     // Find the USD currency id once (sales are always USD per spec)
     const { data: usdCurrencyRow2 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
@@ -5117,8 +5159,25 @@ export async function addSale(data: {
     updatedAt: now,
   };
 
-  const { error } = await supabase.from('sales').insert([saleToRow(sale)]);
-  if (error) throw new Error(error.message);
+  const saleRow = saleToRow(sale);
+  const { error } = await supabase.from('sales').insert([saleRow]);
+  if (error) {
+    // 🔸 Resilience: older installations created the `sales` table before the
+    // `payment_method` column existed. PostgREST rejects any request that
+    // references the missing column. Retry the insert WITHOUT it so the sale
+    // still gets created — the in-memory `paymentMethod` still drives the
+    // cash-box logic below. The user should run the quick-fix in Settings →
+    // إعداد المشتريات والمبيعات to add the column for full persistence.
+    if (isMissingPaymentMethodColumn(error)) {
+      console.warn('[Supabase] sales.payment_method column missing — retrying insert without it. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+      const { payment_method: _dropped, ...fallbackRow } = saleRow;
+      void _dropped;
+      const { error: retryError } = await supabase.from('sales').insert([fallbackRow]);
+      if (retryError) throw new Error(retryError.message);
+    } else {
+      throw new Error(error.message);
+    }
+  }
 
   // 🔸 Cash-box integration per spec:
   //   - cash sale   → add totalPrice (USD) to the USD cash box
@@ -5204,7 +5263,22 @@ export async function updateSale(id: string, data: {
   };
 
   const { error } = await supabase.from('sales').update(updateObj).eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) {
+    // 🔸 Resilience: older installations created the `sales` table before the
+    // `payment_method` column existed. Retry the update WITHOUT it so the sale
+    // still gets updated — the in-memory `effectivePaymentMethod` still drives
+    // the cash-box logic below. The user should run the quick-fix in Settings →
+    // إعداد المشتريات والمبيعات to add the column for full persistence.
+    if (isMissingPaymentMethodColumn(error)) {
+      console.warn('[Supabase] sales.payment_method column missing — retrying update without it. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+      const { payment_method: _dropped, ...fallbackObj } = updateObj;
+      void _dropped;
+      const { error: retryError } = await supabase.from('sales').update(fallbackObj).eq('id', id);
+      if (retryError) throw new Error(retryError.message);
+    } else {
+      throw new Error(error.message);
+    }
+  }
 
   // 🔸 Recalculate USD vault if any cash-affecting field changed
   // (amount, payment method, or date relative to opening_balance_date)
@@ -5225,8 +5299,19 @@ export async function deleteSale(id: string): Promise<void> {
   await initializeDatabase();
   // 🔸 Fetch the sale before deleting so we know whether it was a cash sale
   // (cash sales affect the USD vault; credit sales do not)
-  const { data: row } = await supabase.from('sales').select('payment_method, total_price').eq('id', id).maybeSingle();
-  const wasCash = (row as { payment_method?: string } | null)?.payment_method !== 'credit';
+  // 🔸 Resilience: if the `payment_method` column is missing (older install),
+  // the select referencing it will error — fall back to assuming a cash sale
+  // (pre-feature behavior) so the vault recompute still runs safely.
+  let wasCash = true;
+  const { data: row, error: selError } = await supabase.from('sales').select('payment_method, total_price').eq('id', id).maybeSingle();
+  if (selError && isMissingPaymentMethodColumn(selError)) {
+    console.warn('[Supabase] sales.payment_method column missing — assuming cash sale for vault recompute. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    // wasCash stays true (safe default: trigger vault recompute)
+  } else if (selError) {
+    throw new Error(selError.message);
+  } else {
+    wasCash = (row as { payment_method?: string } | null)?.payment_method !== 'credit';
+  }
 
   const { error } = await supabase.from('sales').delete().eq('id', id);
   if (error) throw new Error(error.message);

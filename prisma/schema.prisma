@@ -163,6 +163,9 @@ model Unit {
   materialUnits MaterialUnit[]
   purchases     Purchase[]
   sales         Sale[]
+
+  // 🔸 Back-relation for Material.defaultUnit (required by Prisma)
+  materialsAsDefault Material[]
 }
 
 // المواد
@@ -230,6 +233,10 @@ model Sale {
   quantityInBase      Float    // snapshot
   unitPrice           Float    // USD
   totalPrice          Float    // USD = quantity × unitPrice
+  // طريقة السداد — 'cash' (default): تُضاف قيمة الفاتورة لصندوق الدولار فوراً
+  //                  'credit': بيع آجل، لا يؤثر على أي صندوق حتى تحصيله لاحقاً
+  //                  (تظهر كفاتورة غير مسددة في كشف الحساب، دون أي تكامل مع نظام الديون)
+  paymentMethod       String   @default("cash")
   description         String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

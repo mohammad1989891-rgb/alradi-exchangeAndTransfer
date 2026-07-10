@@ -51,13 +51,14 @@ export async function POST(request: NextRequest) {
     const { mode } = body as { mode?: string };
 
     if (mode === 'create') {
-      const { date, accountId, materialId, quantity, unitId, unitPrice, description } = body as {
+      const { date, accountId, materialId, quantity, unitId, unitPrice, paymentMethod, description } = body as {
         date?: string;
         accountId?: string;
         materialId?: string;
         quantity?: number;
         unitId?: string;
         unitPrice?: number;
+        paymentMethod?: 'cash' | 'credit';
         description?: string;
       };
       if (!date || !accountId || !materialId || !unitId || quantity === undefined || unitPrice === undefined) {
@@ -79,13 +80,14 @@ export async function POST(request: NextRequest) {
         quantity,
         unitId,
         unitPrice,
+        paymentMethod,
         description,
       });
       return NextResponse.json({ success: true, data: sale });
     }
 
     if (mode === 'update') {
-      const { id, date, accountId, materialId, quantity, unitId, unitPrice, description } = body as {
+      const { id, date, accountId, materialId, quantity, unitId, unitPrice, paymentMethod, description } = body as {
         id?: string;
         date?: string;
         accountId?: string;
@@ -93,6 +95,7 @@ export async function POST(request: NextRequest) {
         quantity?: number;
         unitId?: string;
         unitPrice?: number;
+        paymentMethod?: 'cash' | 'credit';
         description?: string;
       };
       if (!id) {
@@ -108,6 +111,7 @@ export async function POST(request: NextRequest) {
         quantity,
         unitId,
         unitPrice,
+        paymentMethod,
         description,
       });
       return NextResponse.json({ success: true, data: sale });

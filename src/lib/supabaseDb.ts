@@ -1331,6 +1331,35 @@ export async function recalculateVaultBalance(currencyId: string): Promise<Vault
     }
   }
 
+  // 7. VEHICLE TRANSACTIONS: Partner 1 + cash → deduct from USD vault
+  //    (Per spec:
+  //      - الشريك الأول + كاش = خصم من صندوق الدولار (المال يخرج)
+  //      - الشريك الأول + آجل = لا تأثير على الصندوق
+  //      - الشريك الثاني (أي طريقة دفع) = لا تأثير، توثيق فقط
+  //    Vehicle transactions are always denominated in USD.)
+  let vehicleTxQuery = supabase.from('vehicle_transactions').select('*');
+
+  if (dateFilter) {
+    vehicleTxQuery = vehicleTxQuery.gt('date', dateFilter);
+  }
+
+  const { data: vehicleTxs } = await vehicleTxQuery;
+  if (vehicleTxs) {
+    // Find the USD currency id once (vehicle transactions are always USD per spec)
+    const { data: usdCurrencyRow3 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+    const usdCurrencyId3 = usdCurrencyRow3 && usdCurrencyRow3.length > 0 ? (usdCurrencyRow3[0] as Record<string, unknown>).id as string : null;
+    if (usdCurrencyId3 && currencyId === usdCurrencyId3) {
+      for (const vt of vehicleTxs) {
+        const vtObj = rowToVehicleTransaction(vt);
+        // Only Partner 1 + cash affects the vault (deduct: money goes OUT)
+        // Partner 1 + credit and Partner 2 (any) are documentation-only → no vault effect
+        if (vtObj.partner === 'first' && vtObj.paymentType === 'cash') {
+          delta -= vtObj.amount;
+        }
+      }
+    }
+  }
+
   // Compute new balance
   const newBalance = openingBalance + delta;
 
@@ -4497,7 +4526,7 @@ function saleToRow(s: Partial<Sale>): Record<string, unknown> {
 
 // ---- Helper: get USD currency id ----
 
-async function getUsdCurrencyId(): Promise<string | null> {
+export async function getUsdCurrencyId(): Promise<string | null> {
   const { data } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
   if (data && data.length > 0) return (data[0] as Record<string, unknown>).id as string;
   // Fallback: default currency

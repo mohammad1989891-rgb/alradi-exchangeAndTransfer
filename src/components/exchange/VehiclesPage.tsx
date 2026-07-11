@@ -726,10 +726,11 @@ export function VehiclesPage() {
       };
     });
     
-    // تحديث الصندوق للمعاملات الكاش
-    if (data.paymentType === 'cash') {
-      await updateCashbox(data.amount, data.partner, true);
-    }
+    // إعادة احتساب رصيد صندوق الدولار (يشمل بنود المركبات وفق القواعد المحاسبية)
+    // 🔸 Single Source of Truth: recalculateVaultBalance يجمع جميع مصادر البيانات
+    // 🔸 الشريك الأول + كاش = خصم | الشريك الأول + آجل = لا تأثير | الشريك الثاني = لا تأثير
+    // 🔸 إعادة احتساب كاملة تمنع التأثير المكرر
+    await refreshUsdVault();
     
     toast({
       title: 'تمت الإضافة',
@@ -740,9 +741,6 @@ export function VehiclesPage() {
   // تعديل معاملة
   const handleUpdateTransaction = async (updatedTransaction: VehicleTransaction) => {
     if (!selectedVehicle) return;
-    
-    // إيجاد المعاملة القديمة
-    const oldTransaction = selectedVehicle.transactions.find(t => t.id === updatedTransaction.id);
     
     // تحديث في قاعدة البيانات
     await db.updateVehicleTransaction(updatedTransaction.id, {
@@ -783,17 +781,10 @@ export function VehiclesPage() {
       };
     });
     
-    // تحديث الصندوق إذا تغيرت المعاملة
-    if (oldTransaction) {
-      // عكس تأثير المعاملة القديمة
-      if (oldTransaction.paymentType === 'cash') {
-        await updateCashbox(oldTransaction.amount, oldTransaction.partner, false);
-      }
-      // إضافة تأثير المعاملة الجديدة
-      if (updatedTransaction.paymentType === 'cash') {
-        await updateCashbox(updatedTransaction.amount, updatedTransaction.partner, true);
-      }
-    }
+    // إعادة احتساب رصيد الصندوق — إعادة احتساب كاملة من المصدر
+    // 🔸 يلغي أثر البند القديم ويطبق البند الجديد تلقائياً (لا تأثير مكرر)
+    // 🔸 تغيير كاش→آجل يُعيد المبلغ، آجل→كاش يَخصم، تغيير الشريك يُلغي الأثر
+    await refreshUsdVault();
     
     toast({
       title: 'تم التعديل',
@@ -804,9 +795,6 @@ export function VehiclesPage() {
   // حذف معاملة
   const handleDeleteTransaction = async (transactionId: string) => {
     if (!selectedVehicle) return;
-    
-    // إيجاد المعاملة قبل الحذف
-    const transaction = selectedVehicle.transactions.find(t => t.id === transactionId);
     
     // حذف من قاعدة البيانات
     await db.deleteVehicleTransaction(transactionId);
@@ -838,10 +826,10 @@ export function VehiclesPage() {
       };
     });
     
-    // عكس تأثير الصندوق للحذف
-    if (transaction && transaction.paymentType === 'cash') {
-      await updateCashbox(transaction.amount, transaction.partner, false);
-    }
+    // إعادة احتساب رصيد الصندوق — يلغي أثر البند المحذوف تلقائياً
+    // 🔸 إذا كان البند للشريك الأول + كاش تتم إعادة قيمته إلى صندوق الدولار
+    // 🔸 باقي الحالات لا تأثير (إعادة احتساب كاملة تمنع التأثير المكرر)
+    await refreshUsdVault();
     
     toast({
       title: 'تم الحذف',
@@ -895,15 +883,12 @@ export function VehiclesPage() {
   // Confirm delete vehicle
   const handleConfirmDeleteVehicle = async () => {
     if (vehicleToDelete) {
-      // عكس تأثير جميع المعاملات الكاش قبل الحذف
-      for (const tx of vehicleToDelete.transactions) {
-        if (tx.paymentType === 'cash') {
-          await updateCashbox(tx.amount, tx.partner, false);
-        }
-      }
-      
-      // حذف المركبة من قاعدة البيانات
+      // حذف المركبة من قاعدة البيانات (يحذف جميع بنودها تلقائياً)
       await db.deleteVehicle(vehicleToDelete.id);
+      
+      // إعادة احتساب رصيد الصندوق — يلغي أثر جميع البنود المحذوفة تلقائياً
+      // 🔸 إعادة احتساب كاملة من المصدر تمنع التأثير المكرر
+      await refreshUsdVault();
       
       // حذف المركبة مع جميع معاملاتها
       setVehicles(vehicles.filter(v => v.id !== vehicleToDelete.id));
@@ -927,6 +912,30 @@ export function VehiclesPage() {
   // 🔸 الشريك الأول (لنا) كاش = خصم من الصندوق
   // 🔸 الشريك الثاني (علينا) كاش = إضافة للصندوق
   // ============================================
+  
+  // ============================================
+  // 🔹 إعادة احتساب رصيد صندوق الدولار — Single Source of Truth
+  // 🔸 تعتمد على recalculateVaultBalance التي تجمع جميع مصادر البيانات:
+  //    (transactions + debts + payments + exchanges + purchases + sales + vehicle_transactions)
+  // 🔸 القواعد المحاسبية لبنود المركبات (تُطبَّق داخل recalculateVaultBalance):
+  //    - الشريك الأول + كاش = خصم من صندوق الدولار
+  //    - الشريك الأول + آجل = لا تأثير
+  //    - الشريك الثاني (أي طريقة) = لا تأثير (توثيق فقط)
+  // 🔸 إعادة احتساب كاملة من المصدر → تمنع الخصم/الإضافة المكررة تلقائياً
+  // 🔸 تُطلِق حدث app-data-refreshed ليُحدِّث: الأرصدة، Dashboard، التقارير، المركبات
+  // ============================================
+  const refreshUsdVault = async () => {
+    try {
+      const usdId = await db.getUsdCurrencyId();
+      if (usdId) {
+        await db.recalculateVaultBalance(usdId);
+      }
+      // إشعار جميع الصفحات بتحديث الصندوق (الأرصدة، Dashboard، التقارير)
+      window.dispatchEvent(new Event('app-data-refreshed'));
+    } catch (error) {
+      console.error('Error refreshing USD vault:', error);
+    }
+  };
   
   // تحديث الصندوق
   const updateCashbox = async (amount: number, partner: 'first' | 'second', isAdd: boolean) => {

@@ -1,10 +1,8 @@
 'use client';
 
-import { useState, useMemo, useEffect, Fragment } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { getSalesByAccount } from '@/lib/supabaseDb';
-import type { Sale } from '@/lib/supabaseDb';
+import { useAccountStatement } from '@/hooks/useAccountStatement';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -23,22 +21,19 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
-  BookOpen, Printer, FileText, X, TrendingUp
+  BookOpen, Printer, FileText, X
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { formatNumber } from '@/lib/format';
-import type { Transaction, Debt, DebtPayment, Currency } from '@/lib/supabaseDb';
 
 export function AccountStatementModal() {
   const { 
     isAccountStatementOpen, 
     closeAccountStatement, 
     accounts, 
-    currencies, 
+    currencies,
     selectedAccountForStatement 
   } = useAppStore();
-  
-  const { transactions, debts, debtPayments } = useSupabaseData();
   
   // Determine initial selected account using useMemo
   const defaultAccountId = useMemo(() => {
@@ -50,68 +45,6 @@ export function AccountStatementModal() {
   
   const [selectedAccountId, setSelectedAccountId] = useState<string>(defaultAccountId);
 
-  // 🔸 Sales linked to the selected account (all in USD per spec)
-  const [accountSales, setAccountSales] = useState<Sale[]>([]);
-  const [isLoadingSales, setIsLoadingSales] = useState(false);
-
-  // 🔸 Keep the statement's sales section in sync with the latest data.
-  //    The modal fetches sales from the `sales` table via getSalesByAccount
-  //    (which selects ALL sales for the account — no payment_method filter —
-  //    so both cash and credit sales are always returned).
-  //
-  //    Root cause of "credit sales don't appear in the statement": the
-  //    original effect only refetched when `selectedAccountId` changed, so
-  //    sales created/edited/deleted while the modal was closed (or while a
-  //    different account was selected) never appeared until the user
-  //    manually switched accounts. The fix below adds two more triggers:
-  //      1. Refetch when the modal opens (isAccountStatementOpen turns true)
-  //         — picks up sales created since the last view.
-  //      2. Listen for `sales-updated` + `app-data-refreshed` window events
-  //         (dispatched by SaleDialog and SalesPage after create/edit/delete)
-  //         and refetch live, so the statement + final balance update
-  //         immediately without requiring the user to reopen the modal.
-  useEffect(() => {
-    if (!selectedAccountId) {
-      // No account selected — nothing to fetch. (We intentionally do NOT call
-      // setAccountSales([]) here to avoid the set-state-in-effect lint rule;
-      // accountSales is reset via the empty result path of getSalesByAccount
-      // when a real account is selected, and the modal is hidden when no
-      // account exists anyway.)
-      return;
-    }
-    let cancelled = false;
-
-    const load = () => {
-      setIsLoadingSales(true);
-      getSalesByAccount(selectedAccountId)
-        .then((sales) => {
-          if (!cancelled) setAccountSales(sales);
-        })
-        .catch((err) => {
-          console.error('Error fetching sales for account:', err);
-          if (!cancelled) setAccountSales([]);
-        })
-        .finally(() => {
-          if (!cancelled) setIsLoadingSales(false);
-        });
-    };
-
-    // Initial load (fires on mount, on account change, and on modal open)
-    load();
-
-    // Live refresh: refetch whenever a sale is created/edited/deleted anywhere
-    // in the app, so the statement's balance stays accurate in real time.
-    const handleSalesUpdated = () => load();
-    window.addEventListener('sales-updated', handleSalesUpdated);
-    window.addEventListener('app-data-refreshed', handleSalesUpdated);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener('sales-updated', handleSalesUpdated);
-      window.removeEventListener('app-data-refreshed', handleSalesUpdated);
-    };
-  }, [selectedAccountId, isAccountStatementOpen]);
-  
   // Date filter state
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -123,277 +56,17 @@ export function AccountStatementModal() {
     setDateTo('');
   };
   
-  // Filter data for selected account
-  const accountTransactions = useMemo(() => {
-    if (!selectedAccountId) return [];
-    let filtered = transactions.filter(t => t.accountId === selectedAccountId && t.isComplete !== false);
-    
-    // Apply date filter
-    if (hasDateFilter) {
-      filtered = filtered.filter(t => {
-        const txDate = new Date(t.date).toISOString().split('T')[0];
-        const matchesDateFrom = !dateFrom || txDate >= dateFrom;
-        const matchesDateTo = !dateTo || txDate <= dateTo;
-        return matchesDateFrom && matchesDateTo;
-      });
-    }
-    
-    return filtered;
-  }, [transactions, selectedAccountId, dateFrom, dateTo, hasDateFilter]);
-  
-  const accountDebts = useMemo(() => {
-    if (!selectedAccountId) return [];
-    return debts.filter(d => d.accountId === selectedAccountId);
-  }, [debts, selectedAccountId]);
-  
-  // Group transactions by currency
-  const transactionsByCurrency = useMemo(() => {
-    const grouped: Record<string, Transaction[]> = {};
-    
-    for (const tx of accountTransactions) {
-      const currencyId = tx.currencyId;
-      if (!grouped[currencyId]) {
-        grouped[currencyId] = [];
-      }
-      grouped[currencyId].push(tx);
-    }
-    
-    // Sort each group by date
-    for (const currencyId in grouped) {
-      grouped[currencyId].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-    }
-    
-    return grouped;
-  }, [accountTransactions]);
-  
-  // 🔸 Date-filtered sales for this account (all sales are USD per spec)
-  const filteredAccountSales = useMemo(() => {
-    if (!hasDateFilter) return accountSales;
-    return accountSales.filter(s => {
-      const sDate = new Date(s.date).toISOString().split('T')[0];
-      const matchesDateFrom = !dateFrom || sDate >= dateFrom;
-      const matchesDateTo = !dateTo || sDate <= dateTo;
-      return matchesDateFrom && matchesDateTo;
-    });
-  }, [accountSales, dateFrom, dateTo, hasDateFilter]);
-
-  // 🔸 Unified statement item type: a transaction OR a sale, with runningBalance
-  type StatementItem = {
-    id: string;
-    date: Date;
-    type: 'INCOME' | 'EXPENSE';
-    amount: number;
-    finalBalance: number;
-    description?: string | null;
-    runningBalance: number;
-    isSale: boolean;
-    paymentMethod?: 'cash' | 'credit';
-    materialName?: string;
-    quantity?: number;
-    unitName?: string;
-  };
-
-  // Calculate totals per currency — for USD, merge sales into the running balance
-  const currencyStats = useMemo(() => {
-    const stats: Record<string, {
-      currency: Currency | undefined;
-      totalIncome: number;
-      totalExpense: number;
-      netBalance: number;
-      items: StatementItem[];
-    }> = {};
-
-    // Find USD currency id (sales are always USD)
-    const usdCurrency = currencies.find(c => c.code === 'USD');
-
-    for (const currencyId in transactionsByCurrency) {
-      const currency = currencies.find(c => c.id === currencyId);
-      const txs = transactionsByCurrency[currencyId];
-
-      // Build items: convert transactions to StatementItem
-      let items: StatementItem[] = txs.map(tx => ({
-        id: tx.id,
-        date: new Date(tx.date),
-        type: tx.type,
-        amount: tx.amount,
-        finalBalance: tx.finalBalance,
-        description: tx.description,
-        runningBalance: 0,
-        isSale: false,
-      }));
-
-      // 🔸 If this is the USD currency, merge sales (treat each sale as INCOME)
-      if (usdCurrency && currencyId === usdCurrency.id && filteredAccountSales.length > 0) {
-        const saleItems: StatementItem[] = filteredAccountSales.map(s => ({
-          id: s.id,
-          date: new Date(s.date),
-          type: 'INCOME' as const, // Sale = customer owes us → لنا
-          amount: s.totalPrice,
-          finalBalance: s.totalPrice,
-          description: s.description || `بيع ${s.materialName}`,
-          runningBalance: 0,
-          isSale: true,
-          paymentMethod: s.paymentMethod,
-          materialName: s.materialName,
-          quantity: s.quantity,
-          unitName: s.unitName,
-        }));
-        items = items.concat(saleItems);
-      }
-
-      // Sort by date ascending (then by createdAt for stable order — use id as tiebreaker)
-      items.sort((a, b) => {
-        const diff = a.date.getTime() - b.date.getTime();
-        if (diff !== 0) return diff;
-        return a.id.localeCompare(b.id);
-      });
-
-      // Compute running balance
-      // 🔸 Cash sales are reference-only: they remain visible in the statement
-      //    as a historical record (with all invoice data + a "كاش" badge) but
-      //    do NOT affect totalIncome / runningBalance, because their value was
-      //    already collected directly into the USD vault at sale time.
-      //    Only credit sales (unpaid receivables) move the account balance,
-      //    since كشف الحساب exists to show الذمم والمبالغ المستحقة.
-      let totalIncome = 0;
-      let totalExpense = 0;
-      let runningBalance = 0;
-      items = items.map(it => {
-        const isCashSale = it.isSale && it.paymentMethod === 'cash';
-        if (!isCashSale) {
-          if (it.type === 'INCOME') {
-            totalIncome += it.finalBalance;
-            runningBalance += it.finalBalance;
-          } else {
-            totalExpense += it.finalBalance;
-            runningBalance -= it.finalBalance;
-          }
-        }
-        return { ...it, runningBalance };
-      });
-
-      stats[currencyId] = {
-        currency,
-        totalIncome,
-        totalExpense,
-        netBalance: runningBalance,
-        items,
-      };
-    }
-
-    // 🔸 Edge case: account has sales but NO USD transactions — still show USD section
-    if (usdCurrency && !stats[usdCurrency.id] && filteredAccountSales.length > 0) {
-      let items: StatementItem[] = filteredAccountSales.map(s => ({
-        id: s.id,
-        date: new Date(s.date),
-        type: 'INCOME' as const,
-        amount: s.totalPrice,
-        finalBalance: s.totalPrice,
-        description: s.description || `بيع ${s.materialName}`,
-        runningBalance: 0,
-        isSale: true,
-        paymentMethod: s.paymentMethod,
-        materialName: s.materialName,
-        quantity: s.quantity,
-        unitName: s.unitName,
-      }));
-      items.sort((a, b) => a.date.getTime() - b.date.getTime());
-      // 🔸 Cash sales are reference-only (see main loop comment above) —
-      //    visible in the statement but excluded from the balance.
-      let totalIncome = 0;
-      let runningBalance = 0;
-      items = items.map(it => {
-        const isCashSale = it.isSale && it.paymentMethod === 'cash';
-        if (!isCashSale) {
-          totalIncome += it.finalBalance;
-          runningBalance += it.finalBalance;
-        }
-        return { ...it, runningBalance };
-      });
-      stats[usdCurrency.id] = {
-        currency: usdCurrency,
-        totalIncome,
-        totalExpense: 0,
-        netBalance: runningBalance,
-        items,
-      };
-    }
-
-    return stats;
-  }, [transactionsByCurrency, currencies, filteredAccountSales]);
-  
-  // Group debts by currency
-  const debtsByCurrency = useMemo(() => {
-    const grouped: Record<string, Debt[]> = {};
-    
-    for (const debt of accountDebts) {
-      const currencyId = debt.currencyId;
-      if (!grouped[currencyId]) {
-        grouped[currencyId] = [];
-      }
-      grouped[currencyId].push(debt);
-    }
-    
-    // Sort each group by date
-    for (const currencyId in grouped) {
-      grouped[currencyId].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-    }
-    
-    return grouped;
-  }, [accountDebts]);
-  
-  // Calculate debt totals per currency with payments
-  const debtStats = useMemo(() => {
-    const stats: Record<string, {
-      currency: Currency | undefined;
-      totalDebt: number;
-      paidDebt: number;
-      unpaidDebt: number;
-      debts: Debt[];
-      // إضافة بيانات الدفعات
-      paymentsByDebt: Record<string, DebtPayment[]>;
-      // حساب الرصيد المتبقي لكل دين
-      remainingByDebt: Record<string, number>;
-    }> = {};
-
-    for (const currencyId in debtsByCurrency) {
-      const currency = currencies.find(c => c.id === currencyId);
-      const currencyDebts = debtsByCurrency[currencyId];
-
-      // حساب الدفعات لكل دين
-      const paymentsByDebt: Record<string, DebtPayment[]> = {};
-      const remainingByDebt: Record<string, number> = {};
-
-      let totalDebt = 0;
-      let totalPaid = 0;
-
-      for (const debt of currencyDebts) {
-        // جلب الدفعات المرتبطة بهذا الدين
-        const debtPaymentsList = debtPayments.filter(p => p.debtId === debt.id);
-        paymentsByDebt[debt.id] = debtPaymentsList;
-
-        // حساب إجمالي المدفوع لهذا الدين
-        const paidAmount = debtPaymentsList.reduce((sum, p) => sum + p.amount, 0);
-        const remaining = Math.max(0, debt.finalBalance - paidAmount);
-
-        remainingByDebt[debt.id] = remaining;
-        totalDebt += debt.finalBalance;
-        totalPaid += paidAmount;
-      }
-
-      stats[currencyId] = {
-        currency,
-        totalDebt,
-        paidDebt: totalPaid,
-        unpaidDebt: totalDebt - totalPaid,
-        debts: currencyDebts,
-        paymentsByDebt,
-        remainingByDebt,
-      };
-    }
-
-    return stats;
-  }, [debtsByCurrency, currencies, debtPayments]);
+  // 🔸 Single Source of Truth — all balance calculations are now centralized
+  //    in the useAccountStatement hook, which is shared with AccountMatchModal.
+  //    This guarantees the statement and the match modal produce IDENTICAL
+  //    balances, income totals, and expense totals for the same account.
+  //    No duplicate logic lives in this component anymore.
+  const { currencyStats, debtStats, hasData } = useAccountStatement(
+    selectedAccountId,
+    dateFrom || undefined,
+    dateTo || undefined,
+    true, // listen to live `sales-updated` / `app-data-refreshed` events
+  );
   
   const selectedAccount = accounts.find(a => a.id === selectedAccountId);
   
@@ -690,7 +363,8 @@ export function AccountStatementModal() {
     printWindow.print();
   };
   
-  const hasData = Object.keys(currencyStats).length > 0 || Object.keys(debtStats).length > 0;
+  // 🔸 `hasData` comes from the useAccountStatement hook (Single Source of
+  //    Truth). No local redefinition needed.
   
   return (
     <Dialog open={isAccountStatementOpen} onOpenChange={closeAccountStatement}>

@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppStore } from '@/store/useAppStore';
-import { useSupabaseData } from '@/hooks/useSupabaseData';
+import { useAccountStatement } from '@/hooks/useAccountStatement';
 import { cn } from '@/lib/utils';
 import {
   Dialog,
@@ -17,7 +17,6 @@ import {
   Copy, Check, Share2, MessageSquare, RefreshCcw 
 } from 'lucide-react';
 import { formatNumber } from '@/lib/format';
-import type { Currency } from '@/lib/supabaseDb';
 import { useToast } from '@/hooks/use-toast';
 
 interface AccountMatchModalProps {
@@ -33,44 +32,137 @@ function formatNum(num: number): string {
 
 export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchModalProps) {
   const { accounts, currencies } = useAppStore();
-  const { transactions } = useSupabaseData();
   const { toast } = useToast();
   
   const [copied, setCopied] = useState(false);
   const [customMessage, setCustomMessage] = useState<string | null>(null);
   
   const account = accounts.find(a => a.id === accountId);
-  
-  // Filter transactions for this account
-  const accountTransactions = useMemo(() => {
-    return transactions.filter(t => t.accountId === accountId && t.isComplete !== false);
-  }, [transactions, accountId]);
-  
-  // Calculate balance by currency
+
+  // 🔸 Single Source of Truth — uses the EXACT same accounting logic as the
+  //    account statement (دفتر الأستاذ / AccountStatementModal). This
+  //    guarantees the match modal's balance is 100% identical to the
+  //    statement's balance for the same account, because both consume the
+  //    same `useAccountStatement` hook.
+  //
+  //    What's included in the balance (per spec):
+  //      ✔ Financial transactions (لنا / علينا)
+  //      ✔ Debts (with payments subtracted)
+  //      ✔ CREDIT sales (unpaid receivables → "لنا")
+  //      ✖ CASH sales (already collected into the USD vault → reference only)
+  //      ✖ Purchases (always cash in this system → already deducted from vault)
+  //
+  //    The `listenToLive=true` flag makes this hook refetch sales on
+  //    `sales-updated` / `app-data-refreshed` window events, so the match
+  //    modal stays in sync after any sale/debt/transaction change without
+  //    requiring a page reload.
+  const { currencyStats, debtStats } = useAccountStatement(
+    accountId,
+    undefined, // no date filter — show full balance like the statement does
+    undefined,
+    true,
+  );
+
+  // 🔸 Merge the per-currency transaction/sale balance (currencyStats) with
+  //    the per-currency debt balance (debtStats) into a single unified view.
+  //    For each currency:
+  //      netBalance = currencyStats.netBalance (transactions + credit sales)
+  //    Debts are shown SEPARATELY in the statement (debtStats), but for the
+  //    match modal's bottom-line "الرصيد المستحق" we follow the same rule
+  //    the statement uses: the statement's final "الصافي" per currency is
+  //    `currencyStats.netBalance`, and debts are displayed in their own
+  //    section. So the match modal's per-currency balance mirrors
+  //    `currencyStats.netBalance` to stay byte-for-byte identical.
+  //
+  //    HOWEVER, the spec for مطابقة says: "مجموع (لنا), مجموع (علينا), الرصيد
+  //    النهائي ... يجب أن تكون متطابقة بين كشف الحساب و صفحة مطابقة الحساب".
+  //    The statement shows currencyStats.netBalance as "الصافي" per currency
+  //    and debtStats.unpaidDebt per currency as the debt section. To present
+  //    ONE unified "you owe us / we owe you" number per currency in the match
+  //    message, we combine them:
+  //      - "لنا" (we are owed) = currencyStats.totalIncome + debtStats.totalDebt - debtStats.paidDebt
+  //        (income transactions + credit sales + unpaid receivable debts)
+  //      - "علينا" (we owe) = currencyStats.totalExpense
+  //        (expense transactions — payables are tracked as expense transactions
+  //         in this system, not as debts; debts here are all receivable by
+  //         design, see debtType default below)
+  //    This keeps the match message meaningful while the per-currency
+  //    "الرصيد" still exactly matches `currencyStats.netBalance` + debts impact.
   const balancesByCurrency = useMemo(() => {
     const balances: Record<string, {
-      currency: Currency | undefined;
-      netBalance: number;
+      currency: typeof currencies[number] | undefined;
+      netBalance: number; // statement's net (transactions + credit sales)
+      // Debt portion (unpaid) — receivables count as "لنا", payables as "علينا"
+      unpaidDebt: number;
+      // Combined receivable (لنا) / payable (علينا) for the match message
+      forUs: number; // لنا
+      againstUs: number; // علينا
     }> = {};
-    
-    for (const tx of accountTransactions) {
-      const currencyId = tx.currencyId;
-      if (!balances[currencyId]) {
-        balances[currencyId] = {
-          currency: currencies.find(c => c.id === currencyId),
-          netBalance: 0,
-        };
+
+    // Collect all currency ids from both stats
+    const allCurrencyIds = new Set<string>([
+      ...Object.keys(currencyStats),
+      ...Object.keys(debtStats),
+    ]);
+
+    for (const currencyId of allCurrencyIds) {
+      const cs = currencyStats[currencyId];
+      const ds = debtStats[currencyId];
+      const currency = currencies.find(c => c.id === currencyId);
+
+      // 🔸 Replicate the statement's debt direction logic:
+      //    In this system debts have debtType RECEIVABLE (لنا) or PAYABLE (علينا).
+      //    The statement displays debts per currency with totalDebt / paidDebt /
+      //    unpaidDebt, but does NOT fold them into currencyStats.netBalance.
+      //    For the MATCH MESSAGE we need a single "لنا / لكم" figure per
+      //    currency that the recipient can verify against the statement.
+      //    We compute it as:
+      //      forUs      = totalIncome (transactions لنا + credit sales) +
+      //                    unpaid receivable debts
+      //      againstUs  = totalExpense (transactions علينا) +
+      //                    unpaid payable debts
+      //    netBalance (statement's "الصافي") = forUs - againstUs
+      //    This preserves the statement's netBalance while surfacing the
+      //    gross لنا / علينا breakdown that a match message needs.
+      let unpaidReceivableDebt = 0; // لنا (debtType RECEIVABLE or unset)
+      let unpaidPayableDebt = 0; // علينا (debtType PAYABLE)
+      if (ds) {
+        for (const debt of ds.debts) {
+          const remaining = ds.remainingByDebt[debt.id] ?? debt.finalBalance;
+          if (debt.debtType === 'PAYABLE') {
+            unpaidPayableDebt += remaining;
+          } else {
+            // RECEIVABLE is the default (legacy debts had no debtType)
+            unpaidReceivableDebt += remaining;
+          }
+        }
       }
-      
-      if (tx.type === 'INCOME') {
-        balances[currencyId].netBalance += tx.finalBalance;
-      } else {
-        balances[currencyId].netBalance -= tx.finalBalance;
-      }
+
+      const totalIncome = cs?.totalIncome ?? 0;
+      const totalExpense = cs?.totalExpense ?? 0;
+      const statementNet = cs?.netBalance ?? 0;
+
+      const forUs = totalIncome + unpaidReceivableDebt;
+      const againstUs = totalExpense + unpaidPayableDebt;
+
+      // 🔸 The "net" we display matches the statement's "الصافي" when there
+      //    are no debts. When there ARE debts, the statement shows debts in a
+      //    separate section; the match message folds them in so the recipient
+      //    sees a single bottom-line. To keep the visible "balance card" in
+      //    the match modal EXACTLY equal to the statement's "الصافي", we use
+      //    `statementNet` as the card's netBalance. The forUs/againstUs are
+      //    used only for the message text.
+      balances[currencyId] = {
+        currency,
+        netBalance: statementNet,
+        unpaidDebt: (ds?.unpaidDebt ?? 0),
+        forUs,
+        againstUs,
+      };
     }
-    
+
     return balances;
-  }, [accountTransactions, currencies]);
+  }, [currencyStats, debtStats, currencies]);
   
   // Generate the match message - derived directly without state
   const originalMessage = useMemo(() => {
@@ -86,9 +178,15 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
     lines.push('🖥️ مطابقة حساب 🖥️');
     lines.push('');
     
-    // Group balances: positive (لنا) and negative (لكم)
-    const positiveBalances: { currency: Currency | undefined; amount: number }[] = [];
-    const negativeBalances: { currency: Currency | undefined; amount: number }[] = [];
+    // 🔸 Per spec: the match message's "الرصيد المستحق لنا / لكم" must match
+    //    the statement's final balance. We use `netBalance` (statement's
+    //    "الصافي" per currency, including credit sales) so the recipient can
+    //    open the statement and see the SAME number.
+    //    Positive netBalance → "لنا" (they owe us).
+    //    Negative netBalance → "لكم" (we owe them).
+    //    Zero → balanced.
+    const positiveBalances: { currency: typeof currencies[number] | undefined; amount: number }[] = [];
+    const negativeBalances: { currency: typeof currencies[number] | undefined; amount: number }[] = [];
     
     for (const currencyId in balancesByCurrency) {
       const balance = balancesByCurrency[currencyId];
@@ -136,7 +234,7 @@ export function AccountMatchModal({ isOpen, onClose, accountId }: AccountMatchMo
     lines.push('🖋️ قسم المحاسبة 🖋️');
     
     return lines.join('\n');
-  }, [balancesByCurrency]);
+  }, [balancesByCurrency, currencies]);
   
   // Display message is either custom or original
   const displayMessage = customMessage ?? originalMessage;

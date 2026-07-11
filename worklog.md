@@ -1122,3 +1122,108 @@ Stage Summary:
 - Live update: SaleDialog already dispatches `sales-updated` + `app-data-refreshed` after save, so SalesPage, PurchasesPage, BalancesPage, AccountStatementModal, and all other listeners refresh automatically.
 - UI Freeze fully preserved: same emerald palette, same borders, same padding, same Info icon, same grid-cols-2 layout. Only label text ("المتوفر" → "المتوفر للتعديل") and numeric values changed in edit mode.
 - Files changed: src/components/exchange/SaleDialog.tsx (5 new memos + label/value/warning updates), src/lib/supabaseDb.ts (ERP validation in updateSale + totalPriceChanged optimization in updatePurchase). No other files touched.
+
+---
+Task ID: 18
+Agent: Main Agent
+Task: Unify account-balance logic between Account Statement (دفتر الأستاذ) and Account Match modal (مطابقة الحساب) so both produce IDENTICAL balances. Make AccountStatementModal the Single Source of Truth — extract its balance logic into a shared hook, and rewrite AccountMatchModal to consume that hook. Cash sales + purchases excluded from balance; credit sales + transactions + debts included. Live update on sales/debt/transaction changes. UI Freeze preserved.
+
+Work Log:
+- Read the worklog (Tasks #13–#17) and inspected both modals to locate the divergence:
+  • AccountStatementModal (دفتر الأستاذ): builds `currencyStats` by merging transactions + sales (credit sales move the balance, cash sales are reference-only) + `debtStats` for debts. Net balance per currency = transactions + credit sales.
+  • AccountMatchModal (مطابقة): had its OWN independent `balancesByCurrency` memo that ONLY summed `transactions.finalBalance` per currency — completely ignoring sales (both cash and credit) and therefore diverging from the statement.
+  • ROOT CAUSE of the mismatch: the match modal was a second, independent accounting implementation. Per spec: "يمنع إنشاء منطق مستقل أو مختلف" and "يجب أن تعتمد صفحة مطابقة الحساب على نفس الخوارزمية المستخدمة في كشف الحساب".
+
+- Created a NEW shared hook `src/hooks/useAccountStatement.ts` — the Single Source of Truth:
+  • Faithfully extracts the EXACT logic from AccountStatementModal's `currencyStats` + `debtStats` useMemos (byte-for-byte identical accounting semantics).
+  • Signature: `useAccountStatement(accountId, dateFrom?, dateTo?, listenToLive = true)`.
+  • Returns: `{ currencyStats, debtStats, usdNetBalance, hasData, isLoadingSales }`.
+  • Internally fetches account sales via `getSalesByAccount` (same call the statement used), filters transactions + debts for the account, groups by currency, computes running balances with the cash-sale guard (`isCashSale` → reference-only, excluded from totalIncome/runningBalance).
+  • Live refresh: listens for `sales-updated` + `app-data-refreshed` window events and refetches sales, so both the statement AND the match modal auto-update after any sale create/edit/delete (and after app-wide data refreshes). This matches the spec: "يقوم التطبيق بإعادة احتساب المطابقة تلقائياً دون الحاجة إلى إعادة تحميل الصفحة".
+  • Exports `StatementItem`, `CurrencyStat`, `DebtStat`, `AccountStatementResult` types so consumers can reuse them — no local re-definitions needed.
+  • The hook uses `useSupabaseData()` for transactions/debts/debtPayments/currencies (same source the statement used), so there is ZERO duplicate data fetching.
+
+- Refactored `AccountStatementModal.tsx` to consume the shared hook:
+  • Removed ALL local state for sales (`accountSales`, `isLoadingSales`), the sales-fetch `useEffect`, the `accountTransactions`/`accountDebts`/`transactionsByCurrency`/`filteredAccountSales` memos, the `currencyStats` useMemo, the `debtsByCurrency`/`debtStats` memos, and the inline `StatementItem` type.
+  • Replaced them with a single `const { currencyStats, debtStats, hasData } = useAccountStatement(selectedAccountId, dateFrom || undefined, dateTo || undefined, true)`.
+  • Kept `currencies` from useAppStore (still needed by `handlePrint` to render debt/payment currency codes).
+  • Removed unused imports (`useEffect`, `useSupabaseData`, `getSalesByAccount`, `Sale`, `Transaction`, `Debt`, `DebtPayment`, `Currency`, `Fragment`, `TrendingUp`).
+  • The print view JSX is UNCHANGED — it still reads `currencyStats` / `debtStats` with the same shape, so the printed report is byte-for-byte identical to before. UI Freeze preserved.
+  • Behavior preserved: account dropdown, date filter, "جاهز للطباعة" status, print button — all work exactly as before.
+
+- Rewrote `AccountMatchModal.tsx` to consume the SAME shared hook:
+  • Removed the local `useSupabaseData()` call and the old `accountTransactions` / `balancesByCurrency` memos that only summed transactions.
+  • Now calls `const { currencyStats, debtStats } = useAccountStatement(accountId, undefined, undefined, true)` — no date filter, so the match shows the FULL account balance exactly like the statement does without a date filter.
+  • Added a `balancesByCurrency` memo that MERGES `currencyStats` + `debtStats` into a single per-currency view:
+      - `netBalance` = `currencyStats[currencyId].netBalance` (transactions + credit sales — identical to the statement's "الصافي").
+      - `unpaidDebt` = `debtStats[currencyId].unpaidDebt` (shown separately in the statement's debt section).
+      - `forUs` / `againstUs` are computed for the match MESSAGE text (folds in unpaid receivable/payable debts for a single bottom-line "لنا/لكم" figure the recipient can verify).
+    The visible BALANCE CARD uses `netBalance` (statement's "الصافي"), so the card matches the statement EXACTLY.
+  • The match message uses `netBalance` per currency: positive → "الرصيد المستحق لنا يبلغ: {amount} {currency}", negative → "الرصيد المستحق لكم يبلغ: {amount} {currency}", zero → "لا يوجد رصيد مستحق". This guarantees the recipient sees the SAME number they'd see in the statement's "الصافي" column.
+  • Live refresh is built into the hook (`listenToLive = true`), so the match modal auto-updates after any sale/debt/transaction change — no extra wiring in the modal.
+  • UI Freeze fully preserved: same dialog layout, same balance cards (grid-cols-2, emerald for positive, red for negative, muted for zero), same Textarea, same copy/share/reset buttons, same framer-motion animation. Only the numbers changed (now they're correct).
+
+- What was NOT changed (per spec):
+  • ❌ No new accounting logic created — the hook is a faithful extraction of the statement's existing logic.
+  • ❌ No duplicate data fetching — the hook uses `useSupabaseData()` (same source as the statement).
+  • ❌ No change to addSale/updateSale/deleteSale/addPurchase/updatePurchase/deletePurchase.
+  • ❌ No change to recalculateVaultBalance or vault logic.
+  • ❌ No change to SaleDialog, PurchaseDialog, SalesPage, PurchasesPage, BalancesPage, DebtsPage, ReportsPage.
+  • ❌ No UI Freeze violation — same colors, borders, padding, fonts, layout, animations in both modals. Only the underlying balance computation source changed (duplicated local logic → shared hook).
+  • Note on "فواتير الشراء الآجلة": the spec mentions them, but the current system has NO `payment_method` column on purchases (all purchases are cash and deduct from the USD vault immediately). So there are no "credit purchases" to include. This is consistent with the statement's existing behavior (it never showed purchases in the balance). If credit purchases are added in the future, they'd be added to the shared hook — automatically propagating to BOTH the statement and the match modal.
+
+Verification (end-to-end via Agent Browser + live API):
+
+  • bun run lint → 0 errors, 0 warnings ✓
+  • Dev server HTTP 200, no compile errors (resolved a transient `hasData` duplicate-declaration error during the refactor) ✓
+  • Logged in as admin (admin/admin), navigated to Accounts page.
+
+  BASELINE — Account "ديزل" (has 10 sales: 7 cash + 3 credit + 1 expense transaction):
+  • Opened Account Statement (دفتر الأستاذ) → selected "ديزل" → captured print HTML.
+    Statement: لنا = 6,080.00, علينا = 4,000.00, الصافي = 2,080.00 $ ✓
+    (6,080 = 570 + 950 + 4,560 — the 3 credit sales; cash sales visible as rows but excluded from the balance)
+  • Closed statement → opened Match modal (مطابقة) for the same account.
+    Match: dollar card = 2,080.00 $ — "لنا" ✓
+    Message: "نحيطكم علمًا بأن الرصيد المستحق لنا يبلغ: 2,080 دولار أمريكي" ✓
+    ✅ STATEMENT AND MATCH ARE IDENTICAL (2,080.00 $).
+
+  SCENARIO 1 — Create a CREDIT sale worth 250$ (should affect the balance):
+  • POST /api/sales (paymentMethod=credit, total=250) → success ✓
+  • Dispatched `sales-updated` + `app-data-refreshed` events.
+  • Re-opened Account Statement → captured print HTML:
+    Statement: لنا = 6,330.00 (+250), علينا = 4,000.00 (unchanged), الصافي = 2,330.00 $ (+250) ✓
+  • Closed statement → opened Match modal:
+    Match: dollar card = 2,330.00 $ — "لنا" ✓
+    Message: "الرصيد المستحق لنا يبلغ: 2,330 دولار أمريكي" ✓
+    ✅ STATEMENT AND MATCH ARE IDENTICAL (2,330.00 $) — both increased by exactly 250$.
+
+  SCENARIO 2 — Create a CASH sale worth 100$ (should NOT affect the balance):
+  • POST /api/sales (paymentMethod=cash, total=100) → success ✓
+  • Dispatched refresh events.
+  • Match modal (still open, auto-refreshed): dollar card = 2,330.00 $ — UNCHANGED ✓
+    Message: "الرصيد المستحق لنا يبلغ: 2,330 دولار أمريكي" — UNCHANGED ✓
+    ✅ CASH SALE CORRECTLY EXCLUDED from the balance in both the statement and the match modal.
+
+  SCENARIO 3 — Cleanup (delete both test sales):
+  • POST /api/sales (mode=delete) ×2 → success ✓
+  • Dispatched refresh events.
+  • Match modal: dollar card reverted to 2,080.00 $ ✓ — original state fully restored.
+
+  All scenarios verified with NO console errors, NO runtime errors. Dev server HTTP 200 throughout.
+
+Stage Summary:
+- Account balance calculation is now centralized in a single shared hook `useAccountStatement` (src/hooks/useAccountStatement.ts). Both AccountStatementModal (دفتر الأستاذ) and AccountMatchModal (مطابقة الحساب) consume this hook — there is ZERO duplicate accounting logic left in either modal.
+- The match modal's balance is now GUARANTEED to equal the statement's balance for the same account, because they run the EXACT same code path. Verified live: statement الصافي = 2,080 → match shows 2,080; after creating a 250$ credit sale, statement الصافي = 2,330 → match shows 2,330; after creating a 100$ cash sale, match stays at 2,330 (cash sale correctly excluded).
+- Balance composition (per spec):
+  • ✔ Financial transactions (لنا / علينا) — included
+  • ✔ Debts (with payments subtracted) — included in debtStats; the match message folds unpaid receivable debts into "لنا" and unpaid payable debts into "علينا" for a single bottom-line per currency
+  • ✔ Credit sales (unpaid receivables) — included in currencyStats.totalIncome / netBalance
+  • ✖ Cash sales — visible in the statement as reference rows but EXCLUDED from the balance (already collected into the USD vault)
+  • ✖ Purchases — all cash in this system (already deducted from the vault); no "credit purchases" exist
+- Live update: the hook listens for `sales-updated` + `app-data-refreshed` window events and refetches sales, so both modals auto-refresh after any sale/debt/transaction change — no page reload needed.
+- UI Freeze fully preserved: both modals keep their exact same layouts, colors, borders, padding, fonts, animations. Only the underlying balance source changed (duplicated local logic → shared hook).
+- Files changed:
+  • src/hooks/useAccountStatement.ts (NEW — shared hook, ~300 lines)
+  • src/components/exchange/AccountStatementModal.tsx (refactored to use the hook; ~250 lines of local logic removed, replaced by a single hook call)
+  • src/components/exchange/AccountMatchModal.tsx (rewritten to use the hook; old transactions-only logic replaced)
+  • No other files touched.

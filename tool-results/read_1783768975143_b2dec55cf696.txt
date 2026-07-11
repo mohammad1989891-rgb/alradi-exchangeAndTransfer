@@ -1,0 +1,797 @@
+     1→'use client';
+     2→
+     3→import { useState, useMemo, useEffect, Fragment } from 'react';
+     4→import { useAppStore } from '@/store/useAppStore';
+     5→import { useSupabaseData } from '@/hooks/useSupabaseData';
+     6→import { getSalesByAccount } from '@/lib/supabaseDb';
+     7→import type { Sale } from '@/lib/supabaseDb';
+     8→import { cn } from '@/lib/utils';
+     9→import {
+    10→  Dialog,
+    11→  DialogContent,
+    12→  DialogHeader,
+    13→  DialogTitle,
+    14→} from '@/components/ui/dialog';
+    15→import {
+    16→  Select,
+    17→  SelectContent,
+    18→  SelectItem,
+    19→  SelectTrigger,
+    20→  SelectValue,
+    21→} from '@/components/ui/select';
+    22→import { Button } from '@/components/ui/button';
+    23→import { Input } from '@/components/ui/input';
+    24→import { Label } from '@/components/ui/label';
+    25→import {
+    26→  BookOpen, Printer, FileText, X, TrendingUp
+    27→} from 'lucide-react';
+    28→import { format } from 'date-fns';
+    29→import { formatNumber } from '@/lib/format';
+    30→import type { Transaction, Debt, DebtPayment, Currency } from '@/lib/supabaseDb';
+    31→
+    32→export function AccountStatementModal() {
+    33→  const { 
+    34→    isAccountStatementOpen, 
+    35→    closeAccountStatement, 
+    36→    accounts, 
+    37→    currencies, 
+    38→    selectedAccountForStatement 
+    39→  } = useAppStore();
+    40→  
+    41→  const { transactions, debts, debtPayments } = useSupabaseData();
+    42→  
+    43→  // Determine initial selected account using useMemo
+    44→  const defaultAccountId = useMemo(() => {
+    45→    if (selectedAccountForStatement) {
+    46→      return selectedAccountForStatement.id;
+    47→    }
+    48→    return accounts.length > 0 ? accounts[0].id : '';
+    49→  }, [selectedAccountForStatement, accounts]);
+    50→  
+    51→  const [selectedAccountId, setSelectedAccountId] = useState<string>(defaultAccountId);
+    52→
+    53→  // 🔸 Sales linked to the selected account (all in USD per spec)
+    54→  const [accountSales, setAccountSales] = useState<Sale[]>([]);
+    55→  const [isLoadingSales, setIsLoadingSales] = useState(false);
+    56→
+    57→  // 🔸 Keep the statement's sales section in sync with the latest data.
+    58→  //    The modal fetches sales from the `sales` table via getSalesByAccount
+    59→  //    (which selects ALL sales for the account — no payment_method filter —
+    60→  //    so both cash and credit sales are always returned).
+    61→  //
+    62→  //    Root cause of "credit sales don't appear in the statement": the
+    63→  //    original effect only refetched when `selectedAccountId` changed, so
+    64→  //    sales created/edited/deleted while the modal was closed (or while a
+    65→  //    different account was selected) never appeared until the user
+    66→  //    manually switched accounts. The fix below adds two more triggers:
+    67→  //      1. Refetch when the modal opens (isAccountStatementOpen turns true)
+    68→  //         — picks up sales created since the last view.
+    69→  //      2. Listen for `sales-updated` + `app-data-refreshed` window events
+    70→  //         (dispatched by SaleDialog and SalesPage after create/edit/delete)
+    71→  //         and refetch live, so the statement + final balance update
+    72→  //         immediately without requiring the user to reopen the modal.
+    73→  useEffect(() => {
+    74→    if (!selectedAccountId) {
+    75→      // No account selected — nothing to fetch. (We intentionally do NOT call
+    76→      // setAccountSales([]) here to avoid the set-state-in-effect lint rule;
+    77→      // accountSales is reset via the empty result path of getSalesByAccount
+    78→      // when a real account is selected, and the modal is hidden when no
+    79→      // account exists anyway.)
+    80→      return;
+    81→    }
+    82→    let cancelled = false;
+    83→
+    84→    const load = () => {
+    85→      setIsLoadingSales(true);
+    86→      getSalesByAccount(selectedAccountId)
+    87→        .then((sales) => {
+    88→          if (!cancelled) setAccountSales(sales);
+    89→        })
+    90→        .catch((err) => {
+    91→          console.error('Error fetching sales for account:', err);
+    92→          if (!cancelled) setAccountSales([]);
+    93→        })
+    94→        .finally(() => {
+    95→          if (!cancelled) setIsLoadingSales(false);
+    96→        });
+    97→    };
+    98→
+    99→    // Initial load (fires on mount, on account change, and on modal open)
+   100→    load();
+   101→
+   102→    // Live refresh: refetch whenever a sale is created/edited/deleted anywhere
+   103→    // in the app, so the statement's balance stays accurate in real time.
+   104→    const handleSalesUpdated = () => load();
+   105→    window.addEventListener('sales-updated', handleSalesUpdated);
+   106→    window.addEventListener('app-data-refreshed', handleSalesUpdated);
+   107→
+   108→    return () => {
+   109→      cancelled = true;
+   110→      window.removeEventListener('sales-updated', handleSalesUpdated);
+   111→      window.removeEventListener('app-data-refreshed', handleSalesUpdated);
+   112→    };
+   113→  }, [selectedAccountId, isAccountStatementOpen]);
+   114→  
+   115→  // Date filter state
+   116→  const [dateFrom, setDateFrom] = useState('');
+   117→  const [dateTo, setDateTo] = useState('');
+   118→  const hasDateFilter = dateFrom || dateTo;
+   119→  
+   120→  // Clear date filter
+   121→  const clearDateFilter = () => {
+   122→    setDateFrom('');
+   123→    setDateTo('');
+   124→  };
+   125→  
+   126→  // Filter data for selected account
+   127→  const accountTransactions = useMemo(() => {
+   128→    if (!selectedAccountId) return [];
+   129→    let filtered = transactions.filter(t => t.accountId === selectedAccountId && t.isComplete !== false);
+   130→    
+   131→    // Apply date filter
+   132→    if (hasDateFilter) {
+   133→      filtered = filtered.filter(t => {
+   134→        const txDate = new Date(t.date).toISOString().split('T')[0];
+   135→        const matchesDateFrom = !dateFrom || txDate >= dateFrom;
+   136→        const matchesDateTo = !dateTo || txDate <= dateTo;
+   137→        return matchesDateFrom && matchesDateTo;
+   138→      });
+   139→    }
+   140→    
+   141→    return filtered;
+   142→  }, [transactions, selectedAccountId, dateFrom, dateTo, hasDateFilter]);
+   143→  
+   144→  const accountDebts = useMemo(() => {
+   145→    if (!selectedAccountId) return [];
+   146→    return debts.filter(d => d.accountId === selectedAccountId);
+   147→  }, [debts, selectedAccountId]);
+   148→  
+   149→  // Group transactions by currency
+   150→  const transactionsByCurrency = useMemo(() => {
+   151→    const grouped: Record<string, Transaction[]> = {};
+   152→    
+   153→    for (const tx of accountTransactions) {
+   154→      const currencyId = tx.currencyId;
+   155→      if (!grouped[currencyId]) {
+   156→        grouped[currencyId] = [];
+   157→      }
+   158→      grouped[currencyId].push(tx);
+   159→    }
+   160→    
+   161→    // Sort each group by date
+   162→    for (const currencyId in grouped) {
+   163→      grouped[currencyId].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+   164→    }
+   165→    
+   166→    return grouped;
+   167→  }, [accountTransactions]);
+   168→  
+   169→  // 🔸 Date-filtered sales for this account (all sales are USD per spec)
+   170→  const filteredAccountSales = useMemo(() => {
+   171→    if (!hasDateFilter) return accountSales;
+   172→    return accountSales.filter(s => {
+   173→      const sDate = new Date(s.date).toISOString().split('T')[0];
+   174→      const matchesDateFrom = !dateFrom || sDate >= dateFrom;
+   175→      const matchesDateTo = !dateTo || sDate <= dateTo;
+   176→      return matchesDateFrom && matchesDateTo;
+   177→    });
+   178→  }, [accountSales, dateFrom, dateTo, hasDateFilter]);
+   179→
+   180→  // 🔸 Unified statement item type: a transaction OR a sale, with runningBalance
+   181→  type StatementItem = {
+   182→    id: string;
+   183→    date: Date;
+   184→    type: 'INCOME' | 'EXPENSE';
+   185→    amount: number;
+   186→    finalBalance: number;
+   187→    description?: string | null;
+   188→    runningBalance: number;
+   189→    isSale: boolean;
+   190→    paymentMethod?: 'cash' | 'credit';
+   191→    materialName?: string;
+   192→    quantity?: number;
+   193→    unitName?: string;
+   194→  };
+   195→
+   196→  // Calculate totals per currency — for USD, merge sales into the running balance
+   197→  const currencyStats = useMemo(() => {
+   198→    const stats: Record<string, {
+   199→      currency: Currency | undefined;
+   200→      totalIncome: number;
+   201→      totalExpense: number;
+   202→      netBalance: number;
+   203→      items: StatementItem[];
+   204→    }> = {};
+   205→
+   206→    // Find USD currency id (sales are always USD)
+   207→    const usdCurrency = currencies.find(c => c.code === 'USD');
+   208→
+   209→    for (const currencyId in transactionsByCurrency) {
+   210→      const currency = currencies.find(c => c.id === currencyId);
+   211→      const txs = transactionsByCurrency[currencyId];
+   212→
+   213→      // Build items: convert transactions to StatementItem
+   214→      let items: StatementItem[] = txs.map(tx => ({
+   215→        id: tx.id,
+   216→        date: new Date(tx.date),
+   217→        type: tx.type,
+   218→        amount: tx.amount,
+   219→        finalBalance: tx.finalBalance,
+   220→        description: tx.description,
+   221→        runningBalance: 0,
+   222→        isSale: false,
+   223→      }));
+   224→
+   225→      // 🔸 If this is the USD currency, merge sales (treat each sale as INCOME)
+   226→      if (usdCurrency && currencyId === usdCurrency.id && filteredAccountSales.length > 0) {
+   227→        const saleItems: StatementItem[] = filteredAccountSales.map(s => ({
+   228→          id: s.id,
+   229→          date: new Date(s.date),
+   230→          type: 'INCOME' as const, // Sale = customer owes us → لنا
+   231→          amount: s.totalPrice,
+   232→          finalBalance: s.totalPrice,
+   233→          description: s.description || `بيع ${s.materialName}`,
+   234→          runningBalance: 0,
+   235→          isSale: true,
+   236→          paymentMethod: s.paymentMethod,
+   237→          materialName: s.materialName,
+   238→          quantity: s.quantity,
+   239→          unitName: s.unitName,
+   240→        }));
+   241→        items = items.concat(saleItems);
+   242→      }
+   243→
+   244→      // Sort by date ascending (then by createdAt for stable order — use id as tiebreaker)
+   245→      items.sort((a, b) => {
+   246→        const diff = a.date.getTime() - b.date.getTime();
+   247→        if (diff !== 0) return diff;
+   248→        return a.id.localeCompare(b.id);
+   249→      });
+   250→
+   251→      // Compute running balance
+   252→      // 🔸 Cash sales are reference-only: they remain visible in the statement
+   253→      //    as a historical record (with all invoice data + a "كاش" badge) but
+   254→      //    do NOT affect totalIncome / runningBalance, because their value was
+   255→      //    already collected directly into the USD vault at sale time.
+   256→      //    Only credit sales (unpaid receivables) move the account balance,
+   257→      //    since كشف الحساب exists to show الذمم والمبالغ المستحقة.
+   258→      let totalIncome = 0;
+   259→      let totalExpense = 0;
+   260→      let runningBalance = 0;
+   261→      items = items.map(it => {
+   262→        const isCashSale = it.isSale && it.paymentMethod === 'cash';
+   263→        if (!isCashSale) {
+   264→          if (it.type === 'INCOME') {
+   265→            totalIncome += it.finalBalance;
+   266→            runningBalance += it.finalBalance;
+   267→          } else {
+   268→            totalExpense += it.finalBalance;
+   269→            runningBalance -= it.finalBalance;
+   270→          }
+   271→        }
+   272→        return { ...it, runningBalance };
+   273→      });
+   274→
+   275→      stats[currencyId] = {
+   276→        currency,
+   277→        totalIncome,
+   278→        totalExpense,
+   279→        netBalance: runningBalance,
+   280→        items,
+   281→      };
+   282→    }
+   283→
+   284→    // 🔸 Edge case: account has sales but NO USD transactions — still show USD section
+   285→    if (usdCurrency && !stats[usdCurrency.id] && filteredAccountSales.length > 0) {
+   286→      let items: StatementItem[] = filteredAccountSales.map(s => ({
+   287→        id: s.id,
+   288→        date: new Date(s.date),
+   289→        type: 'INCOME' as const,
+   290→        amount: s.totalPrice,
+   291→        finalBalance: s.totalPrice,
+   292→        description: s.description || `بيع ${s.materialName}`,
+   293→        runningBalance: 0,
+   294→        isSale: true,
+   295→        paymentMethod: s.paymentMethod,
+   296→        materialName: s.materialName,
+   297→        quantity: s.quantity,
+   298→        unitName: s.unitName,
+   299→      }));
+   300→      items.sort((a, b) => a.date.getTime() - b.date.getTime());
+   301→      // 🔸 Cash sales are reference-only (see main loop comment above) —
+   302→      //    visible in the statement but excluded from the balance.
+   303→      let totalIncome = 0;
+   304→      let runningBalance = 0;
+   305→      items = items.map(it => {
+   306→        const isCashSale = it.isSale && it.paymentMethod === 'cash';
+   307→        if (!isCashSale) {
+   308→          totalIncome += it.finalBalance;
+   309→          runningBalance += it.finalBalance;
+   310→        }
+   311→        return { ...it, runningBalance };
+   312→      });
+   313→      stats[usdCurrency.id] = {
+   314→        currency: usdCurrency,
+   315→        totalIncome,
+   316→        totalExpense: 0,
+   317→        netBalance: runningBalance,
+   318→        items,
+   319→      };
+   320→    }
+   321→
+   322→    return stats;
+   323→  }, [transactionsByCurrency, currencies, filteredAccountSales]);
+   324→  
+   325→  // Group debts by currency
+   326→  const debtsByCurrency = useMemo(() => {
+   327→    const grouped: Record<string, Debt[]> = {};
+   328→    
+   329→    for (const debt of accountDebts) {
+   330→      const currencyId = debt.currencyId;
+   331→      if (!grouped[currencyId]) {
+   332→        grouped[currencyId] = [];
+   333→      }
+   334→      grouped[currencyId].push(debt);
+   335→    }
+   336→    
+   337→    // Sort each group by date
+   338→    for (const currencyId in grouped) {
+   339→      grouped[currencyId].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+   340→    }
+   341→    
+   342→    return grouped;
+   343→  }, [accountDebts]);
+   344→  
+   345→  // Calculate debt totals per currency with payments
+   346→  const debtStats = useMemo(() => {
+   347→    const stats: Record<string, {
+   348→      currency: Currency | undefined;
+   349→      totalDebt: number;
+   350→      paidDebt: number;
+   351→      unpaidDebt: number;
+   352→      debts: Debt[];
+   353→      // إضافة بيانات الدفعات
+   354→      paymentsByDebt: Record<string, DebtPayment[]>;
+   355→      // حساب الرصيد المتبقي لكل دين
+   356→      remainingByDebt: Record<string, number>;
+   357→    }> = {};
+   358→
+   359→    for (const currencyId in debtsByCurrency) {
+   360→      const currency = currencies.find(c => c.id === currencyId);
+   361→      const currencyDebts = debtsByCurrency[currencyId];
+   362→
+   363→      // حساب الدفعات لكل دين
+   364→      const paymentsByDebt: Record<string, DebtPayment[]> = {};
+   365→      const remainingByDebt: Record<string, number> = {};
+   366→
+   367→      let totalDebt = 0;
+   368→      let totalPaid = 0;
+   369→
+   370→      for (const debt of currencyDebts) {
+   371→        // جلب الدفعات المرتبطة بهذا الدين
+   372→        const debtPaymentsList = debtPayments.filter(p => p.debtId === debt.id);
+   373→        paymentsByDebt[debt.id] = debtPaymentsList;
+   374→
+   375→        // حساب إجمالي المدفوع لهذا الدين
+   376→        const paidAmount = debtPaymentsList.reduce((sum, p) => sum + p.amount, 0);
+   377→        const remaining = Math.max(0, debt.finalBalance - paidAmount);
+   378→
+   379→        remainingByDebt[debt.id] = remaining;
+   380→        totalDebt += debt.finalBalance;
+   381→        totalPaid += paidAmount;
+   382→      }
+   383→
+   384→      stats[currencyId] = {
+   385→        currency,
+   386→        totalDebt,
+   387→        paidDebt: totalPaid,
+   388→        unpaidDebt: totalDebt - totalPaid,
+   389→        debts: currencyDebts,
+   390→        paymentsByDebt,
+   391→        remainingByDebt,
+   392→      };
+   393→    }
+   394→
+   395→    return stats;
+   396→  }, [debtsByCurrency, currencies, debtPayments]);
+   397→  
+   398→  const selectedAccount = accounts.find(a => a.id === selectedAccountId);
+   399→  
+   400→  const handlePrint = () => {
+   401→    const printWindow = window.open('', '_blank');
+   402→    if (!printWindow) return;
+   403→    
+   404→    printWindow.document.write(`
+   405→      <!DOCTYPE html>
+   406→      <html dir="rtl" lang="ar">
+   407→      <head>
+   408→        <meta charset="UTF-8">
+   409→        <title>دفتر الأستاذ - ${selectedAccount?.name || ''}</title>
+   410→        <style>
+   411→          * { margin: 0; padding: 0; box-sizing: border-box; }
+   412→          body { 
+   413→            font-family: 'Segoe UI', Tahoma, Arial, sans-serif; 
+   414→            padding: 20px;
+   415→            direction: rtl;
+   416→            background: white;
+   417→          }
+   418→          .header {
+   419→            text-align: center;
+   420→            border-bottom: 2px solid #333;
+   421→            padding-bottom: 8px;
+   422→            margin-bottom: 10px;
+   423→          }
+   424→          .header h1 { font-size: 20px; margin-bottom: 2px; }
+   425→          .header p { color: #666; font-size: 12px; }
+   426→          
+   427→          .currency-section {
+   428→            margin-bottom: 15px;
+   429→          }
+   430→          .currency-title {
+   431→            background: #f5f5f5;
+   432→            padding: 10px 15px;
+   433→            border-radius: 8px;
+   434→            margin-bottom: 10px;
+   435→            display: flex;
+   436→            justify-content: space-between;
+   437→            align-items: center;
+   438→          }
+   439→          .currency-title h3 { font-size: 16px; }
+   440→          .currency-title .net { font-weight: bold; }
+   441→          
+   442→          .summary-grid {
+   443→            display: grid;
+   444→            grid-template-columns: repeat(3, 1fr);
+   445→            gap: 10px;
+   446→            margin-bottom: 15px;
+   447→          }
+   448→          .summary-card {
+   449→            border: 1px solid #ddd;
+   450→            border-radius: 8px;
+   451→            padding: 10px;
+   452→            text-align: center;
+   453→          }
+   454→          .summary-card .label { font-size: 12px; color: #666; }
+   455→          .summary-card .value { font-size: 16px; font-weight: bold; margin-top: 5px; }
+   456→          .income { color: #16a34a; }
+   457→          .expense { color: #dc2626; }
+   458→          .debt { color: #d97706; }
+   459→          
+   460→          table {
+   461→            width: 100%;
+   462→            border-collapse: collapse;
+   463→          }
+   464→          th, td {
+   465→            border: 1px solid #ddd;
+   466→            padding: 8px 10px;
+   467→            text-align: right;
+   468→          }
+   469→          th {
+   470→            background: #f5f5f5;
+   471→            font-weight: bold;
+   472→            font-size: 12px;
+   473→          }
+   474→          td { font-size: 12px; }
+   475→          .income-row { background: #f0fdf4; }
+   476→          .expense-row { background: #fef2f2; }
+   477→          .debt-row { background: #fffbeb; }
+   478→          .sale-row { background: #f0f9ff; }
+   479→          .sale-credit-row { background: #fffbeb; }
+   480→          .badge {
+   481→            display: inline-block;
+   482→            padding: 1px 6px;
+   483→            border-radius: 4px;
+   484→            font-size: 10px;
+   485→            font-weight: 600;
+   486→            margin-inline-start: 4px;
+   487→          }
+   488→          .badge-cash { background: #d1fae5; color: #065f46; }
+   489→          .badge-credit { background: #fef3c7; color: #92400e; }
+   490→          
+   491→          .debt-section {
+   492→            margin-top: 15px;
+   493→          }
+   494→          
+   495→          .footer {
+   496→            margin-top: 15px;
+   497→            padding-top: 10px;
+   498→            border-top: 1px solid #ddd;
+   499→            text-align: center;
+   500→            color: #666;
+   501→            font-size: 12px;
+   502→          }
+   503→          
+   504→          @media print {
+   505→            body { padding: 10px; margin: 0; }
+   506→            .currency-section { page-break-inside: auto; }
+   507→            .debt-section { page-break-inside: auto; }
+   508→            table { page-break-inside: auto; }
+   509→            tr { page-break-inside: avoid; }
+   510→            thead { display: table-header-group; }
+   511→            tfoot { display: table-footer-group; }
+   512→            .header { page-break-after: avoid; page-break-inside: avoid; }
+   513→            .summary-grid { page-break-inside: avoid; page-break-after: avoid; }
+   514→            .currency-title { page-break-after: avoid; }
+   515→            .footer { page-break-before: avoid; }
+   516→          }
+   517→        </style>
+   518→      </head>
+   519→      <body>
+   520→        <div class="header">
+   521→          <h1>دفتر الأستاذ</h1>
+   522→          <p>الحساب: ${selectedAccount?.name || ''}</p>
+   523→          ${hasDateFilter ? `
+   524→            <p style="background: #f0f9ff; padding: 8px 15px; border-radius: 8px; margin: 10px 0; display: inline-block;">
+   525→              📅 الفترة: ${dateFrom ? 'من ' + dateFrom : ''} ${dateTo ? 'إلى ' + dateTo : ''}
+   526→            </p>
+   527→          ` : ''}
+   528→          <p>تاريخ الطباعة: ${new Date().toLocaleDateString('ar-SA')}</p>
+   529→        </div>
+   530→        
+   531→        ${Object.entries(currencyStats).map(([currencyId, stat]) => `
+   532→          <div class="currency-section">
+   533→            <div class="currency-title">
+   534→              <h3>${stat.currency?.name || ''} (${stat.currency?.symbol || ''})</h3>
+   535→              <span class="net ${stat.netBalance >= 0 ? 'income' : 'expense'}">
+   536→                الصافي: ${formatNumber(stat.netBalance)} ${stat.currency?.symbol || ''}
+   537→              </span>
+   538→            </div>
+   539→            
+   540→            <div class="summary-grid">
+   541→              <div class="summary-card">
+   542→                <div class="label">لنا</div>
+   543→                <div class="value income">${formatNumber(stat.totalIncome)}</div>
+   544→              </div>
+   545→              <div class="summary-card">
+   546→                <div class="label">علينا</div>
+   547→                <div class="value expense">${formatNumber(stat.totalExpense)}</div>
+   548→              </div>
+   549→              <div class="summary-card">
+   550→                <div class="label">الرصيد</div>
+   551→                <div class="value ${stat.netBalance >= 0 ? 'income' : 'expense'}">${formatNumber(stat.netBalance)}</div>
+   552→              </div>
+   553→            </div>
+   554→            
+   555→            ${stat.items.length > 0 ? `
+   556→              <table>
+   557→                <thead>
+   558→                  <tr>
+   559→                    <th>التاريخ</th>
+   560→                    <th>النوع</th>
+   561→                    <th>المبلغ</th>
+   562→                    <th>الرصيد التراكمي</th>
+   563→                    <th>البيان</th>
+   564→                  </tr>
+   565→                </thead>
+   566→                <tbody>
+   567→                  ${stat.items.map(t => {
+   568→                    const rowClass = t.isSale
+   569→                      ? (t.paymentMethod === 'credit' ? 'sale-credit-row' : 'sale-row')
+   570→                      : (t.type === 'INCOME' ? 'income-row' : 'expense-row');
+   571→                    const typeLabel = t.isSale
+   572→                      ? (t.paymentMethod === 'credit'
+   573→                          ? '🛒 بيع <span class="badge badge-credit">آجل</span>'
+   574→                          : '🛒 بيع <span class="badge badge-cash">كاش</span>')
+   575→                      : (t.type === 'INCOME' ? 'لنا' : 'علينا');
+   576→                    const descLabel = t.isSale && t.materialName
+   577→                      ? `بيع ${t.materialName} (${formatNumber(t.quantity || 0)} ${t.unitName || ''})${t.paymentMethod === 'credit' ? ' — فاتورة غير مسددة' : ''}`
+   578→                      : (t.description || '-');
+   579→                    return `
+   580→                    <tr class="${rowClass}">
+   581→                      <td>${format(new Date(t.date), 'dd/MM/yyyy')}</td>
+   582→                      <td>${typeLabel}</td>
+   583→                      <td class="${t.type === 'INCOME' ? 'income' : 'expense'}">
+   584→                        ${t.type === 'INCOME' ? '+' : '-'}${formatNumber(t.finalBalance)}
+   585→                      </td>
+   586→                      <td>${formatNumber(t.runningBalance)}</td>
+   587→                      <td>${descLabel}</td>
+   588→                    </tr>
+   589→                  `;
+   590→                  }).join('')}
+   591→                </tbody>
+   592→              </table>
+   593→            ` : '<p style="text-align: center; color: #999;">لا توجد حركات</p>'}
+   594→          </div>
+   595→        `).join('')}
+   596→        
+   597→        ${Object.keys(debtStats).length > 0 ? `
+   598→          <div class="debt-section">
+   599→            <h2 style="margin-bottom: 15px; padding: 10px; background: #fffbeb; border-radius: 8px;">
+   600→              الديون
+   601→            </h2>
+   602→            
+   603→            ${Object.entries(debtStats).map(([currencyId, stat]) => {
+   604→              const paymentsByDebt = stat.paymentsByDebt || {};
+   605→              const remainingByDebt = stat.remainingByDebt || {};
+   606→              
+   607→              return `
+   608→              <div class="currency-section">
+   609→                <div class="currency-title" style="background: #fffbeb;">
+   610→                  <h3>${stat.currency?.name || ''} (${stat.currency?.symbol || ''})</h3>
+   611→                  <span class="debt">
+   612→                    المتبقي: ${formatNumber(stat.unpaidDebt)} ${stat.currency?.symbol || ''}
+   613→                  </span>
+   614→                </div>
+   615→                
+   616→                <div class="summary-grid">
+   617→                  <div class="summary-card">
+   618→                    <div class="label">إجمالي الديون</div>
+   619→                    <div class="value debt">${formatNumber(stat.totalDebt)}</div>
+   620→                  </div>
+   621→                  <div class="summary-card">
+   622→                    <div class="label">مدفوع</div>
+   623→                    <div class="value income">${formatNumber(stat.paidDebt)}</div>
+   624→                  </div>
+   625→                  <div class="summary-card">
+   626→                    <div class="label">متبقي</div>
+   627→                    <div class="value expense">${formatNumber(stat.unpaidDebt)}</div>
+   628→                  </div>
+   629→                </div>
+   630→                
+   631→                <table>
+   632→                  <thead>
+   633→                    <tr>
+   634→                      <th>التاريخ</th>
+   635→                      <th>المبلغ الأساسي</th>
+   636→                      <th>العملة</th>
+   637→                      <th>المبلغ</th>
+   638→                      <th>متبقي</th>
+   639→                      <th>البيان</th>
+   640→                    </tr>
+   641→                  </thead>
+   642→                  <tbody>
+   643→                    ${stat.debts.map(d => {
+   644→                      const payments = paymentsByDebt[d.id] || [];
+   645→                      const paid = payments.reduce((sum, p) => sum + p.amount, 0);
+   646→                      const remaining = remainingByDebt[d.id] ?? d.finalBalance;
+   647→                      const isReceivable = d.debtType === 'RECEIVABLE' || !d.debtType;
+   648→                      const isFullyPaid = remaining <= 0;
+   649→                      const debtCurrency = currencies.find(c => c.id === d.currencyId);
+   650→                      
+   651→                      return `
+   652→                        <tr class="${isFullyPaid ? 'income-row' : 'debt-row'}">
+   653→                          <td>${format(new Date(d.date), 'dd/MM/yyyy')}</td>
+   654→                          <td>${formatNumber(d.amount)}</td>
+   655→                          <td>${debtCurrency ? debtCurrency.code : ''}</td>
+   656→                          <td class="debt">${formatNumber(d.finalBalance)}</td>
+   657→                          <td class="${isFullyPaid ? 'income' : 'expense'}">${formatNumber(remaining)}</td>
+   658→                          <td>${d.description || '-'}</td>
+   659→                        </tr>
+   660→                        ${payments.map(p => {
+   661→                          const pCurrency = currencies.find(c => c.id === p.currencyId);
+   662→                          return `
+   663→                          <tr style="background: #f0fdfa; font-size: 11px;">
+   664→                            <td style="padding-right: 30px;">└ ${format(new Date(p.date), 'dd/MM/yyyy')}</td>
+   665→                            <td>${formatNumber(p.amount)}</td>
+   666→                            <td>${pCurrency ? pCurrency.code : ''}</td>
+   667→                            <td></td>
+   668→                            <td></td>
+   669→                            <td>${p.description || ''}</td>
+   670→                          </tr>
+   671→                        `;}).join('')}
+   672→                      `;
+   673→                    }).join('')}
+   674→                  </tbody>
+   675→                </table>
+   676→              </div>
+   677→            `;
+   678→            }).join('')}
+   679→          </div>
+   680→        ` : ''}
+   681→        
+   682→        <div class="footer">
+   683→          <p>نظام الصرافة والحوالات</p>
+   684→        </div>
+   685→      </body>
+   686→      </html>
+   687→    `);
+   688→    
+   689→    printWindow.document.close();
+   690→    printWindow.print();
+   691→  };
+   692→  
+   693→  const hasData = Object.keys(currencyStats).length > 0 || Object.keys(debtStats).length > 0;
+   694→  
+   695→  return (
+   696→    <Dialog open={isAccountStatementOpen} onOpenChange={closeAccountStatement}>
+   697→      <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+   698→        <DialogHeader>
+   699→          <DialogTitle className="text-xl flex items-center gap-2">
+   700→            <BookOpen className="w-5 h-5 text-primary" />
+   701→            دفتر الأستاذ
+   702→          </DialogTitle>
+   703→        </DialogHeader>
+   704→        
+   705→        <div className="flex-1 flex flex-col">
+   706→          {/* Filters Section */}
+   707→          <div className="space-y-4">
+   708→            {/* Account Selector */}
+   709→            <div>
+   710→              <label className="text-sm text-muted-foreground mb-2 block">الحساب</label>
+   711→              <Select value={selectedAccountId} onValueChange={setSelectedAccountId}>
+   712→                <SelectTrigger className="rounded-xl">
+   713→                  <SelectValue placeholder="اختر الحساب" />
+   714→                </SelectTrigger>
+   715→                <SelectContent>
+   716→                  {accounts.map((account) => (
+   717→                    <SelectItem key={account.id} value={account.id}>
+   718→                      {account.name}
+   719→                    </SelectItem>
+   720→                  ))}
+   721→                </SelectContent>
+   722→              </Select>
+   723→            </div>
+   724→            
+   725→            {/* Date Filter Row */}
+   726→            <div className="flex items-end gap-3">
+   727→              <div className="flex-1">
+   728→                <Label className="text-xs text-muted-foreground mb-1 block">من تاريخ</Label>
+   729→                <Input
+   730→                  type="date"
+   731→                  value={dateFrom}
+   732→                  onChange={(e) => setDateFrom(e.target.value)}
+   733→                  className="text-sm rounded-xl"
+   734→                />
+   735→              </div>
+   736→              <div className="flex-1">
+   737→                <Label className="text-xs text-muted-foreground mb-1 block">إلى تاريخ</Label>
+   738→                <Input
+   739→                  type="date"
+   740→                  value={dateTo}
+   741→                  onChange={(e) => setDateTo(e.target.value)}
+   742→                  className="text-sm rounded-xl"
+   743→                />
+   744→              </div>
+   745→              {hasDateFilter && (
+   746→                <Button
+   747→                  variant="ghost"
+   748→                  size="sm"
+   749→                  onClick={clearDateFilter}
+   750→                  className="h-10 text-xs text-muted-foreground shrink-0"
+   751→                >
+   752→                  <X className="w-3 h-3 ml-1" />
+   753→                  مسح
+   754→                </Button>
+   755→              )}
+   756→            </div>
+   757→          </div>
+   758→          
+   759→          {/* Status Message */}
+   760→          <div className="flex-1 flex items-center justify-center py-8">
+   761→            {!hasData ? (
+   762→              <div className="text-center text-muted-foreground">
+   763→                <BookOpen className="w-16 h-16 mx-auto mb-4 opacity-30" />
+   764→                <p className="text-lg">لا توجد بيانات لهذا الحساب</p>
+   765→                <p className="text-sm mt-2">لم يتم تسجيل أي حركات أو ديون بعد</p>
+   766→              </div>
+   767→            ) : (
+   768→              <div className="text-center text-muted-foreground">
+   769→                <FileText className="w-16 h-16 mx-auto mb-4 opacity-30" />
+   770→                <p className="text-lg">جاهز للطباعة</p>
+   771→                <p className="text-sm mt-2">اضغط على زر "طباعة تقرير" أدناه</p>
+   772→                {hasDateFilter && (
+   773→                  <p className="text-xs mt-2 text-primary">
+   774→                    📅 الفترة: {dateFrom ? 'من ' + dateFrom : ''} {dateTo ? 'إلى ' + dateTo : ''}
+   775→                  </p>
+   776→                )}
+   777→              </div>
+   778→            )}
+   779→          </div>
+   780→          
+   781→          {/* Print Button - Full Width at Bottom */}
+   782→          {hasData && (
+   783→            <Button
+   784→              onClick={handlePrint}
+   785→              className="w-full rounded-xl py-6 text-base font-medium"
+   786→              size="lg"
+   787→            >
+   788→              <Printer className="w-5 h-5 ml-2" />
+   789→              طباعة تقرير
+   790→            </Button>
+   791→          )}
+   792→        </div>
+   793→      </DialogContent>
+   794→    </Dialog>
+   795→  );
+   796→}
+   797→

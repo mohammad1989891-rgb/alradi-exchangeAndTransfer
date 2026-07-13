@@ -310,25 +310,25 @@ export function SalesPage({ externalAddTrigger }: SalesPageProps) {
   return (
     <div className="space-y-6 pb-4">
       {/* Header — Sticky */}
-      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30">
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30 overflow-visible">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center justify-between"
+          className="flex items-center justify-between gap-2"
         >
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shrink-0">
               <TrendingUp className="w-6 h-6 text-white" />
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">المبيعات</h1>
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold text-foreground truncate">المبيعات</h1>
               <p className="text-sm text-muted-foreground">
                 {sales.length} عملية بيع
               </p>
             </div>
           </div>
           {isAdmin && (
-            <Button onClick={handleOpenAdd} className="gap-2 rounded-full">
+            <Button onClick={handleOpenAdd} className="gap-2 rounded-full shrink-0">
               <Plus className="w-4 h-4" />
               إضافة
             </Button>

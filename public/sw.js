@@ -1,7 +1,7 @@
 // Service Worker for Al-Radhi Exchange App
-// Version: 6.0 - Enhanced offline support + network transition handling
+// Version: 7.0 - Force cache invalidation to deliver mobile add-button fix (FAB + debug logs)
 
-const CACHE_NAME = 'alradhi-v6';
+const CACHE_NAME = 'alradhi-v7';
 
 // 🔸 الملفات الأساسية للتخزين المسبق (App Shell)
 const PRECACHE_URLS = [

@@ -306,6 +306,11 @@ export function SalesPage({ externalAddTrigger }: SalesPageProps) {
     }
   };
 
+  // ---- Debug: confirm button render path ----
+  useEffect(() => {
+    console.log('Render Add Sale Button', { isAdmin, hasExternalTrigger: !!externalAddTrigger });
+  }, [isAdmin, externalAddTrigger]);
+
   // ---- Render ----
   return (
     <div className="space-y-6 pb-4">
@@ -335,6 +340,20 @@ export function SalesPage({ externalAddTrigger }: SalesPageProps) {
           )}
         </motion.div>
       </div>
+
+      {/* Floating Action Button (FAB) — Mobile only
+          Guaranteed-visible add button on phones/tablets.
+          Opens the SAME SaleDialog via the same handleOpenAdd handler.
+          md:hidden = visible on mobile, hidden on desktop (desktop uses header button). */}
+      {isAdmin && (
+        <Button
+          onClick={handleOpenAdd}
+          aria-label="إضافة فاتورة بيع"
+          className="md:hidden fixed bottom-20 right-4 z-40 h-14 w-14 rounded-full shadow-2xl bg-gradient-to-br from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 p-0"
+        >
+          <Plus className="w-6 h-6 text-white" />
+        </Button>
+      )}
 
       {/* Inventory Summary Card */}
       <div className="rounded-2xl border bg-card p-4">

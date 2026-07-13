@@ -1,7 +1,7 @@
 // Service Worker for Al-Radhi Exchange App
-// Version: 7.0 - Force cache invalidation to deliver mobile add-button fix (FAB + debug logs)
+// Version: 8.0 - Restore in-header add-button to proven working pattern (matches Accounts/Vehicles)
 
-const CACHE_NAME = 'alradhi-v7';
+const CACHE_NAME = 'alradhi-v8';
 
 // 🔸 الملفات الأساسية للتخزين المسبق (App Shell)
 const PRECACHE_URLS = [

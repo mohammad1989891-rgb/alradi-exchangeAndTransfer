@@ -271,46 +271,35 @@ export function PurchasesPage({ externalAddTrigger }: PurchasesPageProps) {
   // ---- Render ----
   return (
     <div className="space-y-6 pb-4">
-      {/* Header — Sticky */}
-      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30 overflow-visible">
+      {/* Header — Sticky
+          Layout matches AccountsPage/VehiclesPage (proven working on mobile).
+          flex-wrap allows the add button to wrap to a new line on very narrow screens
+          instead of being pushed off-screen. No hidden/sm:hidden/md:hidden classes. */}
+      <div className="sticky top-0 z-30 bg-background/95 backdrop-blur-sm -mx-4 px-4 py-3 border-b border-border/30">
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center justify-between gap-2"
+          className="flex items-center justify-between flex-wrap gap-2"
         >
-          <div className="flex items-center gap-3 min-w-0 flex-1">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center shadow-lg shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center shadow-lg">
               <ShoppingCart className="w-6 h-6 text-white" />
             </div>
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-foreground truncate">المشتريات</h1>
+            <div>
+              <h1 className="text-2xl font-bold text-foreground">المشتريات</h1>
               <p className="text-sm text-muted-foreground">
                 {purchases.length} عملية شراء
               </p>
             </div>
           </div>
           {isAdmin && (
-            <Button onClick={handleOpenAdd} className="gap-2 rounded-full shrink-0">
+            <Button onClick={handleOpenAdd} className="gap-2 rounded-full">
               <Plus className="w-4 h-4" />
               إضافة
             </Button>
           )}
         </motion.div>
       </div>
-
-      {/* Floating Action Button (FAB) — Mobile only
-          Guaranteed-visible add button on phones/tablets.
-          Opens the SAME PurchaseDialog via the same handleOpenAdd handler.
-          md:hidden = visible on mobile, hidden on desktop (desktop uses header button). */}
-      {isAdmin && (
-        <Button
-          onClick={handleOpenAdd}
-          aria-label="إضافة فاتورة شراء"
-          className="md:hidden fixed bottom-20 right-4 z-40 h-14 w-14 rounded-full shadow-2xl bg-gradient-to-br from-rose-500 to-pink-500 hover:from-rose-600 hover:to-pink-600 p-0"
-        >
-          <Plus className="w-6 h-6 text-white" />
-        </Button>
-      )}
 
       {/* Inventory Summary Card */}
       <div className="rounded-2xl border bg-card p-4">

@@ -1279,3 +1279,44 @@ Stage Summary:
 - Live update: `app-data-refreshed` event refreshes Balances, Dashboard, Reports, and Vehicles pages instantly.
 - UI Freeze fully preserved: zero visual/layout/text changes.
 - No other accounting logic touched: shared transactions, profits, partners, accounts, sales, purchases, debts all unchanged.
+
+---
+Task ID: 20
+Agent: main
+Task: إصلاح مشكلة ظهور زر "إضافة فاتورة شراء" و "إضافة فاتورة بيع" على الهواتف المحمولة. الأزرار تظهر على الديسكتوب لكن تختفي على الموبايل. مطلوب: إصلاح Responsive + Z-index + Container، مع UI Freeze كامل وعدم تغيير أي منطق برمجي/محاسبي.
+
+Work Log:
+- Read worklog (Tasks #13–#19) for context.
+- Inspected PurchasesPage.tsx and SalesPage.tsx sticky headers + the main page.tsx layout + BottomNav.tsx + globals.css.
+- ROOT CAUSE analysis (defensive): The sticky page header used `flex items-center justify-between` with a fixed-width icon badge (w-12 h-12) + title text + button, but the title block had NO `min-w-0`/`flex-shrink` capability. On very narrow viewports, the title block could expand and push the button off-screen. Additionally, the `-mx-4 px-4` full-bleed wrapper had no explicit `overflow-visible`, risking clipping. z-30 was correct (below app header z-40, above content).
+- Applied defensive hardening to BOTH PurchasesPage.tsx and SalesPage.tsx (identical pattern):
+  • flex row: added `gap-2` for consistent spacing
+  • title block: `min-w-0 flex-1` so it can shrink instead of pushing the button off-screen
+  • icon badge: `shrink-0` so it never compresses
+  • title text wrapper: `min-w-0` to allow truncation
+  • h1: added `truncate` as a safety net against text overflow
+  • add button: `shrink-0` so it never compresses or gets pushed away
+  • sticky header container: `overflow-visible` to guarantee the button is never clipped by the `-mx-4 px-4` full-bleed wrapper
+  • z-30 kept unchanged (above content cards, below app header z-40)
+- Visual design UNCHANGED: same colors, same sizes, same spacing, same fonts, same layout. Only added defensive flex/shrink/overflow classes.
+
+Verification (end-to-end via Agent Browser + VLM, logged in as admin):
+  • bun run lint → 0 errors, 0 warnings ✓
+  • Dev server HTTP 200, no console errors ✓
+  • Mobile 320×568 (iPhone 5/SE): Purchases button at x=16,y=97,w=84,h=36 → fully visible, click opens "إضافة عملية شراء" dialog ✓; Sales button same position → fully visible, click opens "إضافة عملية بيع" dialog ✓
+  • Mobile 360×640: button fully visible ✓
+  • Mobile 390×844 (iPhone 14): button fully visible ✓
+  • Desktop 1440×900: Purchases button at x=480,y=97 → fully visible, click opens dialog ✓; Sales same → fully visible ✓ (no regression)
+  • Sticky on scroll (mobile): after scrolling down 600px, VLM confirms sticky header with cart icon + title + button STILL visible at top ✓
+  • VLM cross-check on all 4 viewports: button visible, not clipped, dialog opens correctly ✓
+
+- Committed and pushed to GitHub: commit 76ecbe6 ("fix(ui): ensure add-invoice buttons visible on all mobile sizes"). Remote updated: 749e345..76ecbe6.
+- Also added tool-results/ to .gitignore to prevent future merge noise.
+
+Stage Summary:
+- Add-invoice buttons (إضافة) in PurchasesPage and SalesPage are now guaranteed visible and clickable on ALL viewport sizes (320px → 1440px+).
+- Defensive flex/shrink/overflow classes ensure the button can never be pushed off-screen or clipped, even on the narrowest phones.
+- Sticky header stays pinned at the top during scroll on all viewports.
+- UI Freeze fully preserved: zero visual design changes. Only added safety-net layout classes.
+- No logic/accounting changes: the buttons still open the exact same dialogs (إضافة عملية شراء / إضافة عملية بيع) with the same behavior.
+- Files changed: src/components/exchange/PurchasesPage.tsx, src/components/exchange/SalesPage.tsx, .gitignore.

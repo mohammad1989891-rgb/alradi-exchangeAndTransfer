@@ -1645,3 +1645,35 @@ Stage Summary:
   • src/components/exchange/SettingsPage.tsx — Quick Fix button + PURCHASE_TYPE_FIX_SQL + handler
   • src/app/api/migrate-purchase-type/route.ts — NEW API route for migration
 - IMPORTANT: The user must run the Quick Fix in Settings to add the purchase_type column to the production database before the opening inventory feature will work correctly. Without the column, opening_inventory inserts will throw a clear error message directing the user to run the fix.
+
+---
+Task ID: 24
+Agent: main
+Task: إصلاح خطأ PostgreSQL 42710 ("relation "units" is already member of publication "supabase_realtime"") الذي يظهر عند إعادة تشغيل سكربت إعداد قاعدة البيانات (الذي يضيف عمود purchase_type) على قاعدة بيانات الجداول فيها منضمّة بالفعل إلى publication الـ realtime.
+
+Work Log:
+- قرأت worklog لفهم سياق Task #23 (ميزة الرصيد الافتتاحي للمخزون).
+- حدّدت السبب الجذري: ملفات الـ migration تحتوي على عبارات `ALTER PUBLICATION supabase_realtime ADD TABLE <name>;` غير مُتكرّرة الإجراء (non-idempotent). PostgreSQL لا يدعم `IF NOT EXISTS` لهذه العبارة، فعند إعادة تشغيل السكربت على قاعدة بيانات الجداول فيها منضمّة بالفعل، تفشل العبارة الأولى بخطأ 42710 وتوقف باقي المهاجرة (بما فيها `ALTER TABLE purchases ADD COLUMN purchase_type`).
+- بحثت في كل المستودع عن `ALTER PUBLICATION supabase_realtime ADD TABLE` → وُجدت في 4 ملفات:
+  • supabase/migration-purchases-sales.sql (الملف الذي سبّب خطأ units)
+  • src/components/exchange/SettingsPage.tsx (مصدر SQL الذي ينسخه المستخدم من الواجهة)
+  • supabase/migration.sql (نفس النمط لجداول أخرى)
+  • supabase/fix-rls.sql (نفس النمط لجداول أخرى)
+- الحل: استبدلت العبارات المنفردة بكتلة `DO $$ ... END $$` تفحص `pg_publication_tables` قبل الإضافة لكل جدول، فتصبح المهاجرة آمنة لإعادة التشغيل (idempotent). استخدام `EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t)` لحقن اسم الجدول بأمان.
+- طبّقت الإصلاح على الملفات الأربعة جميعها:
+  • migration-purchases-sales.sql: 5 جداول (units, materials, material_units, purchases, sales)
+  • SettingsPage.tsx: نفس الـ 5 جداول
+  • migration.sql: 13 جدول (currencies ... backups)
+  • fix-rls.sql: 12 جدول (currencies ... vehicles_settings)
+- تحققت من عدم وجود أي عبارة `ALTER PUBLICATION ... ADD TABLE` منفردة متبقية (grep أكّد أن كل التطابقات الآن داخل كتلة DO).
+- bun run lint → 0 أخطاء، 0 تحذيرات ✓
+
+Stage Summary:
+- خطأ PostgreSQL 42710 محسوم بالكامل: جميع سكربتات الـ migration (التي تُشغَّل من Supabase SQL Editor أو من زر "إعداد المشتريات والمبيعات" في الإعدادات) أصبحت idempotent فيما يخص إضافة الجداول إلى publication الـ realtime.
+- النتيجة: المستخدم يمكنه الآن إعادة تشغيل سكربت إعداد المشتريات والمبيعات بأمان → سيضيف عمود `purchase_type` إلى جدول `purchases` (لتفعيل ميزة الرصيد الافتتاحي من Task #23) بدون أن يفشل على عبارة الـ realtime.
+- لم يتغيّر أي منطق تشغيلي أو واجهة — التغيير SQL-only (idempotency).
+- الملفات المعدّلة:
+  • supabase/migration-purchases-sales.sql
+  • supabase/migration.sql
+  • supabase/fix-rls.sql
+  • src/components/exchange/SettingsPage.tsx (فقط سلسلة SQL داخل الـ template literal)

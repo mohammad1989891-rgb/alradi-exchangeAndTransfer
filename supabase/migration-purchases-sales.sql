@@ -128,13 +128,26 @@ CREATE POLICY "Allow all on purchases" ON purchases FOR ALL USING (true) WITH CH
 CREATE POLICY "Allow all on sales" ON sales FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
--- Enable Realtime
+-- Enable Realtime (idempotent — safe to re-run)
+-- PostgreSQL has no "ADD TABLE IF NOT EXISTS" for publications, so we check
+-- pg_publication_tables first to avoid error 42710 ("already member of publication")
+-- when this migration is re-run on a database where tables are already in realtime.
 -- ============================================
-ALTER PUBLICATION supabase_realtime ADD TABLE units;
-ALTER PUBLICATION supabase_realtime ADD TABLE materials;
-ALTER PUBLICATION supabase_realtime ADD TABLE material_units;
-ALTER PUBLICATION supabase_realtime ADD TABLE purchases;
-ALTER PUBLICATION supabase_realtime ADD TABLE sales;
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOREACH t IN ARRAY ARRAY['units','materials','material_units','purchases','sales'] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime'
+              AND schemaname = 'public'
+              AND tablename = t
+        ) THEN
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+        END IF;
+    END LOOP;
+END $$;
 
 -- ============================================
 -- Seed default units (if not exists)

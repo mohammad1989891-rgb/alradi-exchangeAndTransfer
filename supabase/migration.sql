@@ -315,21 +315,30 @@ CREATE POLICY "Allow all on vehicles_settings" ON vehicles_settings FOR ALL USIN
 CREATE POLICY "Allow all on backups" ON backups FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
--- Enable Realtime for all tables
+-- Enable Realtime for all tables (idempotent — safe to re-run)
+-- PostgreSQL has no "ADD TABLE IF NOT EXISTS" for publications, so we check
+-- pg_publication_tables first to avoid error 42710 ("already member of publication")
+-- when this migration is re-run on a database where tables are already in realtime.
 -- ============================================
-ALTER PUBLICATION supabase_realtime ADD TABLE currencies;
-ALTER PUBLICATION supabase_realtime ADD TABLE vaults;
-ALTER PUBLICATION supabase_realtime ADD TABLE accounts;
-ALTER PUBLICATION supabase_realtime ADD TABLE transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE debts;
-ALTER PUBLICATION supabase_realtime ADD TABLE debt_payments;
-ALTER PUBLICATION supabase_realtime ADD TABLE currency_exchanges;
-ALTER PUBLICATION supabase_realtime ADD TABLE users;
-ALTER PUBLICATION supabase_realtime ADD TABLE vehicles;
-ALTER PUBLICATION supabase_realtime ADD TABLE vehicle_transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE shared_transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE vehicles_settings;
-ALTER PUBLICATION supabase_realtime ADD TABLE backups;
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[
+        'currencies','vaults','accounts','transactions','debts','debt_payments',
+        'currency_exchanges','users','vehicles','vehicle_transactions',
+        'shared_transactions','vehicles_settings','backups'
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime'
+              AND schemaname = 'public'
+              AND tablename = t
+        ) THEN
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+        END IF;
+    END LOOP;
+END $$;
 
 -- ============================================
 -- Insert default admin user

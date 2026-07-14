@@ -78,22 +78,32 @@ DROP POLICY IF EXISTS "Allow all operations on vehicles_settings" ON vehicles_se
 -- CREATE POLICY "Allow all on vehicles_settings" ON vehicles_settings FOR ALL USING (true) WITH CHECK (true);
 
 -- ============================================
--- Step 4: Enable Realtime for all tables
+-- Step 4: Enable Realtime for all tables (idempotent — safe to re-run)
 -- ============================================
--- Make sure Realtime is enabled for live updates
+-- Make sure Realtime is enabled for live updates.
+-- PostgreSQL has no "ADD TABLE IF NOT EXISTS" for publications, so we check
+-- pg_publication_tables first to avoid error 42710 ("already member of publication")
+-- when this script is re-run on a database where tables are already in realtime.
 
-ALTER PUBLICATION supabase_realtime ADD TABLE currencies;
-ALTER PUBLICATION supabase_realtime ADD TABLE vaults;
-ALTER PUBLICATION supabase_realtime ADD TABLE accounts;
-ALTER PUBLICATION supabase_realtime ADD TABLE transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE debts;
-ALTER PUBLICATION supabase_realtime ADD TABLE debt_payments;
-ALTER PUBLICATION supabase_realtime ADD TABLE currency_exchanges;
-ALTER PUBLICATION supabase_realtime ADD TABLE users;
-ALTER PUBLICATION supabase_realtime ADD TABLE vehicles;
-ALTER PUBLICATION supabase_realtime ADD TABLE vehicle_transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE shared_transactions;
-ALTER PUBLICATION supabase_realtime ADD TABLE vehicles_settings;
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOREACH t IN ARRAY ARRAY[
+        'currencies','vaults','accounts','transactions','debts','debt_payments',
+        'currency_exchanges','users','vehicles','vehicle_transactions',
+        'shared_transactions','vehicles_settings'
+    ] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime'
+              AND schemaname = 'public'
+              AND tablename = t
+        ) THEN
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+        END IF;
+    END LOOP;
+END $$;
 
 -- ============================================
 -- Done! Verify by running:

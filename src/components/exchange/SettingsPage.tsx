@@ -202,12 +202,22 @@ CREATE POLICY "Allow all on material_units" ON material_units FOR ALL USING (tru
 CREATE POLICY "Allow all on purchases" ON purchases FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow all on sales" ON sales FOR ALL USING (true) WITH CHECK (true);
 
--- Enable Realtime
-ALTER PUBLICATION supabase_realtime ADD TABLE units;
-ALTER PUBLICATION supabase_realtime ADD TABLE materials;
-ALTER PUBLICATION supabase_realtime ADD TABLE material_units;
-ALTER PUBLICATION supabase_realtime ADD TABLE purchases;
-ALTER PUBLICATION supabase_realtime ADD TABLE sales;
+-- Enable Realtime (idempotent — safe to re-run; skips tables already in the publication)
+DO $$
+DECLARE
+    t TEXT;
+BEGIN
+    FOREACH t IN ARRAY ARRAY['units','materials','material_units','purchases','sales'] LOOP
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_publication_tables
+            WHERE pubname = 'supabase_realtime'
+              AND schemaname = 'public'
+              AND tablename = t
+        ) THEN
+            EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.%I', t);
+        END IF;
+    END LOOP;
+END $$;
 
 -- Seed default units (if not exists)
 INSERT INTO units (id, name) VALUES

@@ -198,6 +198,9 @@ model MaterialUnit {
 }
 
 // المشتريات — تُخصم من صندوق الدولار عند الحفظ
+// purchaseType:
+//   - 'purchase' (default): فاتورة شراء فعلية — تخصم من الصندوق وتُحسب ضمن مصروفات الشراء
+//   - 'opening_inventory': رصيد افتتاحي للمخزون — يضيف كمية فقط، لا يخصم الصندوق ولا يُحسب كمصروف
 model Purchase {
   id                  String   @id @default(cuid())
   date                DateTime @default(now())
@@ -210,6 +213,9 @@ model Purchase {
   quantityInBase      Float    // snapshot = quantity × baseFactorSnapshot
   unitPriceUsd        Float
   totalPriceUsd       Float    // = quantity × unitPriceUsd
+  // نوع العملية: 'purchase' (افتراضي) أو 'opening_inventory' (رصيد افتتاحي للمخزون)
+  // الافتراضي 'purchase' للحفاظ على التوافق مع السجلات الموجودة
+  purchaseType        String   @default("purchase")
   description         String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

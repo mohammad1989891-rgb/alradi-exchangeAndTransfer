@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS material_units (
 -- ============================================
 -- Purchases Table (المشتريات)
 -- totalPriceUsd يُخصم من صندوق الدولار
+-- purchase_type: 'purchase' (default) → فاتورة شراء فعلية، تخصم الصندوق
+--                'opening_inventory' → رصيد افتتاحي للمخزون، يضيف كمية فقط بدون خصم
 -- ============================================
 CREATE TABLE IF NOT EXISTS purchases (
   id TEXT PRIMARY KEY,
@@ -55,6 +57,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   quantity_in_base DOUBLE PRECISION NOT NULL DEFAULT 0,
   unit_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   total_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  purchase_type TEXT NOT NULL DEFAULT 'purchase',
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -152,3 +155,11 @@ ON CONFLICT (id) DO NOTHING;
 -- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
 -- ============================================
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+
+-- ============================================
+-- Add purchase_type column for existing installations
+-- 'purchase' (default) = فاتورة شراء فعلية (deducts from USD vault)
+-- 'opening_inventory'  = رصيد افتتاحي للمخزون (no vault effect, inventory-only)
+-- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
+-- ============================================
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';

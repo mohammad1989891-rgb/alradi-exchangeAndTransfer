@@ -22,7 +22,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { formatNumber, computeConversionUnitStock } from '@/lib/format';
-import { Loader2, ShoppingCart, Calendar, Package, DollarSign, Tag, Boxes, Info } from 'lucide-react';
+import { Loader2, ShoppingCart, Calendar, Package, DollarSign, Tag, Boxes, Info, Warehouse } from 'lucide-react';
 import {
   getMaterials,
   getMaterialInventory,
@@ -31,6 +31,7 @@ import {
   type Material,
   type Purchase,
   type MaterialInventory,
+  type PurchaseType,
 } from '@/lib/supabaseDb';
 
 export interface PurchaseDialogProps {
@@ -47,6 +48,8 @@ interface FormState {
   unitId: string;
   unitPriceUsd: string;
   description: string;
+  // 🔸 نوع العملية: 'purchase' (افتراضي) أو 'opening_inventory' (رصيد افتتاحي للمخزون)
+  purchaseType: PurchaseType;
 }
 
 function getTodayISO(): string {
@@ -78,6 +81,7 @@ function getDefaultFormState(): FormState {
     unitId: '',
     unitPriceUsd: '',
     description: '',
+    purchaseType: 'purchase',
   };
 }
 
@@ -102,6 +106,10 @@ export function PurchaseDialog({
   const [isLoadingInventory, setIsLoadingInventory] = useState(false);
 
   const isEditMode = !!editingPurchase;
+  // 🔸 Opening-inventory mode: the unit price is OPTIONAL (per spec:
+  //    "السعر الإفرادي بالدولار (اختياري)"). The total value still computes
+  //    automatically when a price is entered, but the user can leave it blank.
+  const isOpeningInventory = form.purchaseType === 'opening_inventory';
 
   // Load materials list when dialog opens
   const loadMaterials = useCallback(async () => {
@@ -153,6 +161,8 @@ export function PurchaseDialog({
         unitId: editingPurchase.unitId,
         unitPriceUsd: String(editingPurchase.unitPriceUsd ?? ''),
         description: editingPurchase.description ?? '',
+        // 🔸 Preserve the original type on edit (type is immutable per spec)
+        purchaseType: editingPurchase.purchaseType ?? 'purchase',
       });
       // Preload inventory for the editing purchase's material
       loadInventory(editingPurchase.materialId);
@@ -222,6 +232,12 @@ export function PurchaseDialog({
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  // 🔸 Switch the operation type (purchase ↔ opening_inventory).
+  //    Disabled in edit mode (type is immutable per spec).
+  const handleTypeChange = (type: PurchaseType) => {
+    setForm((prev) => ({ ...prev, purchaseType: type }));
+  };
+
   const validate = (): string | null => {
     if (!form.date) return 'يرجى اختيار التاريخ';
     if (!form.materialId) return 'يرجى اختيار المادة';
@@ -229,8 +245,17 @@ export function PurchaseDialog({
     if (!form.quantity || isNaN(quantityNum) || quantityNum <= 0) {
       return 'يرجى إدخال الكمية (أكبر من صفر)';
     }
-    if (form.unitPriceUsd === '' || isNaN(unitPriceNum) || unitPriceNum < 0) {
-      return 'يرجى إدخال سعر إفرادي صحيح';
+    // 🔸 Unit price is REQUIRED for real purchases, OPTIONAL for opening inventory.
+    //    (per spec: "السعر الإفرادي بالدولار (اختياري)" — only for opening inventory)
+    if (!isOpeningInventory) {
+      if (form.unitPriceUsd === '' || isNaN(unitPriceNum) || unitPriceNum < 0) {
+        return 'يرجى إدخال سعر إفرادي صحيح';
+      }
+    } else {
+      // For opening inventory: if a price IS entered, it must be non-negative.
+      if (form.unitPriceUsd !== '' && (isNaN(unitPriceNum) || unitPriceNum < 0)) {
+        return 'يرجى إدخال سعر إفرادي صحيح أو تركه فارغاً';
+      }
     }
     return null;
   };
@@ -248,26 +273,34 @@ export function PurchaseDialog({
 
     setIsSaving(true);
     try {
+      // 🔸 For opening inventory with no price entered, default to 0 (no vault
+      //    effect anyway, but the column is NOT NULL).
+      const effectiveUnitPrice = isOpeningInventory && form.unitPriceUsd === '' ? 0 : unitPriceNum;
       const payload = {
         date: form.date,
         materialId: form.materialId,
         quantity: quantityNum,
         unitId: form.unitId,
-        unitPriceUsd: unitPriceNum,
+        unitPriceUsd: effectiveUnitPrice,
         description: form.description.trim() || undefined,
+        purchaseType: form.purchaseType,
       };
 
       if (isEditMode && editingPurchase) {
         await updatePurchase(editingPurchase.id, payload);
         toast({
           title: 'تم التحديث',
-          description: 'تم تحديث عملية الشراء بنجاح',
+          description: isOpeningInventory
+            ? 'تم تحديث الرصيد الافتتاحي بنجاح'
+            : 'تم تحديث عملية الشراء بنجاح',
         });
       } else {
         await addPurchase(payload);
         toast({
           title: 'تم الحفظ',
-          description: 'تم إضافة عملية الشراء بنجاح',
+          description: isOpeningInventory
+            ? 'تم إضافة الرصيد الافتتاحي للمخزون بنجاح'
+            : 'تم إضافة عملية الشراء بنجاح',
         });
       }
 
@@ -284,7 +317,7 @@ export function PurchaseDialog({
         description:
           error instanceof Error
             ? error.message
-            : 'حدث خطأ أثناء حفظ عملية الشراء',
+            : 'حدث خطأ أثناء حفظ العملية',
         variant: 'destructive',
       });
     } finally {
@@ -292,19 +325,33 @@ export function PurchaseDialog({
     }
   };
 
+  // 🔸 Dialog title adapts to the operation type
+  const dialogTitle = isEditMode
+    ? (isOpeningInventory ? 'تعديل الرصيد الافتتاحي' : 'تعديل عملية شراء')
+    : (isOpeningInventory ? 'إضافة رصيد افتتاحي للمخزون' : 'إضافة عملية شراء');
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent scrollable className="max-w-md">
         {/* 🔸 Pinned header — stays visible while body scrolls */}
         <DialogHeader className="flex-shrink-0 border-b px-6 py-4 text-right">
           <DialogTitle className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-rose-500 to-pink-500 flex items-center justify-center">
-              <ShoppingCart className="w-4 h-4 text-white" />
+            <div className={cn(
+              'w-8 h-8 rounded-lg flex items-center justify-center',
+              isOpeningInventory
+                ? 'bg-gradient-to-br from-amber-500 to-orange-500'
+                : 'bg-gradient-to-br from-rose-500 to-pink-500'
+            )}>
+              {isOpeningInventory ? (
+                <Warehouse className="w-4 h-4 text-white" />
+              ) : (
+                <ShoppingCart className="w-4 h-4 text-white" />
+              )}
             </div>
-            {isEditMode ? 'تعديل عملية شراء' : 'إضافة عملية شراء'}
+            {dialogTitle}
           </DialogTitle>
           <DialogDescription className="sr-only">
-            {isEditMode ? 'نموذج تعديل عملية شراء' : 'نموذج إضافة عملية شراء جديدة'}
+            {dialogTitle}
           </DialogDescription>
         </DialogHeader>
 
@@ -316,6 +363,45 @@ export function PurchaseDialog({
             </div>
           ) : (
             <div className="space-y-4">
+              {/* 🔸 نوع العملية — type selector (شراء / رصيد افتتاحي للمخزون)
+                  Disabled in edit mode (type is immutable per spec).
+                  Only shown when creating a NEW record. */}
+              {!isEditMode && (
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-sm">
+                    نوع العملية <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleTypeChange('purchase')}
+                      className={cn(
+                        'flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors',
+                        !isOpeningInventory
+                          ? 'border-rose-500 bg-rose-50 text-rose-700 dark:border-rose-400 dark:bg-rose-950/40 dark:text-rose-300'
+                          : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                      )}
+                    >
+                      <ShoppingCart className="w-4 h-4 flex-shrink-0" />
+                      <span className="truncate">شراء</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleTypeChange('opening_inventory')}
+                      className={cn(
+                        'flex items-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-colors',
+                        isOpeningInventory
+                          ? 'border-amber-500 bg-amber-50 text-amber-700 dark:border-amber-400 dark:bg-amber-950/40 dark:text-amber-300'
+                          : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                      )}
+                    >
+                      <Warehouse className="w-4 h-4 flex-shrink-0" />
+                      <span className="truncate">رصيد افتتاحي للمخزون</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {/* التاريخ */}
               <div className="space-y-1.5">
                 <Label htmlFor="purchase-date" className="flex items-center gap-1.5 text-sm">
@@ -457,11 +543,15 @@ export function PurchaseDialog({
                 </div>
               </div>
 
-              {/* السعر الإفرادي بالدولار */}
+              {/* السعر الإفرادي بالدولار
+                  🔸 REQUIRED for real purchases, OPTIONAL for opening inventory
+                  (per spec: "السعر الإفرادي بالدولار (اختياري)" — opening inventory only) */}
               <div className="space-y-1.5">
                 <Label htmlFor="purchase-price" className="flex items-center gap-1.5 text-sm">
                   <DollarSign className="w-3.5 h-3.5 text-muted-foreground" />
-                  السعر الإفرادي بالدولار <span className="text-red-500">*</span>
+                  السعر الإفرادي بالدولار
+                  {!isOpeningInventory && <span className="text-red-500">*</span>}
+                  {isOpeningInventory && <span className="text-xs text-muted-foreground">(اختياري)</span>}
                 </Label>
                 <div className="relative">
                   <Input
@@ -471,7 +561,7 @@ export function PurchaseDialog({
                     step="any"
                     value={form.unitPriceUsd}
                     onChange={(e) => handleFieldChange('unitPriceUsd', e.target.value)}
-                    placeholder="0.00"
+                    placeholder={isOpeningInventory ? '0.00 (اختياري)' : '0.00'}
                     className="rounded-xl pl-8"
                   />
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">
@@ -495,23 +585,47 @@ export function PurchaseDialog({
                 />
               </div>
 
-              {/* السعر الإجمالي — Read-only computed box */}
-              <div className="rounded-xl border border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20 p-4">
-                <p className="text-xs text-muted-foreground mb-1">
-                  السعر الإجمالي للفاتورة بالدولار
-                </p>
-                <div className="flex items-baseline justify-between gap-2">
-                  <p className="text-[11px] text-muted-foreground">
-                    {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
+              {/* القيمة الإجمالية — Read-only computed box
+                  🔸 For opening inventory: only shown when a price is entered
+                  (per spec: "القيمة الإجمالية تحسب تلقائياً إذا تم إدخال السعر").
+                  For real purchases: always shown (price is required). */}
+              {(!isOpeningInventory || unitPriceNum > 0) && (
+                <div className={cn(
+                  'rounded-xl border p-4',
+                  isOpeningInventory
+                    ? 'border-amber-200/60 dark:border-amber-800/40 bg-amber-50/80 dark:bg-amber-950/20'
+                    : 'border-emerald-200/60 dark:border-emerald-800/40 bg-emerald-50/80 dark:bg-emerald-950/20'
+                )}>
+                  <p className="text-xs text-muted-foreground mb-1">
+                    {isOpeningInventory ? 'القيمة الإجمالية للرصيد الافتتاحي' : 'السعر الإجمالي للفاتورة بالدولار'}
                   </p>
-                  <p className={cn(
-                    'text-xl font-bold text-emerald-600 dark:text-emerald-400',
-                    totalPrice === 0 && 'text-muted-foreground/70'
-                  )}>
-                    {formatNumber(totalPrice)} $
-                  </p>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      {formatNumber(quantityNum)} × {formatNumber(unitPriceNum)} ={' '}
+                    </p>
+                    <p className={cn(
+                      'text-xl font-bold',
+                      isOpeningInventory
+                        ? 'text-amber-600 dark:text-amber-400'
+                        : 'text-emerald-600 dark:text-emerald-400',
+                      totalPrice === 0 && 'text-muted-foreground/70'
+                    )}>
+                      {formatNumber(totalPrice)} $
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* 🔸 Opening-inventory info banner — clarifies that this operation
+                  does NOT affect the vault or any accounting system. */}
+              {isOpeningInventory && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-200/70 bg-amber-50/70 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+                  <Info className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+                  <span>
+                    الرصيد الافتتاحي يضيف الكمية إلى المخزون فقط. لا يؤثر على الصندوق، الحسابات، كشف الحساب، أو الحركات المالية.
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -529,7 +643,12 @@ export function PurchaseDialog({
           <Button
             onClick={handleSave}
             disabled={isSaving || isLoadingMaterials}
-            className="gap-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white"
+            className={cn(
+              'gap-2 rounded-xl text-white',
+              isOpeningInventory
+                ? 'bg-amber-500 hover:bg-amber-600'
+                : 'bg-emerald-500 hover:bg-emerald-600'
+            )}
           >
             {isSaving ? (
               <>
@@ -538,7 +657,11 @@ export function PurchaseDialog({
               </>
             ) : (
               <>
-                <ShoppingCart className="w-4 h-4" />
+                {isOpeningInventory ? (
+                  <Warehouse className="w-4 h-4" />
+                ) : (
+                  <ShoppingCart className="w-4 h-4" />
+                )}
                 {isEditMode ? 'حفظ التعديلات' : 'حفظ'}
               </>
             )}

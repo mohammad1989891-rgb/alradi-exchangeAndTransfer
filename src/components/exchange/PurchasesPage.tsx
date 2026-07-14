@@ -15,6 +15,7 @@ import {
   Boxes,
   Loader2,
   Boxes as InventoryIcon,
+  Warehouse,
 } from 'lucide-react';
 import { MonthCard } from './MonthCard';
 import { groupByMonth } from '@/lib/monthlyGrouping';
@@ -504,7 +505,11 @@ export function PurchasesPage({ externalAddTrigger }: PurchasesPageProps) {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>تفاصيل عملية الشراء</DialogTitle>
+            <DialogTitle>
+              {selectedPurchase?.purchaseType === 'opening_inventory'
+                ? 'تفاصيل الرصيد الافتتاحي'
+                : 'تفاصيل عملية الشراء'}
+            </DialogTitle>
           </DialogHeader>
 
           {selectedPurchase && (
@@ -525,13 +530,22 @@ export function PurchasesPage({ externalAddTrigger }: PurchasesPageProps) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>حذف عملية الشراء</AlertDialogTitle>
+            <AlertDialogTitle>
+              {deletePurchaseState?.purchaseType === 'opening_inventory'
+                ? 'حذف الرصيد الافتتاحي'
+                : 'حذف عملية الشراء'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
               هل أنت متأكد من حذف هذه العملية؟
               <br />
               المادة: {deletePurchaseState?.materialName}
               <br />
-              الإجمالي: {formatNumber(deletePurchaseState?.totalPriceUsd || 0)} $
+              {/* 🔸 For opening inventory, show the quantity (price may be 0) */}
+              {deletePurchaseState?.purchaseType === 'opening_inventory' ? (
+                <>الكمية: {formatNumber(deletePurchaseState?.quantity || 0)} {deletePurchaseState?.unitName}</>
+              ) : (
+                <>الإجمالي: {formatNumber(deletePurchaseState?.totalPriceUsd || 0)} $</>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -561,6 +575,10 @@ interface PurchaseCardProps {
 }
 
 function PurchaseCard({ purchase, index, onClick }: PurchaseCardProps) {
+  // 🔸 Opening-inventory rows use an amber palette + "رصيد افتتاحي" badge;
+  // regular purchases keep the original rose palette + "شراء" badge.
+  // (per spec: "تمييزها بلون أو Badge مختلف عن فواتير الشراء العادية")
+  const isOpeningInventory = purchase.purchaseType === 'opening_inventory';
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -571,16 +589,30 @@ function PurchaseCard({ purchase, index, onClick }: PurchaseCardProps) {
       className={cn(
         'relative overflow-hidden rounded-xl border cursor-pointer transition-all duration-200',
         'hover:shadow-md active:scale-[0.98]',
-        'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200/50 dark:border-rose-800/30'
+        isOpeningInventory
+          ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200/50 dark:border-amber-800/30'
+          : 'bg-rose-50/50 dark:bg-rose-950/20 border-rose-200/50 dark:border-rose-800/30'
       )}
     >
       {/* Side indicator */}
-      <div className="absolute right-0 top-0 bottom-0 w-1 bg-rose-500" />
+      <div className={cn(
+        'absolute right-0 top-0 bottom-0 w-1',
+        isOpeningInventory ? 'bg-amber-500' : 'bg-rose-500'
+      )} />
 
       <div className="p-4 pr-5 flex items-center gap-4">
         {/* Icon */}
-        <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-rose-100 dark:bg-rose-900/50">
-          <ShoppingCart className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+        <div className={cn(
+          'w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0',
+          isOpeningInventory
+            ? 'bg-amber-100 dark:bg-amber-900/50'
+            : 'bg-rose-100 dark:bg-rose-900/50'
+        )}>
+          {isOpeningInventory ? (
+            <Warehouse className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+          ) : (
+            <ShoppingCart className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+          )}
         </div>
 
         {/* Content */}
@@ -589,8 +621,13 @@ function PurchaseCard({ purchase, index, onClick }: PurchaseCardProps) {
             <span className="font-medium text-foreground truncate">
               {purchase.materialName}
             </span>
-            <span className="text-[10px] px-2 py-0.5 rounded-full font-medium bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300">
-              شراء
+            <span className={cn(
+              'text-[10px] px-2 py-0.5 rounded-full font-medium',
+              isOpeningInventory
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/50 dark:text-amber-300'
+                : 'bg-rose-100 text-rose-700 dark:bg-rose-900/50 dark:text-rose-300'
+            )}>
+              {isOpeningInventory ? 'رصيد افتتاحي' : 'شراء'}
             </span>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
@@ -612,21 +649,30 @@ function PurchaseCard({ purchase, index, onClick }: PurchaseCardProps) {
           </div>
         </div>
 
-        {/* Amount */}
-        <div className="text-left flex-shrink-0">
-          <p className="text-lg font-bold text-rose-600 dark:text-rose-400">
-            {formatNumber(purchase.totalPriceUsd)}
-          </p>
-          <p className="text-[10px] text-muted-foreground">$</p>
-        </div>
+        {/* Amount — hidden for opening inventory when no price was entered (totalPriceUsd === 0) */}
+        {(!isOpeningInventory || purchase.totalPriceUsd > 0) && (
+          <div className="text-left flex-shrink-0">
+            <p className={cn(
+              'text-lg font-bold',
+              isOpeningInventory
+                ? 'text-amber-600 dark:text-amber-400'
+                : 'text-rose-600 dark:text-rose-400'
+            )}>
+              {formatNumber(purchase.totalPriceUsd)}
+            </p>
+            <p className="text-[10px] text-muted-foreground">$</p>
+          </div>
+        )}
       </div>
 
-      {/* Subtle footer with unit price */}
-      <div className="px-4 pb-2 pr-5 -mt-1">
-        <p className="text-[10px] text-muted-foreground">
-          السعر الإفرادي: {formatNumber(purchase.unitPriceUsd)} $
-        </p>
-      </div>
+      {/* Subtle footer with unit price — only shown when a price was recorded */}
+      {purchase.unitPriceUsd > 0 && (
+        <div className="px-4 pb-2 pr-5 -mt-1">
+          <p className="text-[10px] text-muted-foreground">
+            السعر الإفرادي: {formatNumber(purchase.unitPriceUsd)} $
+          </p>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -648,22 +694,52 @@ function PurchaseDetailContent({
   onEdit,
   onDelete,
 }: PurchaseDetailContentProps) {
+  // 🔸 Opening-inventory rows use an amber palette + "رصيد افتتاحي للمخزون" label;
+  // regular purchases keep the original rose palette + "عملية شراء" label.
+  const isOpeningInventory = purchase.purchaseType === 'opening_inventory';
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="rounded-xl p-4 bg-rose-50 dark:bg-rose-950/20">
+      <div className={cn(
+        'rounded-xl p-4',
+        isOpeningInventory
+          ? 'bg-amber-50 dark:bg-amber-950/20'
+          : 'bg-rose-50 dark:bg-rose-950/20'
+      )}>
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-full flex items-center justify-center bg-rose-100 dark:bg-rose-900/50">
-            <ShoppingCart className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+          <div className={cn(
+            'w-12 h-12 rounded-full flex items-center justify-center',
+            isOpeningInventory
+              ? 'bg-amber-100 dark:bg-amber-900/50'
+              : 'bg-rose-100 dark:bg-rose-900/50'
+          )}>
+            {isOpeningInventory ? (
+              <Warehouse className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+            ) : (
+              <ShoppingCart className="w-6 h-6 text-rose-600 dark:text-rose-400" />
+            )}
           </div>
           <div className="flex-1">
-            <p className="text-2xl font-bold">
-              {formatNumber(purchase.totalPriceUsd)}{' '}
-              <span className="text-base font-normal text-muted-foreground">$</span>
-            </p>
+            {/* 🔸 For opening inventory with no price, show the quantity instead of the total */}
+            {isOpeningInventory && purchase.totalPriceUsd === 0 ? (
+              <p className="text-2xl font-bold">
+                {formatNumber(purchase.quantity)}{' '}
+                <span className="text-base font-normal text-muted-foreground">{purchase.unitName}</span>
+              </p>
+            ) : (
+              <p className="text-2xl font-bold">
+                {formatNumber(purchase.totalPriceUsd)}{' '}
+                <span className="text-base font-normal text-muted-foreground">$</span>
+              </p>
+            )}
             <div className="flex items-center gap-2 mt-1">
-              <span className="text-sm font-medium text-rose-600 dark:text-rose-400">
-                عملية شراء
+              <span className={cn(
+                'text-sm font-medium',
+                isOpeningInventory
+                  ? 'text-amber-600 dark:text-amber-400'
+                  : 'text-rose-600 dark:text-rose-400'
+              )}>
+                {isOpeningInventory ? 'رصيد افتتاحي للمخزون' : 'عملية شراء'}
               </span>
             </div>
           </div>
@@ -678,10 +754,13 @@ function PurchaseDetailContent({
           label="الكمية"
           value={`${formatNumber(purchase.quantity)} ${purchase.unitName}`}
         />
-        <DetailItem
-          label="السعر الإفرادي"
-          value={`${formatNumber(purchase.unitPriceUsd)} $`}
-        />
+        {/* 🔸 Unit price — only shown when a price was recorded (optional for opening inventory) */}
+        {purchase.unitPriceUsd > 0 && (
+          <DetailItem
+            label="السعر الإفرادي"
+            value={`${formatNumber(purchase.unitPriceUsd)} $`}
+          />
+        )}
       </div>
 
       {/* Description */}
@@ -689,6 +768,16 @@ function PurchaseDetailContent({
         <div className="rounded-xl bg-muted/50 p-3">
           <p className="text-xs text-muted-foreground mb-1">البيان</p>
           <p className="text-sm">{purchase.description}</p>
+        </div>
+      )}
+
+      {/* 🔸 Opening-inventory info banner in the detail modal */}
+      {isOpeningInventory && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200/70 bg-amber-50/70 dark:border-amber-800/40 dark:bg-amber-950/20 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+          <Warehouse className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          <span>
+            هذا رصيد افتتاحي للمخزون — يضيف الكمية فقط بدون تأثير على الصندوق أو الحسابات.
+          </span>
         </div>
       )}
 

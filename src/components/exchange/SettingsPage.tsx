@@ -124,6 +124,8 @@ CREATE TABLE IF NOT EXISTS material_units (
 );
 
 -- Purchases Table (المشتريات)
+-- purchase_type: 'purchase' (default) → فاتورة شراء فعلية، تخصم الصندوق
+--                'opening_inventory' → رصيد افتتاحي للمخزون، يضيف كمية فقط بدون خصم
 CREATE TABLE IF NOT EXISTS purchases (
   id TEXT PRIMARY KEY,
   date TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -136,6 +138,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   quantity_in_base DOUBLE PRECISION NOT NULL DEFAULT 0,
   unit_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   total_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
+  purchase_type TEXT NOT NULL DEFAULT 'purchase',
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -220,7 +223,24 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Add payment_method column for existing installations
 -- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
-ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';`;
+ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+
+-- Add purchase_type column for existing installations
+-- 'purchase' (default) = فاتورة شراء فعلية (deducts from USD vault)
+-- 'opening_inventory'  = رصيد افتتاحي للمخزون (no vault effect, inventory-only)
+-- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';`;
+
+// ============================================
+// 🔸 PURCHASE_TYPE_FIX_SQL (module scope)
+// Minimal, targeted migration that ONLY adds the `purchase_type` column to the
+// `purchases` table. Used when opening inventory fails with:
+// "Could not find the 'purchase_type' column of 'purchases' in the schema cache".
+// ============================================
+const PURCHASE_TYPE_FIX_SQL = `-- Quick fix: add purchase_type column to purchases table
+-- (for older installations that created the purchases table before the opening inventory feature)
+-- Safe to re-run: IF NOT EXISTS won't error if the column already exists.
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';`;
 
 // ============================================
 // 🔸 PAYMENT_METHOD_FIX_SQL (module scope)
@@ -2532,6 +2552,10 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
   const [isFixingPaymentMethod, setIsFixingPaymentMethod] = useState(false);
   const [paymentMethodFixResult, setPaymentMethodFixResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
   const [paymentMethodSqlCopied, setPaymentMethodSqlCopied] = useState(false);
+  // 🔸 Quick-fix state for the targeted purchase_type column migration (opening-inventory feature)
+  const [isFixingPurchaseType, setIsFixingPurchaseType] = useState(false);
+  const [purchaseTypeFixResult, setPurchaseTypeFixResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
+  const [purchaseTypeSqlCopied, setPurchaseTypeSqlCopied] = useState(false);
 
   // القسم الفرعي المفتوح حالياً (افتراضياً: إعداد قاعدة البيانات)
   const [openSub, setOpenSub] = useState<string | null>('db-setup');
@@ -2664,6 +2688,49 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
       });
     } finally {
       setIsFixingPaymentMethod(false);
+    }
+  };
+
+  // 🔸 إصلاح سريع: إضافة عمود purchase_type فقط (لميزة الرصيد الافتتاحي للمخزون)
+  // يعالج خطأ: "Could not find the 'purchase_type' column of 'purchases' in the schema cache"
+  const handleQuickFixPurchaseType = async () => {
+    setIsFixingPurchaseType(true);
+    setPurchaseTypeFixResult(null);
+    setPurchaseTypeSqlCopied(false);
+    try {
+      if (dbPassword) {
+        // Auto-fix via execute-sql API
+        const resp = await fetch('/api/execute-sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql: PURCHASE_TYPE_FIX_SQL,
+            dbPassword,
+            userRole: 'admin',
+          }),
+        });
+        const json = await resp.json();
+        if (resp.ok && json?.success) {
+          setPurchaseTypeFixResult({ success: true, message: 'تمت إضافة عمود نوع العملية (purchase_type) بنجاح ✓ — يمكن الآن إضافة الرصيد الافتتاحي للمخزون.' });
+          toast({ title: 'تم الإصلاح', description: 'تمت إضافة عمود نوع العملية بنجاح.' });
+        } else {
+          setPurchaseTypeFixResult({ success: false, message: json?.error || 'فشل الإصلاح التلقائي.' });
+        }
+      } else {
+        // No password → provide SQL to copy
+        setPurchaseTypeFixResult({
+          success: true,
+          message: 'تم تجهيز SQL. انسخه والصقه في Supabase SQL Editor ثم اضغط Run.',
+          sql: PURCHASE_TYPE_FIX_SQL,
+        });
+      }
+    } catch (error) {
+      setPurchaseTypeFixResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'حدث خطأ غير متوقع.',
+      });
+    } finally {
+      setIsFixingPurchaseType(false);
     }
   };
 
@@ -2869,6 +2936,77 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
                 )}
               </div>
             )}
+
+            {/* 🔸 Quick Fix: purchase_type column (opening-inventory feature) */}
+            <div className="mt-4 pt-4 border-t border-border/50">
+              <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 mb-3">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-amber-800 dark:text-amber-400">ظهور خطأ عند إضافة الرصيد الافتتاحي للمخزون؟</p>
+                    <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
+                      إذا ظهر خطأ «Could not find the &apos;purchase_type&apos; column of &apos;purchases&apos;»، فهذا يعني أن جدول المشتريات أُنشئ قبل إضافة ميزة الرصيد الافتتاحي. هذا الإصلاح السريع يضيف العمود المفقود فقط.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleQuickFixPurchaseType}
+                disabled={isFixingPurchaseType}
+                variant="outline"
+                className="w-full gap-2 border-amber-400 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/20"
+              >
+                {isFixingPurchaseType ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                {isFixingPurchaseType ? 'جاري الإصلاح...' : 'إصلاح عمود نوع العملية (purchase_type)'}
+              </Button>
+
+              {purchaseTypeFixResult && (
+                <div className="mt-3 space-y-2">
+                  <p className={cn('text-xs', purchaseTypeFixResult.success ? 'text-emerald-600' : 'text-red-600')}>
+                    {purchaseTypeFixResult.message}
+                  </p>
+
+                  {purchaseTypeFixResult.sql && (
+                    <div className="rounded-lg border border-border overflow-hidden">
+                      <div className="flex items-center justify-between bg-muted/80 px-3 py-2 border-b border-border">
+                        <span className="text-[11px] font-medium text-muted-foreground">SQL جاهز للنسخ — الصقه في Supabase SQL Editor</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 gap-1 text-xs"
+                          onClick={() => {
+                            navigator.clipboard.writeText(purchaseTypeFixResult.sql!).then(() => {
+                              setPurchaseTypeSqlCopied(true);
+                              toast({ title: 'تم النسخ', description: 'تم نسخ SQL إلى الحافظة' });
+                              setTimeout(() => setPurchaseTypeSqlCopied(false), 2000);
+                            }).catch(() => {
+                              toast({ title: 'فشل النسخ', description: 'تعذر النسخ إلى الحافظة.', variant: 'destructive' });
+                            });
+                          }}
+                        >
+                          {purchaseTypeSqlCopied ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-500" />
+                              <span className="text-emerald-600">تم النسخ</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="w-3 h-3" />
+                              نسخ SQL
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                      <pre className="text-[10px] leading-relaxed text-muted-foreground bg-background p-3 overflow-auto max-h-40 rtl:text-left" dir="ltr">
+                        {purchaseTypeFixResult.sql}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       ),

@@ -1150,6 +1150,31 @@ function isMissingPaymentMethodColumn(error: unknown): boolean {
     (lower.includes('schema cache') || lower.includes('does not exist') || lower.includes('could not find'));
 }
 
+/**
+ * Detects whether a Supabase/PostgREST error is caused by the `purchase_type`
+ * column being missing from the `purchases` table.
+ *
+ * This happens on older installations that created the `purchases` table before
+ * the opening-inventory feature was added. PostgREST caches the schema, so any
+ * request that references the missing column (insert/update/select/filter)
+ * is rejected before reaching PostgreSQL.
+ *
+ * Message examples:
+ *   - "Could not find the 'purchase_type' column of 'purchases' in the schema cache"
+ *   - "column purchases.purchase_type does not exist"
+ *
+ * When this returns true, callers should retry the operation WITHOUT the
+ * `purchase_type` field (the purchase still gets created; defaults to 'purchase'
+ * at the DB level). The user should run the quick-fix in Settings →
+ * إعداد المشتريات والمبيعات to add the column.
+ */
+function isMissingPurchaseTypeColumn(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : (typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : String(error));
+  const lower = msg.toLowerCase();
+  return lower.includes('purchase_type') &&
+    (lower.includes('schema cache') || lower.includes('does not exist') || lower.includes('could not find'));
+}
+
 export async function recalculateVaultBalance(currencyId: string): Promise<Vault | null> {
   await initializeDatabase();
 
@@ -1269,20 +1294,42 @@ export async function recalculateVaultBalance(currencyId: string): Promise<Vault
 
   // 5. PURCHASES: Deduct total_price_usd from USD vault only
   //    (purchases are always paid in USD cash per the spec)
-  let purchaseQuery = supabase.from('purchases').select('*');
+  //    🔸 Only REAL purchases ('purchase_type' = 'purchase') affect the vault.
+  //    Opening-inventory rows ('purchase_type' = 'opening_inventory') add
+  //    quantity to inventory ONLY — NO vault effect (per spec: "لا يتم خصم
+  //    أي مبلغ من الصندوق").
+  //    🔸 Resilience: if the `purchase_type` column is missing (older install),
+  //    the `.ne('purchase_type', 'opening_inventory')` filter errors. Fall back
+  //    to fetching ALL purchases and treating them as real purchases (the
+  //    correct pre-feature behavior, since every purchase created without the
+  //    column is effectively a real purchase).
+  let purchaseQuery = supabase.from('purchases').select('*').ne('purchase_type', 'opening_inventory');
 
   if (dateFilter) {
     purchaseQuery = purchaseQuery.gt('date', dateFilter);
   }
 
-  const { data: purchases } = await purchaseQuery;
-  if (purchases) {
+  let purchaseResult = await purchaseQuery;
+  if (purchaseResult.error && isMissingPurchaseTypeColumn(purchaseResult.error)) {
+    console.warn('[Supabase] purchases.purchase_type column missing — counting all purchases as real for vault recompute. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    let fallbackPurchaseQuery = supabase.from('purchases').select('*');
+    if (dateFilter) fallbackPurchaseQuery = fallbackPurchaseQuery.gt('date', dateFilter);
+    purchaseResult = await fallbackPurchaseQuery;
+    if (purchaseResult.error) throw new Error(purchaseResult.error.message);
+  } else if (purchaseResult.error) {
+    throw new Error(purchaseResult.error.message);
+  }
+  const purchaseRows = purchaseResult.data;
+  if (purchaseRows) {
     // Find the USD currency id once
     const { data: usdCurrencyRow } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
     const usdCurrencyId = usdCurrencyRow && usdCurrencyRow.length > 0 ? (usdCurrencyRow[0] as Record<string, unknown>).id as string : null;
     if (usdCurrencyId && currencyId === usdCurrencyId) {
-      for (const p of purchases) {
+      for (const p of purchaseRows) {
         const purchaseObj = rowToPurchase(p);
+        // 🔸 Final guard: skip opening_inventory rows even if the fallback
+        //    fetched them (defensive — the filter should already exclude them)
+        if (purchaseObj.purchaseType === 'opening_inventory') continue;
         // Purchase: cash goes OUT → vault decreases
         delta -= purchaseObj.totalPriceUsd;
       }
@@ -4379,6 +4426,17 @@ export interface MaterialUnit {
   updatedAt: Date;
 }
 
+// ============================================
+// Purchase Type — distinguishes real purchase invoices from opening inventory
+// - 'purchase'          → فاتورة شراء فعلية: deducts totalPriceUsd from USD vault,
+//                          counts as a purchase expense, creates a purchase movement.
+// - 'opening_inventory' → رصيد افتتاحي للمخزون: adds quantity to inventory ONLY.
+//                          NO vault deduction, NO purchase movement, NO financial
+//                          effect. Represents stock on hand at system start.
+// (Per spec: "لا يتم اعتبار الرصيد الافتتاحي فاتورة شراء")
+// ============================================
+export type PurchaseType = 'purchase' | 'opening_inventory';
+
 export interface Purchase {
   id: string;
   date: Date;
@@ -4391,6 +4449,7 @@ export interface Purchase {
   quantityInBase: number;
   unitPriceUsd: number;
   totalPriceUsd: number;
+  purchaseType: PurchaseType;
   description?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -4469,6 +4528,10 @@ function rowToPurchase(row: Record<string, unknown>): Purchase {
   obj.date = new Date(obj.date as unknown as string);
   obj.createdAt = new Date(obj.createdAt as unknown as string);
   obj.updatedAt = new Date(obj.updatedAt as unknown as string);
+  // 🔸 Backward-compat: older rows may not have purchase_type — default to 'purchase'
+  // (every purchase created before the opening-inventory feature is a real purchase)
+  const raw = (row.purchase_type as string | undefined)?.toLowerCase();
+  obj.purchaseType = raw === 'opening_inventory' ? 'opening_inventory' : 'purchase';
   return obj;
 }
 
@@ -4511,6 +4574,8 @@ function purchaseToRow(p: Partial<Purchase>): Record<string, unknown> {
   if (row.date) row.date = dateToIso(row.date as Date);
   if (row.created_at) row.created_at = dateToIso(row.created_at as Date);
   if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
+  // 🔸 Ensure purchase_type is always written (default 'purchase' if missing)
+  if (!row.purchase_type) row.purchase_type = 'purchase';
   return row;
 }
 
@@ -4957,6 +5022,7 @@ export async function addPurchase(data: {
   unitId: string;
   unitPriceUsd: number;
   description?: string;
+  purchaseType?: PurchaseType;
 }): Promise<Purchase> {
   await initializeDatabase();
   const now = new Date();
@@ -4968,6 +5034,9 @@ export async function addPurchase(data: {
   const baseFactorSnapshot = muInfo.baseFactor;
   const quantityInBase = data.quantity * baseFactorSnapshot;
   const totalPriceUsd = data.quantity * data.unitPriceUsd;
+  // 🔸 purchaseType defaults to 'purchase' (preserves existing behavior).
+  // 'opening_inventory' = رصيد افتتاحي للمخزون: inventory-only, no vault effect.
+  const purchaseType: PurchaseType = data.purchaseType === 'opening_inventory' ? 'opening_inventory' : 'purchase';
 
   const purchase: Purchase = {
     id: 'pur_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
@@ -4981,18 +5050,46 @@ export async function addPurchase(data: {
     quantityInBase,
     unitPriceUsd: data.unitPriceUsd,
     totalPriceUsd,
+    purchaseType,
     description: data.description || null,
     createdAt: now,
     updatedAt: now,
   };
 
-  const { error } = await supabase.from('purchases').insert([purchaseToRow(purchase)]);
-  if (error) throw new Error(error.message);
+  let insertError = await (async () => {
+    const { error } = await supabase.from('purchases').insert([purchaseToRow(purchase)]);
+    return error;
+  })();
+  // 🔸 Resilience: if the `purchase_type` column is missing (older installation),
+  // we CANNOT silently default to 'purchase' — that would deduct from the vault
+  // for an operation the user intended as opening inventory (no vault effect).
+  // Instead, throw a clear error telling the user to run the migration.
+  // (For 'purchase' type only, we could safely retry without the column since
+  // the DB default is 'purchase' anyway — but for 'opening_inventory' we MUST
+  // refuse to insert to avoid an incorrect vault deduction.)
+  if (insertError && isMissingPurchaseTypeColumn(insertError)) {
+    if (purchaseType === 'opening_inventory') {
+      throw new Error(
+        'عمود purchase_type غير موجود في قاعدة البيانات. يرجى تشغيل الإصلاح السريع من: الإعدادات → إعداد المشتريات والمبيعات → إصلاح سريع (إضافة عمود نوع العملية).'
+      );
+    }
+    // For 'purchase' type: safe to retry without the column (DB defaults to 'purchase')
+    console.warn('[Supabase] purchases.purchase_type column missing — retrying insert without it (type=purchase, safe default). Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    const rowWithoutType = { ...purchaseToRow(purchase) };
+    delete rowWithoutType.purchase_type;
+    const { error: retryError } = await supabase.from('purchases').insert([rowWithoutType]);
+    insertError = retryError;
+  }
+  if (insertError) throw new Error(insertError.message);
 
-  // Deduct from USD vault — recalculate USD vault balance
-  const usdCurrencyId = await getUsdCurrencyId();
-  if (usdCurrencyId) {
-    await recalculateVaultBalance(usdCurrencyId);
+  // 🔸 Vault effect:
+  //  - 'purchase'          → deduct totalPriceUsd from USD vault (cash goes OUT)
+  //  - 'opening_inventory' → NO vault effect (per spec: "لا يتم خصم أي مبلغ من الصندوق")
+  if (purchaseType === 'purchase') {
+    const usdCurrencyId = await getUsdCurrencyId();
+    if (usdCurrencyId) {
+      await recalculateVaultBalance(usdCurrencyId);
+    }
   }
 
   return purchase;
@@ -5005,6 +5102,7 @@ export async function updatePurchase(id: string, data: {
   unitId?: string;
   unitPriceUsd?: number;
   description?: string;
+  purchaseType?: PurchaseType;
 }): Promise<Purchase | null> {
   await initializeDatabase();
 
@@ -5018,6 +5116,10 @@ export async function updatePurchase(id: string, data: {
   const effectiveUnitPrice = data.unitPriceUsd ?? old.unitPriceUsd;
   const effectiveDate = data.date ? new Date(data.date) : old.date;
   const effectiveDescription = data.description !== undefined ? data.description : old.description;
+  // 🔸 purchaseType is immutable on edit (per spec: edit adjusts inventory by
+  //    the quantity difference only; the type stays the same). If a caller
+  //    passes a new type we ignore it to preserve the original classification.
+  const effectivePurchaseType: PurchaseType = old.purchaseType;
 
   // Re-fetch base_factor if material or unit changed
   let baseFactorSnapshot = old.baseFactorSnapshot;
@@ -5050,20 +5152,32 @@ export async function updatePurchase(id: string, data: {
     updated_at: new Date().toISOString(),
   };
 
-  const { error } = await supabase.from('purchases').update(updateObj).eq('id', id);
-  if (error) throw new Error(error.message);
+  let updateError = await (async () => {
+    const { error } = await supabase.from('purchases').update(updateObj).eq('id', id);
+    return error;
+  })();
+  // 🔸 Resilience: if `purchase_type` column is missing, the update payload
+  // above doesn't reference it, but PostgREST schema cache may still reject
+  // the whole table operation. Retry by selecting only the safe columns.
+  // (In practice this branch is rarely hit because updateObj doesn't include
+  //  purchase_type, but we keep it for symmetry with addPurchase.)
+  if (updateError && isMissingPurchaseTypeColumn(updateError)) {
+    console.warn('[Supabase] purchases.purchase_type column missing — update may have failed. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+  }
+  if (updateError) throw new Error(updateError.message);
 
-  // 🔸 ERP-style: only recalculate the USD vault if the total price changed.
-  //    Per spec: "يتم تحديث صندوق الدولار بفارق قيمة الفاتورة فقط" — the
-  //    vault is derived (opening_balance + sum of all USD-affecting ops), so
-  //    `recalculateVaultBalance` already produces the correct delta-applied
-  //    result. We just skip the recompute when nothing relevant changed to
-  //    avoid unnecessary queries (perf: "استخدام أقل عدد ممكن من الاستعلامات").
-  const totalPriceChanged = totalPriceUsd !== old.totalPriceUsd;
-  if (totalPriceChanged) {
-    const usdCurrencyId = await getUsdCurrencyId();
-    if (usdCurrencyId) {
-      await recalculateVaultBalance(usdCurrencyId);
+  // 🔸 Vault effect on edit:
+  //  - 'purchase'          → recompute USD vault ONLY if total price changed
+  //                          (delta-applied automatically via full recompute)
+  //  - 'opening_inventory' → NO vault effect EVER (per spec: "لا يتم خصم أي مبلغ
+  //                          من الصندوق" — opening inventory never touches the vault)
+  if (effectivePurchaseType === 'purchase') {
+    const totalPriceChanged = totalPriceUsd !== old.totalPriceUsd;
+    if (totalPriceChanged) {
+      const usdCurrencyId = await getUsdCurrencyId();
+      if (usdCurrencyId) {
+        await recalculateVaultBalance(usdCurrencyId);
+      }
     }
   }
 
@@ -5073,13 +5187,26 @@ export async function updatePurchase(id: string, data: {
 
 export async function deletePurchase(id: string): Promise<void> {
   await initializeDatabase();
+
+  // 🔸 Fetch the purchase first so we know its type. Opening-inventory rows
+  //    never affected the vault, so deleting them must NOT trigger a recompute
+  //    (per spec: "دون أي تأثير على الصناديق"). Real purchases ('purchase')
+  //    DID deduct from the vault, so deleting them must recompute to return
+  //    the money.
+  const { data: row } = await supabase.from('purchases').select('*').eq('id', id).single();
+  const purchase = row ? rowToPurchase(row) : null;
+
   const { error } = await supabase.from('purchases').delete().eq('id', id);
   if (error) throw new Error(error.message);
 
-  // Recalculate USD vault
-  const usdCurrencyId = await getUsdCurrencyId();
-  if (usdCurrencyId) {
-    await recalculateVaultBalance(usdCurrencyId);
+  // Only recompute the USD vault if the deleted row was a REAL purchase.
+  // Opening-inventory deletions adjust inventory only (handled by the
+  // inventory derivation: currentInBase = sum(purchases) − sum(sales)).
+  if (purchase && purchase.purchaseType === 'purchase') {
+    const usdCurrencyId = await getUsdCurrencyId();
+    if (usdCurrencyId) {
+      await recalculateVaultBalance(usdCurrencyId);
+    }
   }
 }
 

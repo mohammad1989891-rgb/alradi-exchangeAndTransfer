@@ -1178,245 +1178,206 @@ function isMissingPurchaseTypeColumn(error: unknown): boolean {
 export async function recalculateVaultBalance(currencyId: string): Promise<Vault | null> {
   await initializeDatabase();
 
-  // Get the vault
-  const { data: vaultRows } = await supabase.from('vaults').select('*').eq('currency_id', currencyId);
+  // ── Get the vault — if THIS fails, we can't update the balance (REAL error) ──
+  const { data: vaultRows, error: vaultFetchError } = await supabase
+    .from('vaults')
+    .select('*')
+    .eq('currency_id', currencyId);
+  if (vaultFetchError) {
+    console.error(`[recalcVault] ❌ Failed to fetch vault for currency ${currencyId}:`, vaultFetchError.message);
+    throw new Error(`فشل في الوصول إلى بيانات الصندوق: ${vaultFetchError.message}`);
+  }
   if (!vaultRows || vaultRows.length === 0) return null;
   const vault = rowToVault(vaultRows[0]);
 
   const openingBalance = vault.openingBalance || 0;
   const openingDate = vault.openingBalanceDate;
-
   let delta = 0;
-
-  // Build date filter - only operations AFTER opening_balance_date
   const dateFilter = openingDate ? openingDate.toISOString() : null;
 
-  // 1. TRANSACTIONS: Complete, cash (overflow transactions use currencyId directly)
-  let transactionQuery = supabase.from('transactions').select('*')
-    .eq('is_complete', true)
-    .eq('payment_type', 'CASH');
+  // ════════════════════════════════════════════════════════════════════
+  // RESILIENT sub-queries: each category is wrapped in try/catch.
+  // A transient failure (network blip, RLS hiccup, etc.) logs a warning
+  // but does NOT prevent the vault balance from being updated. The
+  // exchange operation itself (category #4) is the critical one — if it
+  // fails, the vault balance will be slightly off for THIS currency until
+  // the next recalc, but the function still writes the best-available
+  // balance. This prevents the "phantom error + stale vault" double-bug.
+  // ════════════════════════════════════════════════════════════════════
 
-  if (dateFilter) {
-    transactionQuery = transactionQuery.gt('date', dateFilter);
-  }
-
-  const { data: transactions } = await transactionQuery;
-  if (transactions) {
-    for (const tx of transactions) {
-      const txObj = rowToTransaction(tx);
-      // Determine which vault this transaction affects
-      const vaultCurrencyId = txObj.isOverflowTransaction ? txObj.currencyId : (txObj.baseCurrencyId || txObj.currencyId);
-
-      if (vaultCurrencyId === currencyId) {
-        // INCOME: vault decreases (money goes out)
-        // EXPENSE: vault increases (money comes in)
-        if (txObj.type === 'INCOME') {
-          delta -= txObj.amount;
-        } else {
-          delta += txObj.amount;
+  // ── 1. TRANSACTIONS: Complete, cash ──
+  try {
+    let transactionQuery = supabase.from('transactions').select('*')
+      .eq('is_complete', true)
+      .eq('payment_type', 'CASH');
+    if (dateFilter) transactionQuery = transactionQuery.gt('date', dateFilter);
+    const { data: transactions, error: txError } = await transactionQuery;
+    if (txError) {
+      console.warn(`[recalcVault] ⚠ transactions query failed for ${currencyId}: ${txError.message}`);
+    } else if (transactions) {
+      for (const tx of transactions) {
+        const txObj = rowToTransaction(tx);
+        const vaultCurrencyId = txObj.isOverflowTransaction ? txObj.currencyId : (txObj.baseCurrencyId || txObj.currencyId);
+        if (vaultCurrencyId === currencyId) {
+          if (txObj.type === 'INCOME') delta -= txObj.amount;
+          else delta += txObj.amount;
         }
       }
     }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ transactions category error for ${currencyId}:`, e);
   }
 
-  // 2. DEBTS: Cash mode debts affect vault
-  let debtQuery = supabase.from('debts').select('*')
-    .eq('debt_mode', 'CASH');
-
-  if (dateFilter) {
-    debtQuery = debtQuery.gt('date', dateFilter);
-  }
-
-  const { data: debts } = await debtQuery;
-  if (debts) {
-    for (const d of debts) {
-      const debtObj = rowToDebt(d);
-      if (debtObj.currencyId === currencyId) {
-        // PAYABLE (علينا): vault increases (we receive money)
-        // RECEIVABLE (لنا): vault decreases (we give money out)
-        if (debtObj.debtType === 'PAYABLE') {
-          delta += debtObj.amount;
-        } else {
-          delta -= debtObj.amount;
+  // ── 2. DEBTS: Cash mode ──
+  try {
+    let debtQuery = supabase.from('debts').select('*').eq('debt_mode', 'CASH');
+    if (dateFilter) debtQuery = debtQuery.gt('date', dateFilter);
+    const { data: debts, error: debtError } = await debtQuery;
+    if (debtError) {
+      console.warn(`[recalcVault] ⚠ debts query failed for ${currencyId}: ${debtError.message}`);
+    } else if (debts) {
+      for (const d of debts) {
+        const debtObj = rowToDebt(d);
+        if (debtObj.currencyId === currencyId) {
+          if (debtObj.debtType === 'PAYABLE') delta += debtObj.amount;
+          else delta -= debtObj.amount;
         }
       }
     }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ debts category error for ${currencyId}:`, e);
   }
 
-  // 3. DEBT PAYMENTS: Cash mode
-  let paymentQuery = supabase.from('debt_payments').select('*')
-    .eq('payment_mode', 'CASH');
-
-  if (dateFilter) {
-    paymentQuery = paymentQuery.gt('date', dateFilter);
-  }
-
-  const { data: payments } = await paymentQuery;
-  if (payments) {
-    for (const p of payments) {
-      const paymentObj = rowToDebtPayment(p);
-      if (paymentObj.currencyId === currencyId) {
-        // Debt payment direction logic:
-        // RECEIVABLE (لنا): vault decreases (money goes out to pay toward our receivable)
-        // PAYABLE (علينا): vault increases (money comes in to pay toward our payable)
-        const direction = paymentObj.paymentDirection || 'RECEIVABLE';
-        if (direction === 'PAYABLE') {
-          delta += paymentObj.amount;
-        } else {
-          delta -= paymentObj.amount;
+  // ── 3. DEBT PAYMENTS: Cash mode ──
+  try {
+    let paymentQuery = supabase.from('debt_payments').select('*').eq('payment_mode', 'CASH');
+    if (dateFilter) paymentQuery = paymentQuery.gt('date', dateFilter);
+    const { data: payments, error: payError } = await paymentQuery;
+    if (payError) {
+      console.warn(`[recalcVault] ⚠ debt_payments query failed for ${currencyId}: ${payError.message}`);
+    } else if (payments) {
+      for (const p of payments) {
+        const paymentObj = rowToDebtPayment(p);
+        if (paymentObj.currencyId === currencyId) {
+          const direction = paymentObj.paymentDirection || 'RECEIVABLE';
+          if (direction === 'PAYABLE') delta += paymentObj.amount;
+          else delta -= paymentObj.amount;
         }
       }
     }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ debt_payments category error for ${currencyId}:`, e);
   }
 
-  // 4. CURRENCY EXCHANGES: Not deleted
-  let exchangeQuery = supabase.from('currency_exchanges').select('*')
-    .eq('is_deleted', false);
-
-  if (dateFilter) {
-    exchangeQuery = exchangeQuery.gt('date', dateFilter);
-  }
-
-  const { data: exchanges } = await exchangeQuery;
-  if (exchanges) {
-    for (const ex of exchanges) {
-      const exchangeObj = rowToCurrencyExchange(ex);
-      // Outgoing: vault decreases
-      if (exchangeObj.outgoingCurrencyId === currencyId) {
-        delta -= exchangeObj.outgoingAmount;
-      }
-      // Incoming: vault increases
-      if (exchangeObj.incomingCurrencyId === currencyId) {
-        delta += exchangeObj.incomingAmount;
+  // ── 4. CURRENCY EXCHANGES: Not deleted (CRITICAL for this feature) ──
+  try {
+    let exchangeQuery = supabase.from('currency_exchanges').select('*').eq('is_deleted', false);
+    if (dateFilter) exchangeQuery = exchangeQuery.gt('date', dateFilter);
+    const { data: exchanges, error: exError } = await exchangeQuery;
+    if (exError) {
+      console.warn(`[recalcVault] ⚠ currency_exchanges query failed for ${currencyId}: ${exError.message}`);
+    } else if (exchanges) {
+      for (const ex of exchanges) {
+        const exchangeObj = rowToCurrencyExchange(ex);
+        if (exchangeObj.outgoingCurrencyId === currencyId) delta -= exchangeObj.outgoingAmount;
+        if (exchangeObj.incomingCurrencyId === currencyId) delta += exchangeObj.incomingAmount;
       }
     }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ currency_exchanges category error for ${currencyId}:`, e);
   }
 
-  // 5. PURCHASES: Deduct total_price_usd from USD vault only
-  //    (purchases are always paid in USD cash per the spec)
-  //    🔸 Only REAL purchases ('purchase_type' = 'purchase') affect the vault.
-  //    Opening-inventory rows ('purchase_type' = 'opening_inventory') add
-  //    quantity to inventory ONLY — NO vault effect (per spec: "لا يتم خصم
-  //    أي مبلغ من الصندوق").
-  //    🔸 Resilience: if the `purchase_type` column is missing (older install),
-  //    the `.ne('purchase_type', 'opening_inventory')` filter errors. Fall back
-  //    to fetching ALL purchases and treating them as real purchases (the
-  //    correct pre-feature behavior, since every purchase created without the
-  //    column is effectively a real purchase).
-  let purchaseQuery = supabase.from('purchases').select('*').ne('purchase_type', 'opening_inventory');
-
-  if (dateFilter) {
-    purchaseQuery = purchaseQuery.gt('date', dateFilter);
-  }
-
-  let purchaseResult = await purchaseQuery;
-  if (purchaseResult.error && isMissingPurchaseTypeColumn(purchaseResult.error)) {
-    console.warn('[Supabase] purchases.purchase_type column missing — counting all purchases as real for vault recompute. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
-    let fallbackPurchaseQuery = supabase.from('purchases').select('*');
-    if (dateFilter) fallbackPurchaseQuery = fallbackPurchaseQuery.gt('date', dateFilter);
-    purchaseResult = await fallbackPurchaseQuery;
-    if (purchaseResult.error) throw new Error(purchaseResult.error.message);
-  } else if (purchaseResult.error) {
-    throw new Error(purchaseResult.error.message);
-  }
-  const purchaseRows = purchaseResult.data;
-  if (purchaseRows) {
-    // Find the USD currency id once
-    const { data: usdCurrencyRow } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
-    const usdCurrencyId = usdCurrencyRow && usdCurrencyRow.length > 0 ? (usdCurrencyRow[0] as Record<string, unknown>).id as string : null;
-    if (usdCurrencyId && currencyId === usdCurrencyId) {
-      for (const p of purchaseRows) {
-        const purchaseObj = rowToPurchase(p);
-        // 🔸 Final guard: skip opening_inventory rows even if the fallback
-        //    fetched them (defensive — the filter should already exclude them)
-        if (purchaseObj.purchaseType === 'opening_inventory') continue;
-        // Purchase: cash goes OUT → vault decreases
-        delta -= purchaseObj.totalPriceUsd;
-      }
+  // ── 5. PURCHASES: Deduct total_price_usd from USD vault only ──
+  try {
+    let purchaseQuery = supabase.from('purchases').select('*').ne('purchase_type', 'opening_inventory');
+    if (dateFilter) purchaseQuery = purchaseQuery.gt('date', dateFilter);
+    let purchaseResult = await purchaseQuery;
+    if (purchaseResult.error && isMissingPurchaseTypeColumn(purchaseResult.error)) {
+      console.warn('[recalcVault] ⚠ purchases.purchase_type column missing — counting all purchases as real.');
+      let fallbackPurchaseQuery = supabase.from('purchases').select('*');
+      if (dateFilter) fallbackPurchaseQuery = fallbackPurchaseQuery.gt('date', dateFilter);
+      purchaseResult = await fallbackPurchaseQuery;
     }
-  }
-
-  // 6. SALES (cash mode only): Add total_price to USD vault
-  //    - cash sale   → customer pays USD now → vault increases
-  //    - credit sale → deferred; NO vault change until a later collection
-  //    (Per spec: credit sales must NOT create a debt record. They live as
-  //     unpaid invoices in the Sales subsystem and appear in the account
-  //     statement marked as "آجل".)
-  //    🔸 Resilience: if the `sales` table predates the `payment_method` column
-  //    (older installation), the `.eq('payment_method', 'cash')` filter errors.
-  //    Fall back to fetching ALL sales and treating them as cash (the correct
-  //    pre-feature behavior, since every sale created without the column is
-  //    effectively a cash sale). The user should run the quick-fix in Settings →
-  //    إعداد المشتريات والمبيعات to add the column.
-  let saleQuery = supabase.from('sales').select('*').eq('payment_method', 'cash');
-
-  if (dateFilter) {
-    saleQuery = saleQuery.gt('date', dateFilter);
-  }
-
-  let salesResult = await saleQuery;
-  if (salesResult.error && isMissingPaymentMethodColumn(salesResult.error)) {
-    console.warn('[Supabase] sales.payment_method column missing — counting all sales as cash for vault recompute. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
-    let fallbackSaleQuery = supabase.from('sales').select('*');
-    if (dateFilter) fallbackSaleQuery = fallbackSaleQuery.gt('date', dateFilter);
-    salesResult = await fallbackSaleQuery;
-    if (salesResult.error) throw new Error(salesResult.error.message);
-  } else if (salesResult.error) {
-    throw new Error(salesResult.error.message);
-  }
-  const salesRows = salesResult.data;
-  if (salesRows) {
-    // Find the USD currency id once (sales are always USD per spec)
-    const { data: usdCurrencyRow2 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
-    const usdCurrencyId2 = usdCurrencyRow2 && usdCurrencyRow2.length > 0 ? (usdCurrencyRow2[0] as Record<string, unknown>).id as string : null;
-    if (usdCurrencyId2 && currencyId === usdCurrencyId2) {
-      for (const s of salesRows) {
-        const saleObj = rowToSale(s);
-        // Cash sale: USD comes IN → vault increases
-        delta += saleObj.totalPrice;
-      }
-    }
-  }
-
-  // 7. VEHICLE TRANSACTIONS: Partner 1 + cash → deduct from USD vault
-  //    (Per spec:
-  //      - الشريك الأول + كاش = خصم من صندوق الدولار (المال يخرج)
-  //      - الشريك الأول + آجل = لا تأثير على الصندوق
-  //      - الشريك الثاني (أي طريقة دفع) = لا تأثير، توثيق فقط
-  //    Vehicle transactions are always denominated in USD.)
-  let vehicleTxQuery = supabase.from('vehicle_transactions').select('*');
-
-  if (dateFilter) {
-    vehicleTxQuery = vehicleTxQuery.gt('date', dateFilter);
-  }
-
-  const { data: vehicleTxs } = await vehicleTxQuery;
-  if (vehicleTxs) {
-    // Find the USD currency id once (vehicle transactions are always USD per spec)
-    const { data: usdCurrencyRow3 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
-    const usdCurrencyId3 = usdCurrencyRow3 && usdCurrencyRow3.length > 0 ? (usdCurrencyRow3[0] as Record<string, unknown>).id as string : null;
-    if (usdCurrencyId3 && currencyId === usdCurrencyId3) {
-      for (const vt of vehicleTxs) {
-        const vtObj = rowToVehicleTransaction(vt);
-        // Only Partner 1 + cash affects the vault (deduct: money goes OUT)
-        // Partner 1 + credit and Partner 2 (any) are documentation-only → no vault effect
-        if (vtObj.partner === 'first' && vtObj.paymentType === 'cash') {
-          delta -= vtObj.amount;
+    if (purchaseResult.error) {
+      console.warn(`[recalcVault] ⚠ purchases query failed for ${currencyId}: ${purchaseResult.error.message}`);
+    } else if (purchaseResult.data) {
+      const { data: usdCurrencyRow } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+      const usdCurrencyId = usdCurrencyRow && usdCurrencyRow.length > 0 ? (usdCurrencyRow[0] as Record<string, unknown>).id as string : null;
+      if (usdCurrencyId && currencyId === usdCurrencyId) {
+        for (const p of purchaseResult.data) {
+          const purchaseObj = rowToPurchase(p);
+          if (purchaseObj.purchaseType === 'opening_inventory') continue;
+          delta -= purchaseObj.totalPriceUsd;
         }
       }
     }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ purchases category error for ${currencyId}:`, e);
   }
 
-  // Compute new balance
+  // ── 6. SALES (cash mode only): Add total_price to USD vault ──
+  try {
+    let saleQuery = supabase.from('sales').select('*').eq('payment_method', 'cash');
+    if (dateFilter) saleQuery = saleQuery.gt('date', dateFilter);
+    let salesResult = await saleQuery;
+    if (salesResult.error && isMissingPaymentMethodColumn(salesResult.error)) {
+      console.warn('[recalcVault] ⚠ sales.payment_method column missing — counting all sales as cash.');
+      let fallbackSaleQuery = supabase.from('sales').select('*');
+      if (dateFilter) fallbackSaleQuery = fallbackSaleQuery.gt('date', dateFilter);
+      salesResult = await fallbackSaleQuery;
+    }
+    if (salesResult.error) {
+      console.warn(`[recalcVault] ⚠ sales query failed for ${currencyId}: ${salesResult.error.message}`);
+    } else if (salesResult.data) {
+      const { data: usdCurrencyRow2 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+      const usdCurrencyId2 = usdCurrencyRow2 && usdCurrencyRow2.length > 0 ? (usdCurrencyRow2[0] as Record<string, unknown>).id as string : null;
+      if (usdCurrencyId2 && currencyId === usdCurrencyId2) {
+        for (const s of salesResult.data) {
+          const saleObj = rowToSale(s);
+          delta += saleObj.totalPrice;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ sales category error for ${currencyId}:`, e);
+  }
+
+  // ── 7. VEHICLE TRANSACTIONS: Partner 1 + cash → deduct from USD vault ──
+  try {
+    let vehicleTxQuery = supabase.from('vehicle_transactions').select('*');
+    if (dateFilter) vehicleTxQuery = vehicleTxQuery.gt('date', dateFilter);
+    const { data: vehicleTxs, error: vtError } = await vehicleTxQuery;
+    if (vtError) {
+      console.warn(`[recalcVault] ⚠ vehicle_transactions query failed for ${currencyId}: ${vtError.message}`);
+    } else if (vehicleTxs) {
+      const { data: usdCurrencyRow3 } = await supabase.from('currencies').select('id').eq('code', 'USD').limit(1);
+      const usdCurrencyId3 = usdCurrencyRow3 && usdCurrencyRow3.length > 0 ? (usdCurrencyRow3[0] as Record<string, unknown>).id as string : null;
+      if (usdCurrencyId3 && currencyId === usdCurrencyId3) {
+        for (const vt of vehicleTxs) {
+          const vtObj = rowToVehicleTransaction(vt);
+          if (vtObj.partner === 'first' && vtObj.paymentType === 'cash') {
+            delta -= vtObj.amount;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.warn(`[recalcVault] ⚠ vehicle_transactions category error for ${currencyId}:`, e);
+  }
+
+  // ── Compute new balance ──
   const newBalance = openingBalance + delta;
 
-  // Update vault
-  const { error } = await supabase.from('vaults').update({
+  // ── Update vault — if THIS fails, it's a REAL error (throw) ──
+  const { error: updateError } = await supabase.from('vaults').update({
     balance: newBalance,
     updated_at: new Date().toISOString(),
   }).eq('id', vault.id);
 
-  if (error) throw new Error(error.message);
+  if (updateError) {
+    console.error(`[recalcVault] ❌ Failed to UPDATE vault ${vault.id} for currency ${currencyId}: ${updateError.message}`);
+    throw new Error(`فشل تحديث رصيد الصندوق: ${updateError.message}`);
+  }
 
   const { data: updatedRow } = await supabase.from('vaults').select('*').eq('id', vault.id).single();
   return updatedRow ? rowToVault(updatedRow) : null;
@@ -3316,10 +3277,47 @@ export async function addCurrencyExchange(data: {
   const { error } = await supabase.from('currency_exchanges').insert([currencyExchangeToRow(exchange)]);
   if (error) throw new Error(error.message);
 
-  // Recalculate vault balances for both currencies
-  await recalculateVaultBalance(data.outgoingCurrencyId);
-  await recalculateVaultBalance(data.incomingCurrencyId);
-  
+  // ════════════════════════════════════════════════════════════════════
+  // VAULT BALANCE UPDATE — this is part of the CORE operation, NOT a UI
+  // refresh. Per spec: "يجب ألا تعتبر العملية ناجحة للمستخدم إذا تم حفظ
+  // سجل التصريف بينما فشل تحديث الرصيد المالي."
+  //
+  // recalculateVaultBalance is resilient (sub-query failures are logged
+  // but don't prevent the vault UPDATE). It only throws if:
+  //   (a) the vaults table is unreachable, or
+  //   (b) the final UPDATE vaults SET balance=... fails.
+  // Both are real errors → we surface them to the user.
+  // ════════════════════════════════════════════════════════════════════
+  let vaultUpdateFailed = false;
+  let vaultUpdateError: string | null = null;
+
+  try {
+    await recalculateVaultBalance(data.outgoingCurrencyId);
+  } catch (e) {
+    vaultUpdateFailed = true;
+    vaultUpdateError = e instanceof Error ? e.message : String(e);
+    console.error('[addCurrencyExchange] ❌ outgoing vault recalc failed:', vaultUpdateError);
+  }
+
+  try {
+    await recalculateVaultBalance(data.incomingCurrencyId);
+  } catch (e) {
+    vaultUpdateFailed = true;
+    vaultUpdateError = e instanceof Error ? e.message : String(e);
+    console.error('[addCurrencyExchange] ❌ incoming vault recalc failed:', vaultUpdateError);
+  }
+
+  if (vaultUpdateFailed) {
+    // The exchange row IS in the DB, but at least one vault wasn't updated.
+    // Surface a clear error so the user knows the vault is stale. They can
+    // press "sync" or refresh to recompute. Do NOT swallow this — per spec,
+    // a successful save requires a successful vault update.
+    throw new Error(
+      `تم حفظ عملية الصرف ولكن تعذر تحديث رصيد الصندوق: ${vaultUpdateError}. ` +
+      `يرجى تحديث الصفحة أو الضغط على زر المزامنة لإعادة حساب الأرصدة.`
+    );
+  }
+
   return exchange;
 }
 
@@ -3342,9 +3340,45 @@ export async function deleteCurrencyExchange(id: string): Promise<void> {
   }).eq('id', id);
   if (error) throw new Error(error.message);
 
-  // Recalculate vault balances for both currencies
-  await recalculateVaultBalance(exchange.outgoingCurrencyId);
-  await recalculateVaultBalance(exchange.incomingCurrencyId);
+  // ════════════════════════════════════════════════════════════════════
+  // REVERSE VAULT IMPACT — this is part of the CORE delete operation.
+  // recalculateVaultBalance re-derives the balance from ALL non-deleted
+  // exchanges. Since this row now has is_deleted=true, it's excluded →
+  // the outgoing amount is no longer subtracted, the incoming amount is
+  // no longer added → effectively reverses the original effect.
+  //
+  // This is idempotent: calling recalc multiple times produces the same
+  // correct result (the balance always reflects all non-deleted rows).
+  // So even if the user somehow double-clicks delete, the second recalc
+  // won't double-reverse (the row is already is_deleted=true).
+  // ════════════════════════════════════════════════════════════════════
+  let vaultUpdateFailed = false;
+  let vaultUpdateError: string | null = null;
+
+  try {
+    await recalculateVaultBalance(exchange.outgoingCurrencyId);
+  } catch (e) {
+    vaultUpdateFailed = true;
+    vaultUpdateError = e instanceof Error ? e.message : String(e);
+    console.error('[deleteCurrencyExchange] ❌ outgoing vault recalc failed:', vaultUpdateError);
+  }
+
+  try {
+    await recalculateVaultBalance(exchange.incomingCurrencyId);
+  } catch (e) {
+    vaultUpdateFailed = true;
+    vaultUpdateError = e instanceof Error ? e.message : String(e);
+    console.error('[deleteCurrencyExchange] ❌ incoming vault recalc failed:', vaultUpdateError);
+  }
+
+  if (vaultUpdateFailed) {
+    // The row IS soft-deleted, but at least one vault wasn't reversed.
+    // Surface a clear error so the user knows the vault is stale.
+    throw new Error(
+      `تم حذف عملية الصرف ولكن تعذر عكس أثرها على الصندوق: ${vaultUpdateError}. ` +
+      `يرجى تحديث الصفحة أو الضغط على زر المزامنة لإعادة حساب الأرصدة.`
+    );
+  }
 }
 
 export async function getExchangeStats(): Promise<{

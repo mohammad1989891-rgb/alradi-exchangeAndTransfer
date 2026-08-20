@@ -40,6 +40,7 @@ interface CurrencyExchangeCardProps {
 export function CurrencyExchangeCard({ exchange, currencies, onDelete }: CurrencyExchangeCardProps) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Find currencies
   const outgoingCurrency = currencies.find(c => c.id === exchange.outgoingCurrencyId);
@@ -270,15 +271,29 @@ export function CurrencyExchangeCard({ exchange, currencies, onDelete }: Currenc
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>إلغاء</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>إلغاء</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-500 hover:bg-red-600"
-              onClick={() => {
-                onDelete(exchange.id);
-                setShowDeleteDialog(false);
+              disabled={isDeleting}
+              onClick={async (e) => {
+                // Prevent Radix from auto-closing the dialog — we control
+                // closing manually AFTER the async delete completes, so the
+                // user sees the loading state and can't double-click.
+                e.preventDefault();
+                if (isDeleting) return; // double-click guard
+                setIsDeleting(true);
+                try {
+                  await onDelete(exchange.id);
+                  setShowDeleteDialog(false);
+                } catch {
+                  // Error toast already shown by the parent handler.
+                  // Keep the dialog open so the user can retry or cancel.
+                } finally {
+                  setIsDeleting(false);
+                }
               }}
             >
-              حذف
+              {isDeleting ? 'جاري الحذف...' : 'حذف'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -174,16 +174,44 @@ export function CurrencyExchangePage() {
   // Handle delete exchange
   const handleDeleteExchange = async (id: string) => {
     try {
+      // ════════════════════════════════════════════════════════════════════
+      // CORE OPERATION: soft-delete + reverse vault impact.
+      // If this succeeds, the exchange is deleted AND both vault balances
+      // are reversed. If this throws, the delete failed (row not found,
+      // already deleted, or vault recalc failed after soft-delete).
+      // ════════════════════════════════════════════════════════════════════
       await deleteCurrencyExchange(id);
-      await loadExchanges();
-      await refreshData();
 
-      toast({
-        title: 'تم الحذف',
-        description: 'تم حذف عملية الصرف وإعادة الأرصدة',
-        className: 'bg-emerald-500 text-white',
-      });
+      // ════════════════════════════════════════════════════════════════════
+      // UI REFRESH — failures here must NOT show an error toast.
+      // Per spec: "إذا نجح deleteExchangeTransaction() ثم فشل refreshData()
+      // فالنتيجة: ✔ العملية محذوفة. ✔ تم عكس أثرها المالي.
+      // ⚠ يتم تسجيل مشكلة Refresh فقط."
+      // ════════════════════════════════════════════════════════════════════
+      let refreshFailed = false;
+      try {
+        await loadExchanges();
+        await refreshData();
+      } catch (refreshError) {
+        refreshFailed = true;
+        console.error('[CurrencyExchangePage] ⚠ refresh failed after successful delete (operation is still deleted):', refreshError);
+      }
+
+      if (refreshFailed) {
+        toast({
+          title: 'تم الحذف',
+          description: 'تم حذف عملية الصرف وعكس الأرصدة، ولكن تعذر تحديث القائمة المعروضة. يرجى تحديث الصفحة.',
+          className: 'bg-amber-500 text-white',
+        });
+      } else {
+        toast({
+          title: 'تم الحذف',
+          description: 'تم حذف عملية الصرف وإعادة الأرصدة',
+          className: 'bg-emerald-500 text-white',
+        });
+      }
     } catch (error) {
+      // Core operation failed — show error.
       toast({
         title: 'خطأ',
         description: error instanceof Error ? error.message : 'حدث خطأ أثناء الحذف',

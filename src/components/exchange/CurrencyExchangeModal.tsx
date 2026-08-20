@@ -208,6 +208,13 @@ export function CurrencyExchangeModal() {
       // Convert to stored values before saving
       const incomingAmtStored = getStoredAmount(incomingAmt, isIncomingSYP, incomingSYPVersion);
 
+      // ════════════════════════════════════════════════════════════════════
+      // CORE OPERATION: DB insert + vault balance update.
+      // If this succeeds, the operation is TRULY done — the exchange row
+      // is in the DB AND both vault balances are updated.
+      // If this throws, the operation failed (insert failed, or vault
+      // update failed after insert — see addCurrencyExchange for details).
+      // ════════════════════════════════════════════════════════════════════
       await addCurrencyExchange({
         outgoingCurrencyId,
         incomingCurrencyId,
@@ -217,19 +224,40 @@ export function CurrencyExchangeModal() {
         date,
       });
 
-      await refreshData();
+      // ════════════════════════════════════════════════════════════════════
+      // UI REFRESH — failures here must NOT show an error toast.
+      // Per spec: "إذا نجح createExchangeTransaction() ثم فشل refreshData()
+      // فالنتيجة يجب أن تكون: ✔ العملية محفوظة. ✔ الأثر المالي محفوظ.
+      // ⚠ يمكن تسجيل خطأ Refresh في Console للمطور."
+      // ════════════════════════════════════════════════════════════════════
+      let refreshFailed = false;
+      try {
+        await refreshData();
+        window.dispatchEvent(new CustomEvent('exchange-refresh'));
+      } catch (refreshError) {
+        refreshFailed = true;
+        console.error('[CurrencyExchangeModal] ⚠ refresh failed after successful save (operation is still saved):', refreshError);
+      }
 
-      // Dispatch event to refresh the page
-      window.dispatchEvent(new CustomEvent('exchange-refresh'));
+      if (refreshFailed) {
+        toast({
+          title: 'تم الحفظ',
+          description: 'تم حفظ العملية بنجاح، ولكن تعذر تحديث البيانات المعروضة. يرجى تحديث الصفحة.',
+          className: 'bg-amber-500 text-white',
+        });
+      } else {
+        toast({
+          title: 'تم بنجاح',
+          description: 'تم إضافة عملية الصرف بنجاح',
+          className: 'bg-emerald-500 text-white',
+        });
+      }
 
-      toast({
-        title: 'تم بنجاح',
-        description: 'تم إضافة عملية الصرف بنجاح',
-        className: 'bg-emerald-500 text-white',
-      });
-
+      // Close the modal regardless — the operation succeeded.
       closeExchangeModal();
     } catch (error) {
+      // Core operation failed — show error. Modal stays open so the user
+      // can retry or see what went wrong.
       toast({
         title: 'خطأ',
         description: error instanceof Error ? error.message : 'حدث خطأ أثناء إضافة العملية',

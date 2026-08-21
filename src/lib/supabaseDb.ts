@@ -1141,7 +1141,7 @@ export async function getVaults(): Promise<Vault[]> {
  * When this returns true, callers should retry the operation WITHOUT the
  * `payment_method` field (the sale still gets created; the in-memory
  * paymentMethod still drives the cash-box logic). The user should run the
- * quick-fix in Settings → إعداد المشتريات والمبيعات to add the column.
+ * full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات to add the column.
  */
 function isMissingPaymentMethodColumn(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : (typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : String(error));
@@ -1165,7 +1165,7 @@ function isMissingPaymentMethodColumn(error: unknown): boolean {
  *
  * When this returns true, callers should retry the operation WITHOUT the
  * `purchase_type` field (the purchase still gets created; defaults to 'purchase'
- * at the DB level). The user should run the quick-fix in Settings →
+ * at the DB level). The user should run the full DB setup in Settings →
  * إعداد المشتريات والمبيعات to add the column.
  */
 function isMissingPurchaseTypeColumn(error: unknown): boolean {
@@ -5175,11 +5175,11 @@ export async function addPurchase(data: {
   if (insertError && isMissingPurchaseTypeColumn(insertError)) {
     if (purchaseType === 'opening_inventory') {
       throw new Error(
-        'عمود purchase_type غير موجود في قاعدة البيانات. يرجى تشغيل الإصلاح السريع من: الإعدادات → إعداد المشتريات والمبيعات → إصلاح سريع (إضافة عمود نوع العملية).'
+        'عمود purchase_type غير موجود في قاعدة البيانات. يرجى إعادة تشغيل سكربت إعداد المشتريات والمبيعات من: الإعدادات → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.'
       );
     }
     // For 'purchase' type: safe to retry without the column (DB defaults to 'purchase')
-    console.warn('[Supabase] purchases.purchase_type column missing — retrying insert without it (type=purchase, safe default). Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    console.warn('[Supabase] purchases.purchase_type column missing — retrying insert without it (type=purchase, safe default). Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
     const rowWithoutType = { ...purchaseToRow(purchase) };
     delete rowWithoutType.purchase_type;
     const { error: retryError } = await supabase.from('purchases').insert([rowWithoutType]);
@@ -5190,7 +5190,7 @@ export async function addPurchase(data: {
   // a cash purchase — which is the correct pre-feature behavior (every purchase
   // created before this feature was effectively a cash purchase).
   if (insertError && isMissingPurchaseMethodColumn(insertError)) {
-    console.warn('[Supabase] purchases.payment_method column missing — retrying insert without it (defaults to cash). Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    console.warn('[Supabase] purchases.payment_method column missing — retrying insert without it (defaults to cash). Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
     const rowWithoutPm = { ...purchaseToRow(purchase) };
     delete rowWithoutPm.payment_method;
     const { error: retryError } = await supabase.from('purchases').insert([rowWithoutPm]);
@@ -5282,7 +5282,7 @@ export async function updatePurchase(id: string, data: {
   // retry without it. The DB default is 'cash', so the row will be treated as
   // a cash purchase — correct pre-feature behavior.
   if (updateError && isMissingPurchaseMethodColumn(updateError)) {
-    console.warn('[Supabase] purchases.payment_method column missing — retrying update without payment_method. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    console.warn('[Supabase] purchases.payment_method column missing — retrying update without payment_method. Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
     const { payment_method: _dropped, ...updateObjWithoutPm } = updateObj;
     const { error: retryError } = await supabase.from('purchases').update(updateObjWithoutPm).eq('id', id);
     updateError = retryError;
@@ -5291,7 +5291,7 @@ export async function updatePurchase(id: string, data: {
   // above doesn't reference it, but PostgREST schema cache may still reject
   // the whole table operation. (Rare in practice.)
   if (updateError && isMissingPurchaseTypeColumn(updateError)) {
-    console.warn('[Supabase] purchases.purchase_type column missing — update may have failed. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    console.warn('[Supabase] purchases.purchase_type column missing — update may have failed. Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
   }
   if (updateError) throw new Error(updateError.message);
 
@@ -5471,10 +5471,10 @@ export async function addSale(data: {
     // `payment_method` column existed. PostgREST rejects any request that
     // references the missing column. Retry the insert WITHOUT it so the sale
     // still gets created — the in-memory `paymentMethod` still drives the
-    // cash-box logic below. The user should run the quick-fix in Settings →
+    // cash-box logic below. The user should run the full DB setup in Settings →
     // إعداد المشتريات والمبيعات to add the column for full persistence.
     if (isMissingPaymentMethodColumn(error)) {
-      console.warn('[Supabase] sales.payment_method column missing — retrying insert without it. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+      console.warn('[Supabase] sales.payment_method column missing — retrying insert without it. Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
       const { payment_method: _dropped, ...fallbackRow } = saleRow;
       void _dropped;
       const { error: retryError } = await supabase.from('sales').insert([fallbackRow]);
@@ -5608,10 +5608,10 @@ export async function updateSale(id: string, data: {
     // 🔸 Resilience: older installations created the `sales` table before the
     // `payment_method` column existed. Retry the update WITHOUT it so the sale
     // still gets updated — the in-memory `effectivePaymentMethod` still drives
-    // the cash-box logic below. The user should run the quick-fix in Settings →
+    // the cash-box logic below. The user should run the full DB setup in Settings →
     // إعداد المشتريات والمبيعات to add the column for full persistence.
     if (isMissingPaymentMethodColumn(error)) {
-      console.warn('[Supabase] sales.payment_method column missing — retrying update without it. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+      console.warn('[Supabase] sales.payment_method column missing — retrying update without it. Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
       const { payment_method: _dropped, ...fallbackObj } = updateObj;
       void _dropped;
       const { error: retryError } = await supabase.from('sales').update(fallbackObj).eq('id', id);
@@ -5646,7 +5646,7 @@ export async function deleteSale(id: string): Promise<void> {
   let wasCash = true;
   const { data: row, error: selError } = await supabase.from('sales').select('payment_method, total_price').eq('id', id).maybeSingle();
   if (selError && isMissingPaymentMethodColumn(selError)) {
-    console.warn('[Supabase] sales.payment_method column missing — assuming cash sale for vault recompute. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    console.warn('[Supabase] sales.payment_method column missing — assuming cash sale for vault recompute. Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات.');
     // wasCash stays true (safe default: trigger vault recompute)
   } else if (selError) {
     throw new Error(selError.message);

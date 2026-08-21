@@ -1922,3 +1922,105 @@ Stage Summary:
   • supabase/migration-purchases-sales.sql — payment_method column في CREATE TABLE + ALTER TABLE + INDEX
   • src/components/exchange/SettingsPage.tsx — payment_method في setup SQL + PURCHASE_PAYMENT_METHOD_FIX_SQL + Quick Fix UI
 - لا تغييرات في: تصميم قسم المشتريات، تصميم نافذة الإنشاء، منطق المخزون، منطق الفواتير الآجلة، إنشاء صندوق جديد، منطق محاسبي خارج نطاق المشتريات.
+
+---
+Task ID: 27
+Agent: main
+Task: تنظيف قسم الإعدادات من أوامر الإصلاح القديمة (Quick Fix) بعد حل جميع مشاكل الأعمدة. إزالة جميع أدوات/أزرار/رسائل/خيارات الإصلاح من الواجهة والكود، مع الحفاظ على البيانات والفواتير والعمود والوظائف الأساسية. UI Freeze كامل.
+
+Work Log:
+- قرأت worklog (Task #23-#26) لفهم السياق.
+- تحققت من وجود جميع الأعمدة الثلاثة في قاعدة البيانات الإنتاجية (REST API):
+  • purchases.payment_method → HTTP 200، قيم 'cash' ✓
+  • purchases.purchase_type → HTTP 200، قيم 'purchase' ✓
+  • sales.payment_method → HTTP 200، قيم 'cash' ✓
+- جميع المشاكل تم حلها → أدوات الإصلاح لم تعد ضرورية.
+
+- استكشفت SettingsPage.tsx ووجدت 3 أدوات إصلاح (Quick Fix):
+  1. PURCHASE_PAYMENT_METHOD_FIX_SQL + handleQuickFixPurchasePaymentMethod + UI block (لميزة كاش/آجل للمشتريات)
+  2. PURCHASE_TYPE_FIX_SQL + handleQuickFixPurchaseType + UI block (لميزة الرصيد الافتتاحي)
+  3. PAYMENT_METHOD_FIX_SQL + handleQuickFixPaymentMethod + UI block (لميزة كاش/آجل للمبيعات)
+- وجدت مساري API مؤقتين غير مستخدمين:
+  • src/app/api/migrate-purchase-type/route.ts (لم يُستدعَ من أي مكان)
+  • src/app/api/migrate-is-archived/route.ts (لم يُستدعَ من أي مكان)
+- وجدت أن /api/execute-sql مستخدم في 8 أماكن أخرى (إعداد قاعدة البيانات، النسخ الاحتياطي) → يجب الإبقاء عليه.
+
+- الإزالة (التنظيف الكامل):
+
+  1. **إزالة الثوابت الثلاثة (FIX_SQL):**
+     • PURCHASE_TYPE_FIX_SQL (السطور 255-264)
+     • PURCHASE_PAYMENT_METHOD_FIX_SQL (السطور 266-279)
+     • PAYMENT_METHOD_FIX_SQL (السطور 281-293)
+     جميعها محذوفة من module scope.
+
+  2. **إزالة state variables (9 متغيرات):**
+     • isFixingPaymentMethod + paymentMethodFixResult + paymentMethodSqlCopied
+     • isFixingPurchaseType + purchaseTypeFixResult + purchaseTypeSqlCopied
+     • isFixingPurchasePaymentMethod + purchasePaymentMethodFixResult + purchasePaymentMethodSqlCopied
+
+  3. **إزالة المعالجات الثلاثة (handlers):**
+     • handleQuickFixPaymentMethod (المبيعات)
+     • handleQuickFixPurchaseType (الرصيد الافتتاحي)
+     • handleQuickFixPurchasePaymentMethod (المشتريات)
+     ~130 سطر محذوف.
+
+  4. **إزالة كتلة الواجهة الكاملة (sub-section 'quick-fix-payment-method'):**
+     • عنوان القسم الفرعي: "إصلاح سريع: عمود طريقة السداد"
+     • وصف القسم الفرعي
+     • 3 بطاقات تحذير كهرمانية
+     • 3 أزرار إصلاح
+     • 3 أقسام نتائج (success/error)
+     • 3 أزرار نسخ SQL
+     • ~250 سطر JSX محذوف.
+     النتيجة: قسم "إعداد المشتريات والمبيعات" نظيف — يحتوي فقط على إعداد قاعدة البيانات الأساسي.
+
+  5. **إزالة مسارات API المؤقتة:**
+     • rm -rf src/app/api/migrate-purchase-type
+     • rm -rf src/app/api/migrate-is-archived
+     • تم التحقق أن /api/execute-sql محفوظ (يستخدمه إعداد قاعدة البيانات).
+
+  6. **تحديث رسائل الأخطاء والـ console.warn في supabaseDb.ts:**
+     • رسالة خطأ addPurchase (missing purchase_type): "يرجى تشغيل الإصلاح السريع" → "يرجى إعادة تشغيل سكربت إعداد المشتريات والمبيعات من: الإعدادات → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات."
+     • 7 رسائل console.warn: "Run the quick-fix in Settings" → "Run the full DB setup in Settings → إعداد المشتريات والمبيعات → إعداد قاعدة البيانات"
+     • 3 تعليقات JSDoc: "quick-fix" → "full DB setup"
+     النتيجة: لا يوجد أي إشارة إلى "quick-fix" أو "إصلاح سريع" في الكود.
+
+- التحقق النهائي:
+  • grep -rn "handleQuickFix\|isFixing\|FIX_SQL\|quick-fix\|إصلاح سريع\|إصلاح عمود" src/ → لا نتائج ✓
+  • ls src/app/api/ | grep migrat → لا نتائج ✓
+  • /api/execute-sql محفوظ ✓
+  • bun run lint → 0 أخطاء، 0 تحذيرات ✓
+
+Verification (end-to-end via Agent Browser، مسجل دخول كـ admin):
+  • Dev server HTTP 200 ✓
+  • الانتقال إلى الإعدادات ✓
+  • فحص نص الصفحة: `document.body.innerText.includes('إصلاح')` → false ✓ (لا يوجد أي نص "إصلاح")
+  • فحص نص الصفحة: `document.body.innerText.includes('quick-fix')` → false ✓
+  • فحص الأزرار: لا توجد أزرار تحتوي على "إصلاح" أو "fix" أو "Quick" ✓
+  • الانتقال إلى المشتريات → فتح نافذة الإضافة ✓
+  • محدد طريقة السداد (كاش/آجل) لا يزال يعمل ✓
+  • لا أخطاء في browser errors ✓
+  • لا أخطاء compile في الكود ✓
+
+Stage Summary:
+- تم تنظيف قسم "إعداد المشتريات والمبيعات" بالكامل من جميع أدوات الإصلاح القديمة:
+  • 3 ثوابت FIX_SQL محذوفة
+  • 3 معالجات (handlers) محذوفة
+  • 9 state variables محذوفة
+  • كتلة UI كاملة (~250 سطر) محذوفة — القسم الفرعي "quick-fix-payment-method"
+  • مسارا API مؤقتان محذوفان (migrate-purchase-type، migrate-is-archived)
+  • رسائل الأخطاء والـ console.warn محدّثة لتشير إلى إعداد قاعدة البيانات بدلاً من الإصلاح السريع
+- المحفوظ:
+  • /api/execute-sql (يستخدمه إعداد قاعدة البيانات والنسخ الاحتياطي)
+  • جميع البيانات والفواتير القديمة
+  • بنية قاعدة البيانات (الأعمدة purchase_type، payment_method محفوظة)
+  • منطق المرونة في supabaseDb.ts (defensive coding، لا يؤذي، يحمي من الحوادث)
+  • محدد طريقة السداد (كاش/آجل) في PurchaseDialog
+  • جميع الوظائف الأساسية (إنشاء/تعديل/حذف المشتريات والمبيعات)
+- UI Freeze محفوظ 100%: لم تتغير ألوان، أحجام، خطوط، تخطيط، أو ترتيب الأقسام. فقط إزالة أدوات الإصلاح المؤقتة.
+- الملفات المعدّلة:
+  • src/components/exchange/SettingsPage.tsx — إزالة 3 ثوابت + 3 معالجات + 9 state + كتلة UI كاملة
+  • src/lib/supabaseDb.ts — تحديث رسالة خطأ + 7 رسائل console.warn + 3 تعليقات JSDoc
+  • src/app/api/migrate-purchase-type/route.ts — محذوف
+  • src/app/api/migrate-is-archived/route.ts — محذوف
+- النتيجة: صفحة الإعدادات نظيفة ومنظمة، تحتوي فقط على الإعدادات والخيارات الفعلية التي يحتاجها المستخدم حالياً.

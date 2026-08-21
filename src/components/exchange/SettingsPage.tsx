@@ -124,8 +124,10 @@ CREATE TABLE IF NOT EXISTS material_units (
 );
 
 -- Purchases Table (المشتريات)
--- purchase_type: 'purchase' (default) → فاتورة شراء فعلية، تخصم الصندوق
+-- purchase_type: 'purchase' (default) → فاتورة شراء فعلية، تخصم الصندوق (إذا كانت نقدي)
 --                'opening_inventory' → رصيد افتتاحي للمخزون، يضيف كمية فقط بدون خصم
+-- payment_method: 'cash' (default) → شراء نقدي، يخصم إجمالي الفاتورة من صندوق الدولار فوراً
+--                 'credit'          → شراء آجل، لا يؤثر على الصندوق
 CREATE TABLE IF NOT EXISTS purchases (
   id TEXT PRIMARY KEY,
   date TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -139,6 +141,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   unit_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   total_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   purchase_type TEXT NOT NULL DEFAULT 'purchase',
+  payment_method TEXT NOT NULL DEFAULT 'cash',
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -236,10 +239,18 @@ ON CONFLICT (id) DO NOTHING;
 ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
 
 -- Add purchase_type column for existing installations
--- 'purchase' (default) = فاتورة شراء فعلية (deducts from USD vault)
+-- 'purchase' (default) = فاتورة شراء فعلية (deducts from USD vault if cash)
 -- 'opening_inventory'  = رصيد افتتاحي للمخزون (no vault effect, inventory-only)
 -- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
-ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';`;
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';
+
+-- Add payment_method column to purchases for existing installations
+-- 'cash' (default) = شراء نقدي (deducts totalPriceUsd from USD vault immediately)
+-- 'credit'          = شراء آجل (no vault effect — deferred invoice)
+-- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
+-- Mirrors the same column on the sales table.
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+CREATE INDEX IF NOT EXISTS idx_purchases_payment_method ON purchases(payment_method);`;
 
 // ============================================
 // 🔸 PURCHASE_TYPE_FIX_SQL (module scope)
@@ -251,6 +262,21 @@ const PURCHASE_TYPE_FIX_SQL = `-- Quick fix: add purchase_type column to purchas
 -- (for older installations that created the purchases table before the opening inventory feature)
 -- Safe to re-run: IF NOT EXISTS won't error if the column already exists.
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';`;
+
+// ============================================
+// 🔸 PURCHASE_PAYMENT_METHOD_FIX_SQL (module scope)
+// Minimal, targeted migration that ONLY adds the `payment_method` column to the
+// `purchases` table. Used when a cash/credit purchase fails with:
+// "Could not find the 'payment_method' column of 'purchases' in the schema cache".
+// Mirrors the PAYMENT_METHOD_FIX_SQL for the sales table.
+// ============================================
+const PURCHASE_PAYMENT_METHOD_FIX_SQL = `-- Quick fix: add payment_method column to purchases table
+-- (for older installations that created the purchases table before the cash/credit purchase feature)
+-- 'cash' (default) = شراء نقدي (deducts totalPriceUsd from USD vault immediately)
+-- 'credit'          = شراء آجل (no vault effect — deferred invoice)
+-- Safe to re-run: IF NOT EXISTS won't error if the column already exists.
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+CREATE INDEX IF NOT EXISTS idx_purchases_payment_method ON purchases(payment_method);`;
 
 // ============================================
 // 🔸 PAYMENT_METHOD_FIX_SQL (module scope)
@@ -2566,6 +2592,10 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
   const [isFixingPurchaseType, setIsFixingPurchaseType] = useState(false);
   const [purchaseTypeFixResult, setPurchaseTypeFixResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
   const [purchaseTypeSqlCopied, setPurchaseTypeSqlCopied] = useState(false);
+  // 🔸 Quick-fix state for the targeted purchases.payment_method column migration (cash/credit purchase feature)
+  const [isFixingPurchasePaymentMethod, setIsFixingPurchasePaymentMethod] = useState(false);
+  const [purchasePaymentMethodFixResult, setPurchasePaymentMethodFixResult] = useState<{ success: boolean; message: string; sql?: string } | null>(null);
+  const [purchasePaymentMethodSqlCopied, setPurchasePaymentMethodSqlCopied] = useState(false);
 
   // القسم الفرعي المفتوح حالياً (افتراضياً: إعداد قاعدة البيانات)
   const [openSub, setOpenSub] = useState<string | null>('db-setup');
@@ -2741,6 +2771,49 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
       });
     } finally {
       setIsFixingPurchaseType(false);
+    }
+  };
+
+  // 🔸 إصلاح سريع: إضافة عمود payment_method إلى جدول المشتريات (لميزة كاش/آجل)
+  // يعالج خطأ: "Could not find the 'payment_method' column of 'purchases' in the schema cache"
+  const handleQuickFixPurchasePaymentMethod = async () => {
+    setIsFixingPurchasePaymentMethod(true);
+    setPurchasePaymentMethodFixResult(null);
+    setPurchasePaymentMethodSqlCopied(false);
+    try {
+      if (dbPassword) {
+        // Auto-fix via execute-sql API
+        const resp = await fetch('/api/execute-sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sql: PURCHASE_PAYMENT_METHOD_FIX_SQL,
+            dbPassword,
+            userRole: 'admin',
+          }),
+        });
+        const json = await resp.json();
+        if (resp.ok && json?.success) {
+          setPurchasePaymentMethodFixResult({ success: true, message: 'تمت إضافة عمود طريقة السداد (payment_method) للمشتريات بنجاح ✓ — يمكن الآن حفظ المشتريات بكاش أو آجل.' });
+          toast({ title: 'تم الإصلاح', description: 'تمت إضافة عمود طريقة سداد المشتريات بنجاح.' });
+        } else {
+          setPurchasePaymentMethodFixResult({ success: false, message: json?.error || 'فشل الإصلاح التلقائي.' });
+        }
+      } else {
+        // No password → provide SQL to copy
+        setPurchasePaymentMethodFixResult({
+          success: true,
+          message: 'تم تجهيز SQL. انسخه والصقه في Supabase SQL Editor ثم اضغط Run.',
+          sql: PURCHASE_PAYMENT_METHOD_FIX_SQL,
+        });
+      }
+    } catch (error) {
+      setPurchasePaymentMethodFixResult({
+        success: false,
+        message: error instanceof Error ? error.message : 'حدث خطأ غير متوقع.',
+      });
+    } finally {
+      setIsFixingPurchasePaymentMethod(false);
     }
   };
 
@@ -3016,6 +3089,77 @@ function PurchasesSalesSettings({ isAdmin }: PurchasesSalesSettingsProps) {
                   )}
                 </div>
               )}
+
+              {/* 🔸 Quick Fix: purchases.payment_method column (cash/credit purchase feature) */}
+              <div className="mt-4 pt-4 border-t border-border/50">
+                <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 mb-3">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-amber-800 dark:text-amber-400">ظهور خطأ عند حفظ شراء كاش/آجل؟</p>
+                      <p className="text-xs text-amber-700 dark:text-amber-400/80 leading-relaxed">
+                        إذا ظهر خطأ «Could not find the &apos;payment_method&apos; column of &apos;purchases&apos;»، فهذا يعني أن جدول المشتريات أُنشئ قبل إضافة ميزة كاش/آجل للمشتريات. هذا الإصلاح السريع يضيف العمود المفقود فقط.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <Button
+                  onClick={handleQuickFixPurchasePaymentMethod}
+                  disabled={isFixingPurchasePaymentMethod}
+                  variant="outline"
+                  className="w-full gap-2 border-amber-400 text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/20"
+                >
+                  {isFixingPurchasePaymentMethod ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertTriangle className="w-4 h-4" />}
+                  {isFixingPurchasePaymentMethod ? 'جاري الإصلاح...' : 'إصلاح عمود طريقة سداد المشتريات (payment_method)'}
+                </Button>
+
+                {purchasePaymentMethodFixResult && (
+                  <div className="mt-3 space-y-2">
+                    <p className={cn('text-xs', purchasePaymentMethodFixResult.success ? 'text-emerald-600' : 'text-red-600')}>
+                      {purchasePaymentMethodFixResult.message}
+                    </p>
+
+                    {purchasePaymentMethodFixResult.sql && (
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        <div className="flex items-center justify-between bg-muted/80 px-3 py-2 border-b border-border">
+                          <span className="text-[11px] font-medium text-muted-foreground">SQL جاهز للنسخ — الصقه في Supabase SQL Editor</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 gap-1 text-xs"
+                            onClick={() => {
+                              navigator.clipboard.writeText(purchasePaymentMethodFixResult.sql!).then(() => {
+                                setPurchasePaymentMethodSqlCopied(true);
+                                toast({ title: 'تم النسخ', description: 'تم نسخ SQL إلى الحافظة' });
+                                setTimeout(() => setPurchasePaymentMethodSqlCopied(false), 2000);
+                              }).catch(() => {
+                                toast({ title: 'فشل النسخ', description: 'تعذر النسخ إلى الحافظة.', variant: 'destructive' });
+                              });
+                            }}
+                          >
+                            {purchasePaymentMethodSqlCopied ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-500" />
+                                <span className="text-emerald-600">تم النسخ</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                نسخ SQL
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                        <pre className="text-[10px] leading-relaxed text-muted-foreground bg-background p-3 overflow-auto max-h-40 rtl:text-left" dir="ltr">
+                          {purchasePaymentMethodFixResult.sql}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

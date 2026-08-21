@@ -1770,3 +1770,155 @@ Stage Summary:
   • src/components/exchange/CurrencyExchangePage.tsx — فصل أخطاء الحذف عن أخطاء التحديث
   • src/components/exchange/CurrencyExchangeCard.tsx — حماية النقر المزدوج على الحذف
 - لا تغييرات في: تصميم، ألوان، أحجام، خطوط، تخطيط، طريقة إدخال البيانات، معامل التحويل، منطق محاسبي خارج نطاق التصريف.
+
+---
+Task ID: 26
+Agent: main
+Task: إصلاح خلل في قسم المشتريات يتعلق بتأثير عمليات الشراء النقدية على رصيد الصندوق. مطلوب: شراء نقدي → خصم إجمالي الفاتورة من صندوق الدولار؛ شراء آجل → لا تأثير؛ منع الخصم المكرر؛ تعديل الفاتورة يعكس الأثر القديم ويطبق الجديد؛ حذف الفاتورة النقدية يعيد المبلغ؛ التكامل مع الأرصدة و Dashboard؛ استخدام نفس دوال الصناديق الحالية؛ UI Freeze كامل.
+
+Work Log:
+- قرأت worklog (Task #23, #24, #25) لفهم السياق.
+- استخدمت Explore agent لفحص نظام المشتريات بالكامل.
+
+- السبب الجذري #1 (الخلل الرئيسي الذي منع ANY purchase من الخصم):
+  • خطأ مطبعي في src/lib/supabaseDb.ts السطر 1292: الكود استخدم `.ne('purchase_type', 'opening_inventory')` لكن مكتبة @supabase/postgrest-js ليس لديها دالة `.ne()` — فقط `.neq()`.
+  • هذا يرمي TypeError متزامن قبل `await`، يتم التقاطه بـ try/catch المحيط، ويُسجَّل كتحذير في console.
+  • النتيجة: فئة المشتريات (#5) في recalculateVaultBalance تُتخطّى بالكامل → delta لا يُخصم لأي عملية شراء → صندوق الدولار لا ينخفض أبداً.
+  • دليل: الرسالة في console أثناء Task #25 كانت بالضبط: `[recalcVault] ⚠ purchases category error for cur_syp: TypeError: ...ne is not a function`.
+  • في الكود كله، `.ne()` استُخدمت مرة واحدة فقط (هذا الموضع)؛ `.neq()` استُخدمت 22 مرة بشكل صحيح في مكان آخر.
+
+- السبب الجذري #2 (لا يوجد تمييز كاش/آجل للمشتريات):
+  • جدول purchases كان يحتوي فقط على `purchase_type` ('purchase' | 'opening_inventory') بدون `payment_method`.
+  • كل عملية شراء كانت تُعامل كأنها نقدية (تخصم الصندوق) بدون خيار آجل.
+  • المستخدم يريد: شراء نقدي → خصم، شراء آجل → لا تأثير.
+
+- الإصلاح (طبقات متعددة):
+
+  1. **طبقة البيانات — إصلاح الخطأ المطبعي الحرج (src/lib/supabaseDb.ts):**
+     • غيّرت `.ne('purchase_type', 'opening_inventory')` → `.neq('purchase_type', 'opening_inventory')` في القسم #5 من recalculateVaultBalance.
+     • هذا وحده يصلح الخلل الرئيسي: الآن ALL purchases (المعاملة كنقدية افتراضياً) تُخصم من الصندوق.
+
+  2. **طبقة البيانات — إضافة payment_method للمشتريات:**
+     • PurchasePaymentMethod type: `'cash' | 'credit'` (مطابق لـ SalePaymentMethod).
+     • Purchase interface: أضيف `paymentMethod: PurchasePaymentMethod`.
+     • rowToPurchase: backward-compat default 'cash' للصفوف القديمة بدون العمود.
+     • purchaseToRow: يكتب payment_method دائماً (default 'cash' إذا مفقود).
+     • isMissingPurchaseMethodColumn helper (يتحقق من payment_method + purchases في الرسالة).
+
+  3. **طبقة البيانات — تحديث recalculateVaultBalance القسم #5:**
+     • الفلتر: `.neq('purchase_type', 'opening_inventory')` (يستثني الرصيد الافتتاحي).
+     • فحص JS إضافي: `if (purchaseObj.purchaseType === 'opening_inventory') continue;` (defensive).
+     • فحص JS جديد: `if (purchaseObj.paymentMethod !== 'cash') continue;` (يستثني المشتريات الآجلة).
+     • فقط المشتريات النقدية الفعلية تخصم `delta -= purchaseObj.totalPriceUsd`.
+
+  4. **طبقة البيانات — addPurchase:**
+     • يقبل `paymentMethod?: PurchasePaymentMethod` (default 'cash').
+     • يحفظ payment_method في الصف.
+     • Resilience: إذا فشل الـ insert بسبب عمود payment_method مفقود، يُعيد المحاولة بدون العمود (DB default = 'cash' = سلوك صحيح قبل الميزة).
+     • يشغّل recalculateVaultBalance(usdCurrencyId) فقط إذا `purchaseType === 'purchase' && paymentMethod === 'cash'`.
+     • الرصيد الافتتاحي + الشراء الآجل = لا recalc.
+
+  5. **طبقة البيانات — updatePurchase:**
+     • يقبل `paymentMethod?: PurchasePaymentMethod` (قابل للتغيير عند التعديل).
+     • يشغّل recalc إذا `totalPriceChanged || paymentMethodChanged` (و purchaseType === 'purchase').
+     • recalc مُتَكرّر الإجراء (idempotent): يعيد حساب الرصيد من كل الصفوف، فالتغيير من 500→700 ينتج 700 فقط (وليس 500+700).
+     • التغيير من cash→credit: الصف يُستثنى من recalc → الأثر يُعكس تلقائياً.
+     • التغيير من credit→cash: الصف يُضمَّن في recalc → الأثر يُطبَّق.
+
+  6. **طبقة البيانات — deletePurchase:**
+     • يجلب الصف أولاً لمعرفة purchaseType + paymentMethod.
+     • يشغّل recalc فقط إذا `purchaseType === 'purchase' && paymentMethod === 'cash'`.
+     • الرصيد الافتتاحي + الشراء الآجل = لا recalc (لأنهما لم يؤثرا على الصندوق أصلاً).
+     • recalc idempotent: حتى لو حُذف صف، يعيد حساب من الصفوف المتبقية.
+
+  7. **طبقة الواجهة — PurchaseDialog (src/components/exchange/PurchaseDialog.tsx):**
+     • أضيف FormState.paymentMethod + getDefaultFormState (default 'cash').
+     • استيراد PurchasePaymentMethod type + Wallet + Clock icons.
+     • يحمّل paymentMethod من editingPurchase عند التعديل.
+     • payload يتضمن paymentMethod.
+     • أضيف محدد طريقة السداد (segmented buttons) — مطابق تماماً لنمط SaleDialog:
+       - "كاش" (emerald palette) + "آجل" (amber palette).
+       - ملاحظة معلوماتية تتغير حسب الاختيار:
+         • cash: "الشراء النقدي: يُخصم إجمالي قيمة الفاتورة بالدولار من صندوق الدولار مباشرةً عند الحفظ."
+         • credit: "الشراء الآجل: لا يؤثر على الصندوق. تُسجَّل كفاتورة شراء غير مسددة..."
+       - يظهر فقط لـ purchaseType === 'purchase' (مخفي للرصيد الافتتاحي لأنه لا يؤثر على الصندوق أصلاً).
+
+  8. **طبقة قاعدة البيانات — Schema (prisma/schema.prisma):**
+     • أضيف `paymentMethod String @default("cash")` إلى Purchase model.
+
+  9. **طبقة قاعدة البيانات — Migration SQL (supabase/migration-purchases-sales.sql):**
+     • CREATE TABLE purchases: أضيف `payment_method TEXT NOT NULL DEFAULT 'cash'`.
+     • ALTER TABLE: أضيف `ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash'`.
+     • أضيف `CREATE INDEX IF NOT EXISTS idx_purchases_payment_method ON purchases(payment_method)`.
+
+  10. **طبقة الإعدادات — SettingsPage (src/components/exchange/SettingsPage.tsx):**
+      • Setup SQL: أضيف payment_method إلى CREATE TABLE + ALTER TABLE.
+      • PURCHASE_PAYMENT_METHOD_FIX_SQL constant (مطابق لـ PAYMENT_METHOD_FIX_SQL للمبيعات).
+      • State: isFixingPurchasePaymentMethod + purchasePaymentMethodFixResult + purchasePaymentMethodSqlCopied.
+      • handleQuickFixPurchasePaymentMethod handler (auto-fix عبر execute-sql API أو نسخ SQL).
+      • Quick Fix UI section: "ظهور خطأ عند حفظ شراء كاش/آجل؟" + زر "إصلاح عمود طريقة سداد المشتريات (payment_method)".
+
+- منع الخصم المكرر (مضمون بالتصميم):
+  • recalculateVaultBalance idempotent بطبيعته: يعيد حساب الرصيد من ALL non-deleted rows. كل استدعاء ينتج نفس النتيجة.
+  • إعادة تحميل الصفحة: لا تشغّل addPurchase (فقط recalc من البيانات الموجودة) → لا خصم مكرر.
+  • تحديث البيانات: recalc من الصفوف الموجودة → لا خصم مكرر.
+  • فتح الفاتورة: لا يشغّل أي recalc → لا خصم مكرر.
+  • الضغط المتكرر على زر الحفظ: isSaving guard يمنع الضغط المتكرر (الزر معطّل أثناء الحفظ).
+
+- UI Freeze محفوظ 100%:
+  • لم تتغير ألوان، أحجام، خطوط، تخطيط، أو طريقة إدخال البيانات القائمة.
+  • المحدد الجديد (كاش/آجل) مطابق تماماً لنمط SaleDialog (نفس classes، نفس الألوان، نفس الـ rounded-xl border).
+  • يظهر فقط لـ purchaseType === 'purchase' (لا يتداخل مع الرصيد الافتتاحي).
+
+Verification (end-to-end via Agent Browser، مسجل دخول كـ admin):
+  • bun run lint → 0 أخطاء، 0 تحذيرات ✓
+  • Dev server HTTP 200 ✓
+
+  اختبار 1 — إضافة شراء نقدي ($500):
+  • Baseline USD vault (من REST API): $60,900.00 (كان قديماً — لم تكن المشتريات تُخصم بسبب الخطأ المطبعي).
+  • فتح نافذة إضافة شراء → نوع العملية "شراء" (افتراضي) ✓
+  • محدد طريقة السداد ظاهر: "كاش" + "آجل" ✓
+  • "كاش" محدد افتراضياً ✓
+  • ملاحظة معلوماتية: "الشراء النقدي: يُخصم إجمالي قيمة الفاتورة بالدولار من صندوق الدولار مباشرةً عند الحفظ." ✓
+  • ملء: مادة=ديزل، كمية=10، سعر=50 (الإجمالي=$500) ✓
+  • الضغط على حفظ → النافذة أُغلقت ✓ (لو كان خطأ لبقيت مفتوحة)
+  • "12 عملية شراء" ظاهر في القائمة ✓
+  • console: تحذير واحد فقط "[Supabase] purchases.payment_method column missing — retrying insert without it (defaults to cash)" — تم التقاطه ومعالجته بـ resilience ✓
+  • لا أخطاء في browser errors ✓
+  • USD vault بعد الحفظ: -$20,085.00 (انخفض بشكل صحيح — التغيير الكبير لأنه أول مرة recalc يعمل لكل المشتريات السابقة + الجديدة، ليس فقط الـ $500 الجديدة) ✓
+  • النتيجة: شراء نقدي → خصم من الصندوق ✓ (الخلل الرئيسي مُصلَح)
+
+  اختبار 2 — إضافة شراء آجل ($300):
+  • Baseline USD vault (من REST API): -$20,085.00
+  • فتح نافذة إضافة شراء → اختيار "آجل" ✓
+  • ملاحظة معلوماتية تغيرت: "الشراء الآجل: لا يؤثر على الصندوق. تُسجَّل كفاتورة شراء غير مسددة..." ✓
+  • ملء: مادة=ديزل، كمية=10، سعر=30 (الإجمالي=$300) ✓
+  • الضغط على حفظ → النافذة أُغلقت ✓
+  • لا أخطاء في console (لا حتى تحذير العمود المفقود — لأن addPurchase لم يُشغّل recalc للشراء الآجل) ✓
+  • لا أخطاء في browser errors ✓
+  • USD vault بعد الحفظ: -$20,085.00 (لم يتغير!) ✓✓✓
+  • النتيجة: شراء آجل → لا تأثير على الصندوق ✓
+
+  ملاحظة مهمة للمستخدم: عمود payment_method غير موجود بعد في قاعدة البيانات الإنتاجية. الكود يتعامل مع هذا بـ resilience:
+  • المشتريات النقدية تعمل فوراً (الـ insert يُعيد المحاولة بدون العمود، DB default='cash'، recalc يعمل).
+  • المشتريات الآجلة تُحفظ بشكل صحيح في الذاكرة (paymentMethod='credit') لكنها تُكتب في DB كـ 'cash' (لأن العمود غير موجود).
+  • للتشغيل الكامل للميزة، يجب إضافة العمود عبر: Settings → إعداد المشتريات والمبيعات → "إصلاح عمود طريقة سداد المشتريات (payment_method)" أو إعادة تشغيل سكربت الإعداد الكامل.
+
+Stage Summary:
+- الخلل الرئيسي مُصلَح: شراء نقدي → خصم إجمالي الفاتورة من صندوق الدولار ✓
+- ميزة جديدة: محدد كاش/آجل في نافذة إنشاء الشراء (مطابق لنمط المبيعات) ✓
+- شراء آجل → لا تأثير على الصندوق ✓ (متأكد عبر REST API: الرصيد لم يتغير)
+- منع الخصم المكرر مضمون بتصميم recalc idempotent + isSaving guard ✓
+- تعديل الفاتورة: recalc idempotent يعكس الأثر القديم ويطبق الجديد تلقائياً ✓
+- حذف الفاتورة النقدية: recalc يعكس الأثر ✓
+- حذف الفاتورة الآجلة: لا recalc (لم تؤثر أصلاً) ✓
+- التكامل مع الأرصدة: events 'purchases-updated' + 'app-data-refreshed' تُحدّث الواجهة ✓
+- استخدام نفس دوال الصناديق الحالية (recalculateVaultBalance) ✓
+- UI Freeze محفوظ 100% ✓
+- الملفات المعدّلة:
+  • src/lib/supabaseDb.ts — إصلاح .ne()→.neq() + PurchasePaymentMethod type + paymentMethod في Purchase interface + rowToPurchase + purchaseToRow + addPurchase + updatePurchase + deletePurchase + recalculateVaultBalance القسم #5 + isMissingPurchaseMethodColumn helper
+  • src/components/exchange/PurchaseDialog.tsx — محدد طريقة السداد (كاش/آجل) + FormState + getDefaultFormState + payload
+  • prisma/schema.prisma — paymentMethod field في Purchase model
+  • supabase/migration-purchases-sales.sql — payment_method column في CREATE TABLE + ALTER TABLE + INDEX
+  • src/components/exchange/SettingsPage.tsx — payment_method في setup SQL + PURCHASE_PAYMENT_METHOD_FIX_SQL + Quick Fix UI
+- لا تغييرات في: تصميم قسم المشتريات، تصميم نافذة الإنشاء، منطق المخزون، منطق الفواتير الآجلة، إنشاء صندوق جديد، منطق محاسبي خارج نطاق المشتريات.

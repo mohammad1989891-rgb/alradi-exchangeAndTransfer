@@ -41,9 +41,11 @@ CREATE TABLE IF NOT EXISTS material_units (
 
 -- ============================================
 -- Purchases Table (المشتريات)
--- totalPriceUsd يُخصم من صندوق الدولار
--- purchase_type: 'purchase' (default) → فاتورة شراء فعلية، تخصم الصندوق
+-- totalPriceUsd يُخصم من صندوق الدولار (للشراء النقدي فقط)
+-- purchase_type: 'purchase' (default) → فاتورة شراء فعلية، تخصم الصندوق (إذا كانت نقدي)
 --                'opening_inventory' → رصيد افتتاحي للمخزون، يضيف كمية فقط بدون خصم
+-- payment_method: 'cash' (default) → شراء نقدي، يخصم إجمالي الفاتورة من صندوق الدولار فوراً
+--                 'credit'          → شراء آجل، لا يؤثر على الصندوق
 -- ============================================
 CREATE TABLE IF NOT EXISTS purchases (
   id TEXT PRIMARY KEY,
@@ -58,6 +60,7 @@ CREATE TABLE IF NOT EXISTS purchases (
   unit_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   total_price_usd DOUBLE PRECISION NOT NULL DEFAULT 0,
   purchase_type TEXT NOT NULL DEFAULT 'purchase',
+  payment_method TEXT NOT NULL DEFAULT 'cash',
   description TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -171,8 +174,18 @@ ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 
 
 -- ============================================
 -- Add purchase_type column for existing installations
--- 'purchase' (default) = فاتورة شراء فعلية (deducts from USD vault)
+-- 'purchase' (default) = فاتورة شراء فعلية (deducts from USD vault if cash)
 -- 'opening_inventory'  = رصيد افتتاحي للمخزون (no vault effect, inventory-only)
 -- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
 -- ============================================
 ALTER TABLE purchases ADD COLUMN IF NOT EXISTS purchase_type TEXT NOT NULL DEFAULT 'purchase';
+
+-- ============================================
+-- Add payment_method column to purchases for existing installations
+-- 'cash' (default) = شراء نقدي (deducts totalPriceUsd from USD vault immediately)
+-- 'credit'          = شراء آجل (no vault effect — deferred invoice)
+-- (Safe to re-run: IF NOT EXISTS won't error if the column already exists)
+-- Mirrors the same column on the sales table.
+-- ============================================
+ALTER TABLE purchases ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+CREATE INDEX IF NOT EXISTS idx_purchases_payment_method ON purchases(payment_method);

@@ -32,7 +32,9 @@ import {
   type Purchase,
   type MaterialInventory,
   type PurchaseType,
+  type PurchasePaymentMethod,
 } from '@/lib/supabaseDb';
+import { Wallet, Clock } from 'lucide-react';
 
 export interface PurchaseDialogProps {
   open: boolean;
@@ -50,6 +52,9 @@ interface FormState {
   description: string;
   // 🔸 نوع العملية: 'purchase' (افتراضي) أو 'opening_inventory' (رصيد افتتاحي للمخزون)
   purchaseType: PurchaseType;
+  // 🔸 طريقة السداد: 'cash' (افتراضي) أو 'credit' (آجل)
+  // Only relevant for 'purchase' type — opening_inventory never touches the vault.
+  paymentMethod: PurchasePaymentMethod;
 }
 
 function getTodayISO(): string {
@@ -82,6 +87,9 @@ function getDefaultFormState(): FormState {
     unitPriceUsd: '',
     description: '',
     purchaseType: 'purchase',
+    // 🔸 Default to 'cash' per spec (cash purchases deduct from USD vault immediately;
+    // credit purchases are deferred and don't touch the vault)
+    paymentMethod: 'cash',
   };
 }
 
@@ -163,6 +171,8 @@ export function PurchaseDialog({
         description: editingPurchase.description ?? '',
         // 🔸 Preserve the original type on edit (type is immutable per spec)
         purchaseType: editingPurchase.purchaseType ?? 'purchase',
+        // 🔸 Preserve the original payment method on edit (mutable, but pre-filled)
+        paymentMethod: editingPurchase.paymentMethod === 'credit' ? 'credit' : 'cash',
       });
       // Preload inventory for the editing purchase's material
       loadInventory(editingPurchase.materialId);
@@ -284,6 +294,7 @@ export function PurchaseDialog({
         unitPriceUsd: effectiveUnitPrice,
         description: form.description.trim() || undefined,
         purchaseType: form.purchaseType,
+        paymentMethod: form.paymentMethod,
       };
 
       if (isEditMode && editingPurchase) {
@@ -613,6 +624,65 @@ export function PurchaseDialog({
                       {formatNumber(totalPrice)} $
                     </p>
                   </div>
+                </div>
+              )}
+
+              {/* 🔸 طريقة السداد — Payment Method (segmented buttons)
+                  Only shown for real purchases (purchaseType = 'purchase').
+                  Hidden for opening_inventory (which never touches the vault).
+                  Mirrors the SaleDialog pattern exactly:
+                    - 'cash' (default): deducts totalPriceUsd from USD vault immediately
+                    - 'credit': deferred purchase — NO vault effect until a later payment
+                  (per spec: "شراء نقدي → خصم إجمالي الفاتورة من صندوق الدولار"
+                             "شراء آجل → لا تأثير على الصندوق") */}
+              {!isOpeningInventory && (
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-sm">
+                    <Wallet className="w-3.5 h-3.5 text-muted-foreground" />
+                    طريقة السداد <span className="text-red-500">*</span>
+                  </Label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, paymentMethod: 'cash' }))}
+                      className={cn(
+                        'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+                        form.paymentMethod === 'cash'
+                          ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-700'
+                          : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                      )}
+                    >
+                      <Wallet className="w-4 h-4" />
+                      كاش
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setForm((prev) => ({ ...prev, paymentMethod: 'credit' }))}
+                      className={cn(
+                        'flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-medium transition-all',
+                        form.paymentMethod === 'credit'
+                          ? 'border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-700'
+                          : 'border-border bg-background text-muted-foreground hover:bg-muted/50'
+                      )}
+                    >
+                      <Clock className="w-4 h-4" />
+                      آجل
+                    </button>
+                  </div>
+                  {/* Helper note explaining the cash-box impact */}
+                  <p
+                    className={cn(
+                      'flex items-start gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] leading-relaxed',
+                      form.paymentMethod === 'cash'
+                        ? 'bg-emerald-50/70 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
+                        : 'bg-amber-50/70 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300'
+                    )}
+                  >
+                    <Info className="w-3 h-3 mt-0.5 flex-shrink-0" />
+                    {form.paymentMethod === 'cash'
+                      ? 'الشراء النقدي: يُخصم إجمالي قيمة الفاتورة بالدولار من صندوق الدولار مباشرةً عند الحفظ.'
+                      : 'الشراء الآجل: لا يؤثر على الصندوق. تُسجَّل كفاتورة شراء غير مسددة وتبقى قيمتها ضمن منطق الحساب المرتبط بها.'}
+                  </p>
                 </div>
               )}
 

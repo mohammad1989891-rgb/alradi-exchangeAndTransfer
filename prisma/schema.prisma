@@ -197,10 +197,13 @@ model MaterialUnit {
   @@unique([materialId, unitId])
 }
 
-// المشتريات — تُخصم من صندوق الدولار عند الحفظ
+// المشتريات — تُخصم من صندوق الدولار عند الحفظ (للشراء النقدي فقط)
 // purchaseType:
 //   - 'purchase' (default): فاتورة شراء فعلية — تخصم من الصندوق وتُحسب ضمن مصروفات الشراء
 //   - 'opening_inventory': رصيد افتتاحي للمخزون — يضيف كمية فقط، لا يخصم الصندوق ولا يُحسب كمصروف
+// paymentMethod:
+//   - 'cash' (default): شراء نقدي — يخصم إجمالي الفاتورة من صندوق الدولار فوراً
+//   - 'credit': شراء آجل — لا يؤثر على الصندوق، يُسجَّل كفاتورة غير مسددة
 model Purchase {
   id                  String   @id @default(cuid())
   date                DateTime @default(now())
@@ -216,6 +219,9 @@ model Purchase {
   // نوع العملية: 'purchase' (افتراضي) أو 'opening_inventory' (رصيد افتتاحي للمخزون)
   // الافتراضي 'purchase' للحفاظ على التوافق مع السجلات الموجودة
   purchaseType        String   @default("purchase")
+  // طريقة السداد: 'cash' (افتراضي) أو 'credit' (آجل)
+  // الافتراضي 'cash' للحفاظ على التوافق مع السجلات الموجودة (كل شراء سابق كان نقدي)
+  paymentMethod       String   @default("cash")
   description         String?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt

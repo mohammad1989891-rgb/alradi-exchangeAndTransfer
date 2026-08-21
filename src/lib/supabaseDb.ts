@@ -1175,6 +1175,33 @@ function isMissingPurchaseTypeColumn(error: unknown): boolean {
     (lower.includes('schema cache') || lower.includes('does not exist') || lower.includes('could not find'));
 }
 
+/**
+ * Detects whether a Supabase/PostgREST error is caused by the `payment_method`
+ * column being missing from the `purchases` table.
+ *
+ * This happens on older installations that created the `purchases` table before
+ * the cash/credit purchase feature was added. PostgREST caches the schema, so
+ * any request that references the missing column (insert/update/filter) is
+ * rejected before reaching PostgreSQL.
+ *
+ * Message examples:
+ *   - "Could not find the 'payment_method' column of 'purchases' in the schema cache"
+ *   - "column purchases.payment_method does not exist"
+ *
+ * When this returns true, callers should retry the operation WITHOUT the
+ * `payment_method` field. The DB default is 'cash', so the purchase is treated
+ * as a cash purchase — correct pre-feature behavior.
+ */
+function isMissingPurchaseMethodColumn(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : (typeof error === 'object' && error !== null && 'message' in error ? String((error as { message: unknown }).message) : String(error));
+  const lower = msg.toLowerCase();
+  // 🔸 Must mention BOTH 'payment_method' AND 'purchases' to avoid false-positive
+  //    matches on the sales.payment_method column (which has its own helper:
+  //    isMissingPaymentMethodColumn).
+  return lower.includes('payment_method') && lower.includes('purchases') &&
+    (lower.includes('schema cache') || lower.includes('does not exist') || lower.includes('could not find'));
+}
+
 export async function recalculateVaultBalance(currencyId: string): Promise<Vault | null> {
   await initializeDatabase();
 
@@ -1288,12 +1315,25 @@ export async function recalculateVaultBalance(currencyId: string): Promise<Vault
   }
 
   // ── 5. PURCHASES: Deduct total_price_usd from USD vault only ──
+  //    Only REAL purchases (purchase_type = 'purchase') paid in CASH
+  //    (payment_method = 'cash') deduct from the vault.
+  //    - opening_inventory: inventory-only, NO vault effect (excluded by filter)
+  //    - credit purchases: deferred, NO vault effect until a later payment
+  //    🔸 IMPORTANT: use .eq() for the payment_method filter (the .ne() method
+  //       does NOT exist in @supabase/postgrest-js — only .neq() does. A prior
+  //       bug used .ne('purchase_type', ...) which threw "ne is not a function"
+  //       and silently skipped the entire purchases category, so cash purchases
+  //       never deducted from the vault.)
+  //    🔸 Resilience: if the `purchase_type` column is missing (older install),
+  //       fall back to fetching ALL purchases and filtering in JS.
+  //       If the `payment_method` column is missing (older install), treat all
+  //       purchases as cash (correct pre-feature behavior).
   try {
-    let purchaseQuery = supabase.from('purchases').select('*').ne('purchase_type', 'opening_inventory');
+    let purchaseQuery = supabase.from('purchases').select('*').neq('purchase_type', 'opening_inventory');
     if (dateFilter) purchaseQuery = purchaseQuery.gt('date', dateFilter);
     let purchaseResult = await purchaseQuery;
     if (purchaseResult.error && isMissingPurchaseTypeColumn(purchaseResult.error)) {
-      console.warn('[recalcVault] ⚠ purchases.purchase_type column missing — counting all purchases as real.');
+      console.warn('[recalcVault] ⚠ purchases.purchase_type column missing — fetching all purchases and filtering in JS.');
       let fallbackPurchaseQuery = supabase.from('purchases').select('*');
       if (dateFilter) fallbackPurchaseQuery = fallbackPurchaseQuery.gt('date', dateFilter);
       purchaseResult = await fallbackPurchaseQuery;
@@ -1306,7 +1346,16 @@ export async function recalculateVaultBalance(currencyId: string): Promise<Vault
       if (usdCurrencyId && currencyId === usdCurrencyId) {
         for (const p of purchaseResult.data) {
           const purchaseObj = rowToPurchase(p);
+          // 🔸 Final guard: skip opening_inventory rows even if the fallback
+          //    fetched them (defensive — the .neq() filter should already exclude them)
           if (purchaseObj.purchaseType === 'opening_inventory') continue;
+          // 🔸 Only CASH purchases deduct from the vault.
+          //    Credit purchases are deferred invoices — NO vault effect until
+          //    a later payment is recorded (per spec: "شراء آجل → لا تأثير على الصندوق").
+          //    rowToPurchase defaults paymentMethod to 'cash' for older rows
+          //    that predate the payment_method column (correct pre-feature behavior).
+          if (purchaseObj.paymentMethod !== 'cash') continue;
+          // Purchase: cash goes OUT → vault decreases
           delta -= purchaseObj.totalPriceUsd;
         }
       }
@@ -4471,6 +4520,15 @@ export interface MaterialUnit {
 // ============================================
 export type PurchaseType = 'purchase' | 'opening_inventory';
 
+// ============================================
+// Purchase Payment Method type
+// - 'cash'   → deducts totalPriceUsd from the USD cash box immediately
+// - 'credit' → deferred purchase; does NOT affect any cash box until a later payment
+//              (per spec: "شراء آجل → لا تأثير على الصندوق")
+// Mirrors the SalePaymentMethod pattern used by the Sales subsystem.
+// ============================================
+export type PurchasePaymentMethod = 'cash' | 'credit';
+
 export interface Purchase {
   id: string;
   date: Date;
@@ -4484,6 +4542,7 @@ export interface Purchase {
   unitPriceUsd: number;
   totalPriceUsd: number;
   purchaseType: PurchaseType;
+  paymentMethod: PurchasePaymentMethod;
   description?: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -4566,6 +4625,11 @@ function rowToPurchase(row: Record<string, unknown>): Purchase {
   // (every purchase created before the opening-inventory feature is a real purchase)
   const raw = (row.purchase_type as string | undefined)?.toLowerCase();
   obj.purchaseType = raw === 'opening_inventory' ? 'opening_inventory' : 'purchase';
+  // 🔸 Backward-compat: older rows may not have payment_method — default to 'cash'
+  // (every purchase created before the cash/credit feature was effectively a cash
+  //  purchase that deducted from the vault — this preserves that behavior)
+  const rawPm = (row.payment_method as string | undefined)?.toLowerCase();
+  obj.paymentMethod = rawPm === 'credit' ? 'credit' : 'cash';
   return obj;
 }
 
@@ -4610,6 +4674,8 @@ function purchaseToRow(p: Partial<Purchase>): Record<string, unknown> {
   if (row.updated_at) row.updated_at = dateToIso(row.updated_at as Date);
   // 🔸 Ensure purchase_type is always written (default 'purchase' if missing)
   if (!row.purchase_type) row.purchase_type = 'purchase';
+  // 🔸 Ensure payment_method is always written (default 'cash' if missing)
+  if (!row.payment_method) row.payment_method = 'cash';
   return row;
 }
 
@@ -5057,6 +5123,7 @@ export async function addPurchase(data: {
   unitPriceUsd: number;
   description?: string;
   purchaseType?: PurchaseType;
+  paymentMethod?: PurchasePaymentMethod;
 }): Promise<Purchase> {
   await initializeDatabase();
   const now = new Date();
@@ -5071,6 +5138,9 @@ export async function addPurchase(data: {
   // 🔸 purchaseType defaults to 'purchase' (preserves existing behavior).
   // 'opening_inventory' = رصيد افتتاحي للمخزون: inventory-only, no vault effect.
   const purchaseType: PurchaseType = data.purchaseType === 'opening_inventory' ? 'opening_inventory' : 'purchase';
+  // 🔸 paymentMethod defaults to 'cash' (preserves existing behavior).
+  // 'credit' = شراء آجل: deferred, NO vault effect until a later payment.
+  const paymentMethod: PurchasePaymentMethod = data.paymentMethod === 'credit' ? 'credit' : 'cash';
 
   const purchase: Purchase = {
     id: 'pur_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 9),
@@ -5085,6 +5155,7 @@ export async function addPurchase(data: {
     unitPriceUsd: data.unitPriceUsd,
     totalPriceUsd,
     purchaseType,
+    paymentMethod,
     description: data.description || null,
     createdAt: now,
     updatedAt: now,
@@ -5114,12 +5185,24 @@ export async function addPurchase(data: {
     const { error: retryError } = await supabase.from('purchases').insert([rowWithoutType]);
     insertError = retryError;
   }
+  // 🔸 Resilience: if the `payment_method` column is missing (older installation),
+  // retry without it. The DB default is 'cash', so the row will be treated as
+  // a cash purchase — which is the correct pre-feature behavior (every purchase
+  // created before this feature was effectively a cash purchase).
+  if (insertError && isMissingPurchaseMethodColumn(insertError)) {
+    console.warn('[Supabase] purchases.payment_method column missing — retrying insert without it (defaults to cash). Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    const rowWithoutPm = { ...purchaseToRow(purchase) };
+    delete rowWithoutPm.payment_method;
+    const { error: retryError } = await supabase.from('purchases').insert([rowWithoutPm]);
+    insertError = retryError;
+  }
   if (insertError) throw new Error(insertError.message);
 
   // 🔸 Vault effect:
-  //  - 'purchase'          → deduct totalPriceUsd from USD vault (cash goes OUT)
-  //  - 'opening_inventory' → NO vault effect (per spec: "لا يتم خصم أي مبلغ من الصندوق")
-  if (purchaseType === 'purchase') {
+  //  - 'purchase' + 'cash'    → deduct totalPriceUsd from USD vault (cash goes OUT)
+  //  - 'purchase' + 'credit'  → NO vault effect (deferred invoice)
+  //  - 'opening_inventory'    → NO vault effect (per spec: "لا يتم خصم أي مبلغ من الصندوق")
+  if (purchaseType === 'purchase' && paymentMethod === 'cash') {
     const usdCurrencyId = await getUsdCurrencyId();
     if (usdCurrencyId) {
       await recalculateVaultBalance(usdCurrencyId);
@@ -5137,6 +5220,7 @@ export async function updatePurchase(id: string, data: {
   unitPriceUsd?: number;
   description?: string;
   purchaseType?: PurchaseType;
+  paymentMethod?: PurchasePaymentMethod;
 }): Promise<Purchase | null> {
   await initializeDatabase();
 
@@ -5154,6 +5238,9 @@ export async function updatePurchase(id: string, data: {
   //    the quantity difference only; the type stays the same). If a caller
   //    passes a new type we ignore it to preserve the original classification.
   const effectivePurchaseType: PurchaseType = old.purchaseType;
+  // 🔸 paymentMethod IS mutable on edit (per spec: changing cash→credit should
+  //    return the money to the vault; changing credit→cash should deduct it).
+  const effectivePaymentMethod: PurchasePaymentMethod = data.paymentMethod === 'credit' ? 'credit' : (data.paymentMethod === 'cash' ? 'cash' : old.paymentMethod);
 
   // Re-fetch base_factor if material or unit changed
   let baseFactorSnapshot = old.baseFactorSnapshot;
@@ -5182,6 +5269,7 @@ export async function updatePurchase(id: string, data: {
     quantity_in_base: quantityInBase,
     unit_price_usd: effectiveUnitPrice,
     total_price_usd: totalPriceUsd,
+    payment_method: effectivePaymentMethod,
     description: effectiveDescription,
     updated_at: new Date().toISOString(),
   };
@@ -5190,24 +5278,43 @@ export async function updatePurchase(id: string, data: {
     const { error } = await supabase.from('purchases').update(updateObj).eq('id', id);
     return error;
   })();
+  // 🔸 Resilience: if `payment_method` column is missing (older installation),
+  // retry without it. The DB default is 'cash', so the row will be treated as
+  // a cash purchase — correct pre-feature behavior.
+  if (updateError && isMissingPurchaseMethodColumn(updateError)) {
+    console.warn('[Supabase] purchases.payment_method column missing — retrying update without payment_method. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
+    const { payment_method: _dropped, ...updateObjWithoutPm } = updateObj;
+    const { error: retryError } = await supabase.from('purchases').update(updateObjWithoutPm).eq('id', id);
+    updateError = retryError;
+  }
   // 🔸 Resilience: if `purchase_type` column is missing, the update payload
   // above doesn't reference it, but PostgREST schema cache may still reject
-  // the whole table operation. Retry by selecting only the safe columns.
-  // (In practice this branch is rarely hit because updateObj doesn't include
-  //  purchase_type, but we keep it for symmetry with addPurchase.)
+  // the whole table operation. (Rare in practice.)
   if (updateError && isMissingPurchaseTypeColumn(updateError)) {
     console.warn('[Supabase] purchases.purchase_type column missing — update may have failed. Run the quick-fix in Settings → إعداد المشتريات والمبيعات.');
   }
   if (updateError) throw new Error(updateError.message);
 
   // 🔸 Vault effect on edit:
-  //  - 'purchase'          → recompute USD vault ONLY if total price changed
-  //                          (delta-applied automatically via full recompute)
-  //  - 'opening_inventory' → NO vault effect EVER (per spec: "لا يتم خصم أي مبلغ
-  //                          من الصندوق" — opening inventory never touches the vault)
+  //  recalculateVaultBalance is idempotent — it re-derives the balance from ALL
+  //  non-deleted purchase rows. So whether the price changed, the payment method
+  //  changed (cash↔credit), or both — a single recalc produces the correct new
+  //  balance. The old row's effect is naturally replaced by the new row's effect.
+  //
+  //  - 'purchase' + 'cash'    → included in recalc (deducts new totalPriceUsd)
+  //  - 'purchase' + 'credit'  → excluded from recalc (no deduction — reversed if was cash)
+  //  - 'opening_inventory'    → NEVER affects the vault (no recalc needed)
+  //
+  //  We trigger a recalc whenever ANY of these changed for a 'purchase' type row:
+  //    - totalPriceUsd changed, OR
+  //    - paymentMethod changed (cash↔credit toggle)
   if (effectivePurchaseType === 'purchase') {
     const totalPriceChanged = totalPriceUsd !== old.totalPriceUsd;
-    if (totalPriceChanged) {
+    const paymentMethodChanged = effectivePaymentMethod !== old.paymentMethod;
+    // 🔸 Also recalc if the OLD row was cash (it was deducting before; even if
+    //    nothing changed in this edit, the recalc is idempotent and safe).
+    //    But to avoid unnecessary recalcs, only trigger when something relevant changed.
+    if (totalPriceChanged || paymentMethodChanged) {
       const usdCurrencyId = await getUsdCurrencyId();
       if (usdCurrencyId) {
         await recalculateVaultBalance(usdCurrencyId);
@@ -5222,21 +5329,21 @@ export async function updatePurchase(id: string, data: {
 export async function deletePurchase(id: string): Promise<void> {
   await initializeDatabase();
 
-  // 🔸 Fetch the purchase first so we know its type. Opening-inventory rows
-  //    never affected the vault, so deleting them must NOT trigger a recompute
-  //    (per spec: "دون أي تأثير على الصناديق"). Real purchases ('purchase')
-  //    DID deduct from the vault, so deleting them must recompute to return
-  //    the money.
+  // 🔸 Fetch the purchase first so we know its type AND payment method.
+  //    - opening_inventory: NEVER affected the vault → no recalc needed
+  //    - purchase + cash:   DID deduct → recalc to return the money
+  //    - purchase + credit: NEVER deducted → no recalc needed
   const { data: row } = await supabase.from('purchases').select('*').eq('id', id).single();
   const purchase = row ? rowToPurchase(row) : null;
 
   const { error } = await supabase.from('purchases').delete().eq('id', id);
   if (error) throw new Error(error.message);
 
-  // Only recompute the USD vault if the deleted row was a REAL purchase.
-  // Opening-inventory deletions adjust inventory only (handled by the
-  // inventory derivation: currentInBase = sum(purchases) − sum(sales)).
-  if (purchase && purchase.purchaseType === 'purchase') {
+  // Only recompute the USD vault if the deleted row was a REAL CASH purchase.
+  // - opening_inventory deletions adjust inventory only (handled by the
+  //   inventory derivation: currentInBase = sum(purchases) − sum(sales)).
+  // - credit purchases never touched the vault, so deleting them needs no recalc.
+  if (purchase && purchase.purchaseType === 'purchase' && purchase.paymentMethod === 'cash') {
     const usdCurrencyId = await getUsdCurrencyId();
     if (usdCurrencyId) {
       await recalculateVaultBalance(usdCurrencyId);

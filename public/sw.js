@@ -1,7 +1,7 @@
 // Service Worker for Al-Radhi Exchange App
-// Version: 8.0 - Restore in-header add-button to proven working pattern (matches Accounts/Vehicles)
+// Version: 9.0 - Force cache bust after .ne()→.neq() fix + recalculateVaultBalance resilience (Task #25/#26)
 
-const CACHE_NAME = 'alradhi-v8';
+const CACHE_NAME = 'alradhi-v9';
 
 // 🔸 الملفات الأساسية للتخزين المسبق (App Shell)
 const PRECACHE_URLS = [

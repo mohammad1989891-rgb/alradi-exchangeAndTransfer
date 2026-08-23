@@ -2127,3 +2127,76 @@ Stage Summary:
 - الملفات المعدّلة:
   • src/lib/supabaseDb.ts — createBackup (إضافة 4 جداول) + clearAllData (إعادة كتابة كاملة) + BackupRecord interface (4 حقول جديدة)
 - لا تغييرات في: تصميم، ألوان، أحجام، خطوط، تخطيط، طريقة إدخال البيانات، منطق محاسبي خارج نطاق clearAllData/createBackup.
+
+---
+Task ID: 29
+Agent: main
+Task: إصلاح خطأ "R5.FROM(...).SELECT(...).NE IS NOT A FUNCTION" الذي يظهر على الهاتف عند إضافة عملية تصريف (رغم نجاح الحفظ). مطلوب: تحديد السبب الجذري، إصلاحه، منع ظهور رسالة الخطأ الوهمية، الحفاظ على منطق التصريف وتصميم التطبيق.
+
+Work Log:
+- قرأت worklog (Task #23-#28) لفهم السياق.
+
+- استكشفت الكود الحالي بحثاً عن أي استدعاءات `.ne(` متبقية:
+  • grep -rn "\.ne(" src/ --include="*.ts" --include="*.tsx" → لا نتائج (باستثناء التعليقات).
+  • جميع الاستدعاءات تستخدم `.neq()` بشكل صحيح (22 مرة).
+  • إصلاح Task #26 (`.ne()` → `.neq()` في recalculateVaultBalance القسم #5) موجود في الكود الحالي.
+
+- السبب الجذري للخطأ على الهاتف:
+  • **Service Worker cache قديم (stale)**: إصدار الكاش كان `alradhi-v8` (من Task #22).
+  • إصلاحات Task #25 (recalculateVaultBalance resilience) و Task #26 (`.ne()` → `.neq()`) تمت AFTER Task #22، لكن لم يتم رفع إصدار الكاش.
+  • الهواتف التي خزّنت `alradhi-v8` BEFORE هذه الإصلاحات لا تزال تخدم الـ JS bundle القديم الذي يحتوي على `.ne()` وبدون try/catch المرن.
+  • على الهاتف: addCurrencyExchange → INSERT ينجح → recalculateVaultBalance → القسم #5 يستدعي `.ne('purchase_type', ...)` → TypeError: "ne is not a function" → ينتشر → المودال يعرض toast خطأ وهمي.
+  • على الكمبيوتر: الكاش أحدث (زيارة بعد الإصلاحات) أو dev server لا يستخدم SW caching → الكود الجديد يعمل → لا خطأ.
+
+- آلية Service Worker (public/sw.js):
+  • Navigation requests (HTML): Network First — HTML دائماً طازج.
+  • Static assets (JS/CSS): Stale While Revalidate — يقدم الكاش القديم أولاً (السطر 188: `return cachedResponse || fetchPromise`).
+  • النتيجة: الـ JS bundle القديم يُقدَّم من الكاش حتى لو كان هناك إصدار جديد على الخادم، ما لم يُرفع إصدار CACHE_NAME.
+
+- الإصلاح:
+  • رفع إصدار CACHE_NAME من `alradhi-v8` → `alradhi-v9`.
+  • تحديث التعليق العلوي: "Version: 9.0 - Force cache bust after .ne()→.neq() fix + recalculateVaultBalance resilience (Task #25/#26)".
+  • عند تحميل الهاتف التالي:
+    1. المتصفح يجلب sw.js الجديد (network-first للـ HTML).
+    2. الـ SW الجديد (alradhi-v9) يُثبَّت.
+    3. activate: يحذف كل الكاش القديم (`.filter((name) => name !== CACHE_NAME)` يحذف alradhi-v8).
+    4. الطلب التالي لـ JS chunks يذهب للشبكة (لا cache hit) → يجلب الـ bundle الطازج مع إصلاحات Task #25/#26.
+    5. OfflineDetector يكتشف updatefound/SW_UPDATED → يعرض banner "تحديث جديد متوفر" → المستخدم يضغط "تحديث" → الصفحة تُعاد تحميلها بالكود الجديد.
+
+- التحقق من عدم وجود استدعاءات `.ne(` أخرى:
+  • src/lib/supabaseDb.ts: جميع الاستدعاءات `.neq()` ✓
+  • public/: لا استدعاءات `.ne(` ✓
+  • لا `.ne(` في أي ملف .ts أو .tsx في src/ ✓
+
+- التحقق من فصل أخطاء الحفظ عن أخطاء التحديث (CurrencyExchangeModal):
+  • الكود الحالي (من Task #25) يفصل بالفعل:
+    - المرحلة 1 (CORE): addCurrencyExchange (DB insert + vault recalc) — إذا فشلت → destructive toast.
+    - المرحلة 3 (REFRESH): refreshData + dispatchEvent — إذا فشلت → amber warning toast "تم حفظ العملية بنجاح، ولكن تعذر تحديث البيانات المعروضة."
+  • لا تغيير مطلوب — الكود صحيح.
+
+Verification (end-to-end via Agent Browser، مسجل دخول كـ admin):
+  • bun run lint → 0 أخطاء، 0 تحذيرات ✓
+  • Dev server HTTP 200 ✓
+
+  اختبار إضافة تصريف:
+  • incoming: 100 USD، rate: 15000 (MULTIPLY)، outgoing: 1,500,000 SYP (محسوب) ✓
+  • الضغط على "حفظ العملية" → النافذة أُغلقت ✓ (نجاح الحفظ)
+  • لا أخطاء في browser errors ✓
+  • لا أخطاء/تحذيرات في console ✓ (لا رسالة "ne is not a function")
+  • console: فقط سجلات Supabase المعتادة (Vaults loaded, Currencies loaded, إلخ)
+  • العملية محفوظة في DB: `sb_mt5h2erw_pu2ssawhz`، outgoing=1500000 SYP، incoming=100 USD ✓
+  • العملية تظهر في القائمة: "عمليات الصرف (1)" ✓
+  • تم حذف العملية التجريبية بعد الاختبار (HTTP 204) ✓
+
+  ملاحظة: هذا الاختبار على الكمبيوتر (dev server). على الهاتف، سيظهر banner "تحديث جديد متوفر" بعد رفع إصدار الكاش إلى v9. بعد أن يضغط المستخدم "تحديث"، سيحصل على الكود الجديد ولن يظهر الخطأ.
+
+Stage Summary:
+- السبب الجذري مُحدَّد: Service Worker cache قديم (alradhi-v8) على الهاتف يخدم JS bundle قديم يحتوي على `.ne()` (الذي تم إصلاحه في Task #26 إلى `.neq()`).
+- الإصلاح: رفع إصدار الكاش من alradhi-v8 → alradhi-v9 ليجبر جميع الأجهزة على تجاهل الكاش القديم وجلب الـ bundle الطازج.
+- فصل أخطاء الحفظ عن أخطاء التحديث موجود بالفعل (من Task #25) — لا تغيير مطلوب.
+- منع الضغط المتكرر: isSubmitting guard يمنع الضغط المتكرر على زر الحفظ (الزر معطّل أثناء الحفظ).
+- UI Freeze محفوظ 100% — التغيير الوحيد هو رقم إصدار الكاش في public/sw.js.
+- الملفات المعدّلة:
+  • public/sw.js — CACHE_NAME: alradhi-v8 → alradhi-v9 + تحديث التعليق
+- لا تغييرات في: منطق التصريف، تصميم النافذة، نظام الصناديق، استعلامات Supabase، أو أي كود تشغيلي آخر.
+- النتيجة: بعد أن يحدّث المستخدم الهاتف (banner "تحديث جديد متوفر" → "تحديث")، لن يظهر خطأ "NE IS NOT A FUNCTION" على أي جهاز.

@@ -2024,3 +2024,106 @@ Stage Summary:
   • src/app/api/migrate-purchase-type/route.ts — محذوف
   • src/app/api/migrate-is-archived/route.ts — محذوف
 - النتيجة: صفحة الإعدادات نظيفة ومنظمة، تحتوي فقط على الإعدادات والخيارات الفعلية التي يحتاجها المستخدم حالياً.
+
+---
+Task ID: 28
+Agent: main
+Task: تعديل وظيفة "مسح جميع البيانات" (الإعدادات → النسخ الاحتياطي → مسح جميع البيانات) بحيث: (1) تحذف جميع المعاملات التشغيلية (الحركات، الديون، دفعات السداد، التصريف، المشتريات، المبيعات، المركبات)؛ (2) تعكس تأثيرها على الصناديق بحيث الرصيد النهائي = الرصيد الافتتاحي؛ (3) تحافظ على opening_balance و opening_balance_date ولا تضعها null؛ (4) تحافظ على الرصيد الافتتاحي للمخزون (purchases مع purchase_type='opening_inventory')؛ (5) تنشئ نسخة احتياطية كاملة قبل الحذف. UI Freeze كامل.
+
+Work Log:
+- قرأت worklog (Task #23-#27) لفهم السياق.
+
+- استكشفت clearAllData الحالية في src/lib/supabaseDb.ts (السطر 2767). وجدت 3 أخطاء:
+  1. تحذف 4 جداول فقط (transactions, debts, debt_payments, currency_exchanges) — تفوّت purchases, sales, vehicle_transactions, shared_transactions.
+  2. تضع opening_balance_date = null (السطر 2798) — مخالفة للمواصفات! يكسر نظام الرصيد الافتتاحي.
+  3. تضبط balance = openingBalance يدوياً بدلاً من استخدام recalculateVaultBalance (الدالة الموحدة التي تستخدمها كل الأقسام).
+
+- أيضاً وجدت أن createBackup (السطر 2844) تلتقط 7 جداول فقط — تفوّت purchases, sales, vehicle_transactions, shared_transactions. هذا يعني أن النسخة الاحتياطية قبل الحذف كانت ناقصة!
+
+- الإصلاح (طبقتان):
+
+  1. **إصلاح createBackup (التقاط كامل):**
+     • أضفت 4 جداول جديدة إلى Promise.all: purchases, sales, vehicle_transactions, shared_transactions.
+     • أضفتها إلى backupData object + recordCounts.
+     • BackupRecord interface: أضفت purchases, sales, vehicleTransactions, sharedTransactions إلى recordCounts.
+     • النتيجة: النسخة الاحتياطية قبل الحذف صارت كاملة — لا تفقد أي بيانات.
+
+  2. **إعادة كتابة clearAllData (حذف كامل + recalc):**
+     • STEP 0: إنشاء نسخة احتياطية تلقائية قبل الحذف (كما كان).
+     • STEP 1: حذف كل الجداول التشغيلية:
+       - transactions (الحركات)
+       - debt_payments + debts (الديون + دفعات السداد)
+       - currency_exchanges (التصريف)
+       - purchases — فقط purchase_type='purchase' (KEEP opening_inventory!) مع fallback إذا العمود مفقود.
+       - sales (المبيعات)
+       - vehicle_transactions + shared_transactions (المركبات)
+       - معالجة أخطاء لكل جدول (log warning + continue، لا abort كامل العملية).
+     • STEP 2: recalculateVaultBalance لكل صندوق:
+       - بما أنه لم تعد هناك معاملات، delta = 0 → balance = openingBalance + 0 = openingBalance.
+       - يحافظ على opening_balance (لم يُمَس) و opening_balance_date (لم يُوضع null).
+       - معالجة أخطاء لكل صندوق (log warning + continue).
+     • الرسالة: "تم مسح جميع البيانات بنجاح. تمت إعادة أرصدة الصناديق إلى الرصيد الافتتاحي."
+
+- لماذا recalc بدلاً من balance = openingBalance مباشرةً؟
+  • recalculateVaultBalance هي الدالة الموحدة التي يستخدمها كل قسم (الحركات، الديون، التصريف، المشتريات، المبيعات، المركبات).
+  • تحترم opening_balance_date كتاريخ cutoff للمعاملات.
+  • مُتَكرّرة الإجراء (idempotent) — استدعاؤها مرتين ينتج نفس النتيجة.
+  • تلتقط أي معاملات لم تُحذف (مثل opening_inventory التي نُحافظ عليها) بشكل صحيح.
+  • تستخدم نفس منطق الصناديق الموجود (لا منطق جديد).
+
+- المخزون: purchases مع purchase_type='opening_inventory' محفوظة → inventory = sum(opening_inventory) - 0 sales = الرصيد الافتتاحي للمخزون فقط. مطابق للمواصفات.
+
+- UI Freeze محفوظ 100%: لم يتغير تصميم، ألوان، أحجام، خطوط، تخطيط، أو ترتيب. فقط منطق clearAllData + createBackup.
+
+Verification (end-to-end via Agent Browser + REST API، مسجل دخول كـ admin):
+  • bun run lint → 0 أخطاء، 0 تحذيرات ✓
+  • Dev server HTTP 200 ✓
+
+  قبل المسح:
+  • vaults: 6 صناديق، جميعها balance = opening_balance (بسبب اختبارات سابقة مسحت المعاملات).
+  • operational tables: transactions=0, debts=0, debt_payments=0, currency_exchanges=0, purchases=13, sales=13, vehicle_transactions=3, shared_transactions=0.
+
+  تنفيذ المسح:
+  • الإعدادات → النسخ الاحتياطي → مسح جميع البيانات ✓
+  • إنشاء نسخة احتياطية تلقائية ✓ (21,818 bytes، تشمل purchases+sales+vehicle_transactions+shared_transactions)
+  • الضغط على "متابعة" → countdown 3 ثوانٍ → "تأكيد الحذف" ✓
+  • console: "[Backup] ✅ Pre-delete backup created: bkp_mt5eyny8_ninw9stpk" ✓
+  • console: "[clearAllData] 🔄 Recalculating 6 vault balances (→ opening balance)" ✓
+
+  بعد المسح:
+  • transactions: 0 ✓
+  • debts: 0 ✓
+  • debt_payments: 0 ✓
+  • currency_exchanges: 0 ✓
+  • purchases: 1 row (purchase_type='opening_inventory' — محفوظ عمداً!) ✓
+  • sales: 0 ✓
+  • vehicle_transactions: 0 ✓
+  • shared_transactions: 0 ✓
+  • accounts: 5 محفوظة ✓
+  • currencies: 24 محفوظة ✓
+  • vaults: 6 محفوظة، جميعها balance = opening_balance ✓
+  • opening_balance_date: محفوظ (لم يُوضع null) ✓
+  • الصف المتبقي في purchases: material_name=ديزل، quantity=3، purchase_type=opening_inventory، total_price_usd=0 ✓
+  • لا أخطاء في browser errors ✓
+  • لا أخطاء في console ✓
+
+  اختبار سيناريو المواصفات:
+  • الرصيد الافتتاحي USD = 25,000 (من REST API)
+  • الرصيد بعد المسح = 25,000 = الرصيد الافتتاحي ✓
+  • العملات مستقلة: كل صندوق عاد لرصيده الافتتاحي بشكل مستقل (EUR=5200, DZD=350000, USD=25000, AED=12000, SAR=50000, SYP=12000000) ✓
+
+Stage Summary:
+- وظيفة "مسح جميع البيانات" مُصلَحة بالكامل:
+  • تحذف جميع المعاملات التشغيلية (8 جداول بدلاً من 4)
+  • تحافظ على الرصيد الافتتاحي للمخزون (purchases مع purchase_type='opening_inventory')
+  • تعيد حساب أرصدة الصناديق باستخدام recalculateVaultBalance الموحدة
+  • الرصيد النهائي = الرصيد الافتتاحي (لأن delta = 0 بعد حذف كل المعاملات)
+  • تحافظ على opening_balance و opening_balance_date (لا تضعها null)
+  • تحافظ على الحسابات والعملات والإعدادات
+  • تنشئ نسخة احتياطية كاملة قبل الحذف (تشمل purchases+sales+vehicle_transactions+shared_transactions)
+  • معالجة أخطاء لكل جدول وكل صندوق (log + continue، لا abort كامل العملية)
+- استخدام نفس دوال الصناديق الحالية (recalculateVaultBalance) — لا منطق جديد.
+- UI Freeze محفوظ 100%.
+- الملفات المعدّلة:
+  • src/lib/supabaseDb.ts — createBackup (إضافة 4 جداول) + clearAllData (إعادة كتابة كاملة) + BackupRecord interface (4 حقول جديدة)
+- لا تغييرات في: تصميم، ألوان، أحجام، خطوط، تخطيط، طريقة إدخال البيانات، منطق محاسبي خارج نطاق clearAllData/createBackup.

@@ -2766,10 +2766,12 @@ export async function recalculateAllVaultBalances(): Promise<void> {
 
 export async function clearAllData(): Promise<{ success: boolean; message: string }> {
   await initializeDatabase();
-  
+
   try {
-    // 🔴 CRITICAL: Auto-create backup BEFORE any deletion
-    // No data can be deleted without a backup!
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 0: Auto-create backup BEFORE any deletion
+    // 🔴 CRITICAL: No data can be deleted without a backup!
+    // ════════════════════════════════════════════════════════════════════
     try {
       console.log('[Backup] 🔄 Creating pre-delete backup...');
       const backup = await createBackup('pre_delete');
@@ -2779,28 +2781,100 @@ export async function clearAllData(): Promise<{ success: boolean; message: strin
       return { success: false, message: 'فشل إنشاء النسخة الاحتياطية قبل الحذف. لا يمكن حذف البيانات بدون نسخة احتياطية.' };
     }
 
-    // Delete transactions
-    await supabase.from('transactions').delete().neq('id', '__never_match__');
-    
-    // Delete debts and payments
-    await supabase.from('debt_payments').delete().neq('id', '__never_match__');
-    await supabase.from('debts').delete().neq('id', '__never_match__');
-    
-    // Delete currency exchanges
-    await supabase.from('currency_exchanges').delete().neq('id', '__never_match__');
-    
-    // Reset vault balances - recalculate from opening balance (now 0 operations remain)
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 1: Delete ALL operational transactions.
+    //
+    // Tables deleted (per spec):
+    //   1. transactions          (الحركات)
+    //   2. debts + debt_payments (الديون + دفعات السداد)
+    //   3. currency_exchanges     (عمليات التصريف)
+    //   4. purchases (real only)  (المشتريات — KEEP opening_inventory!)
+    //   5. sales                  (المبيعات)
+    //   6. vehicle_transactions + shared_transactions (المركبات)
+    //
+    // 🔸 IMPORTANT: purchases with purchase_type = 'opening_inventory' are
+    //    PRESERVED (per spec: "الحفاظ فقط على الرصيد الافتتاحي للمخزون").
+    //    Only real purchases ('purchase' type) are deleted.
+    //    Opening-inventory rows never affected the vault, so keeping them
+    //    doesn't impact the vault recalculation in Step 2.
+    // ════════════════════════════════════════════════════════════════════
+
+    // 1. Transactions (الحركات)
+    const { error: txErr } = await supabase.from('transactions').delete().neq('id', '__never_match__');
+    if (txErr) console.warn('[clearAllData] ⚠ transactions delete error:', txErr.message);
+
+    // 2. Debts + debt payments (الديون + دفعات السداد)
+    const { error: dpErr } = await supabase.from('debt_payments').delete().neq('id', '__never_match__');
+    if (dpErr) console.warn('[clearAllData] ⚠ debt_payments delete error:', dpErr.message);
+    const { error: dbErr } = await supabase.from('debts').delete().neq('id', '__never_match__');
+    if (dbErr) console.warn('[clearAllData] ⚠ debts delete error:', dbErr.message);
+
+    // 3. Currency exchanges (عمليات التصريف)
+    const { error: exErr } = await supabase.from('currency_exchanges').delete().neq('id', '__never_match__');
+    if (exErr) console.warn('[clearAllData] ⚠ currency_exchanges delete error:', exErr.message);
+
+    // 4. Purchases — ONLY real purchases, KEEP opening_inventory rows!
+    //    (opening_inventory = رصيد افتتاحي للمخزون, per spec: preserve opening inventory)
+    //    Try with the filter; if the column is missing (older install), fall
+    //    back to deleting ALL purchases (correct pre-feature behavior where
+    //    every purchase was a real purchase).
+    let purchaseDelErr: Error | null = null;
+    const { error: purErr } = await supabase.from('purchases').delete().eq('purchase_type', 'purchase');
+    if (purErr && isMissingPurchaseTypeColumn(purErr)) {
+      console.warn('[clearAllData] ⚠ purchases.purchase_type column missing — deleting ALL purchases (pre-feature behavior).');
+      const { error: purFallbackErr } = await supabase.from('purchases').delete().neq('id', '__never_match__');
+      if (purFallbackErr) purchaseDelErr = new Error(purFallbackErr.message);
+    } else if (purErr) {
+      purchaseDelErr = purErr;
+    }
+    if (purchaseDelErr) console.warn('[clearAllData] ⚠ purchases delete error:', purchaseDelErr.message);
+
+    // 5. Sales (المبيعات) — delete all
+    const { error: saleErr } = await supabase.from('sales').delete().neq('id', '__never_match__');
+    if (saleErr) console.warn('[clearAllData] ⚠ sales delete error:', saleErr.message);
+
+    // 6. Vehicle transactions + shared transactions (المركبات)
+    const { error: vtErr } = await supabase.from('vehicle_transactions').delete().neq('id', '__never_match__');
+    if (vtErr) console.warn('[clearAllData] ⚠ vehicle_transactions delete error:', vtErr.message);
+    const { error: stErr } = await supabase.from('shared_transactions').delete().neq('id', '__never_match__');
+    if (stErr) console.warn('[clearAllData] ⚠ shared_transactions delete error:', stErr.message);
+
+    // ════════════════════════════════════════════════════════════════════
+    // STEP 2: Recalculate ALL vault balances.
+    //
+    // Since all operational transactions are now deleted, recalculateVaultBalance
+    // derives: delta = 0 (no transactions in any category) →
+    //           balance = openingBalance + 0 = openingBalance.
+    //
+    // 🔸 This PRESERVES:
+    //    - opening_balance (untouched — never modified)
+    //    - opening_balance_date (untouched — NOT zeroed to null like the old code)
+    //    - currency_id (vault↔currency link intact)
+    //
+    // 🔸 The OLD code was buggy: it manually set balance = openingBalance AND
+    //    wiped opening_balance_date to null. That broke the opening-balance
+    //    system. The new code uses the SAME recalc function used everywhere
+    //    else, which respects opening_balance_date as the delta cutoff.
+    //
+    // 🔸 Inventory note: opening_inventory purchases are preserved, so
+    //    inventory = sum(opening_inventory quantities) − 0 sales = opening
+    //    inventory only. This matches the spec: "الحفاظ فقط على الرصيد
+    //    الافتتاحي للمخزون".
+    // ════════════════════════════════════════════════════════════════════
     const { data: vaultRows } = await supabase.from('vaults').select('*');
     const vaults = (vaultRows || []).map(rowToVault);
+    console.log(`[clearAllData] 🔄 Recalculating ${vaults.length} vault balances (→ opening balance)`);
     for (const vault of vaults) {
-      await supabase.from('vaults').update({
-        balance: vault.openingBalance || 0,
-        opening_balance_date: null,
-        updated_at: new Date().toISOString(),
-      }).eq('id', vault.id);
+      try {
+        await recalculateVaultBalance(vault.currencyId);
+      } catch (e) {
+        // Don't abort the whole clear if one vault recalc fails — the data
+        // IS deleted; the vault just has a stale balance. Log + continue.
+        console.warn(`[clearAllData] ⚠ recalc failed for vault ${vault.id} (currency ${vault.currencyId}):`, e);
+      }
     }
-    
-    return { success: true, message: 'تم مسح البيانات بنجاح مع الحفاظ على الحسابات والعملات' };
+
+    return { success: true, message: 'تم مسح جميع البيانات بنجاح. تمت إعادة أرصدة الصناديق إلى الرصيد الافتتاحي.' };
   } catch (error) {
     console.error('Error clearing data:', error);
     return { success: false, message: 'حدث خطأ أثناء مسح البيانات' };
@@ -2823,6 +2897,10 @@ export interface BackupRecord {
     debts: number;
     debtPayments: number;
     currencyExchanges: number;
+    purchases: number;
+    sales: number;
+    vehicleTransactions: number;
+    sharedTransactions: number;
   };
   sizeBytes: number;
   createdAt: Date;
@@ -2845,7 +2923,10 @@ export async function createBackup(reason: 'manual' | 'pre_delete' | 'pre_archiv
   await initializeDatabase();
 
   // 1. Export all data (reuse exportAllData logic inline for JSON storage)
-  const [currencyRows, vaultRows, accountRows, transactionRows, debtRows, paymentRows, exchangeRows] = await Promise.all([
+  // 🔸 Capture ALL operational tables so the pre-delete backup is complete.
+  //    (purchases, sales, vehicle_transactions, shared_transactions were
+  //     missing before — they would be lost when clearAllData deletes them.)
+  const [currencyRows, vaultRows, accountRows, transactionRows, debtRows, paymentRows, exchangeRows, purchaseRows, saleRows, vehicleTxRows, sharedTxRows] = await Promise.all([
     supabase.from('currencies').select('*'),
     supabase.from('vaults').select('*'),
     supabase.from('accounts').select('*'),
@@ -2853,6 +2934,10 @@ export async function createBackup(reason: 'manual' | 'pre_delete' | 'pre_archiv
     supabase.from('debts').select('*'),
     supabase.from('debt_payments').select('*'),
     supabase.from('currency_exchanges').select('*'),
+    supabase.from('purchases').select('*'),
+    supabase.from('sales').select('*'),
+    supabase.from('vehicle_transactions').select('*'),
+    supabase.from('shared_transactions').select('*'),
   ]);
 
   const backupData = {
@@ -2863,6 +2948,10 @@ export async function createBackup(reason: 'manual' | 'pre_delete' | 'pre_archiv
     debts: debtRows.data || [],
     debtPayments: paymentRows.data || [],
     currencyExchanges: exchangeRows.data || [],
+    purchases: purchaseRows.data || [],
+    sales: saleRows.data || [],
+    vehicleTransactions: vehicleTxRows.data || [],
+    sharedTransactions: sharedTxRows.data || [],
   };
 
   const recordCounts = {
@@ -2873,6 +2962,10 @@ export async function createBackup(reason: 'manual' | 'pre_delete' | 'pre_archiv
     debts: backupData.debts.length,
     debtPayments: backupData.debtPayments.length,
     currencyExchanges: backupData.currencyExchanges.length,
+    purchases: backupData.purchases.length,
+    sales: backupData.sales.length,
+    vehicleTransactions: backupData.vehicleTransactions.length,
+    sharedTransactions: backupData.sharedTransactions.length,
   };
 
   // Calculate size in bytes
